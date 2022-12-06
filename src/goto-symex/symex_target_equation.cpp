@@ -19,6 +19,17 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include <chrono> // IWYU pragma: keep
 
+#include <iostream> // LUGR debug
+#include <util/format_expr.h> // LUGR debug
+
+/*
+LUGR Todo
+ - decision procedure (output) ?
+ - fault-localization interface ?
+ - line number and bool-type enough for healthy variables ?
+ - need to register healthy var. in symbol table, or declaration in ssa step? -> trace ?
+*/
+
 static std::function<void(solver_hardnesst &)>
 hardness_register_ssa(std::size_t step_index, const SSA_stept &step)
 {
@@ -369,6 +380,31 @@ void symex_target_equationt::convert_assignments(
         mstream << messaget::eom;
       });
 
+      // LUGR: fault localization test:
+      if(step.source.pc->source_location().is_built_in()) {
+        std::cout << "\n~~~~~~~LUGR: in CPROVER built in assignment."  << "\n";
+      }
+      else {
+        std::cout << "\n~~~~~~~LUGR: in assignment"  << "\n";
+
+        std::cout << "~~~~~~~LUGR: line: " << id2string(step.source.pc->source_location().get_line()) << "\n";
+
+        // create healthy variable for fault-loc:
+        const irep_idt identifier =
+            "symex::compHealthy::" + std::to_string(comp_healthy++); // take just line number?
+        symbol_exprt healthySymbol(identifier,bool_typet());
+        //std::cout << format(mySymb) << '\n';
+
+        implies_exprt implication(
+          //true_exprt(),
+          healthySymbol,
+          step.cond_expr);
+        
+        step.cond_expr = implication;
+      }
+      step.output(std::cout);
+      
+
       decision_procedure.set_to_true(step.cond_expr);
       step.converted = true;
       with_solver_hardness(
@@ -529,6 +565,9 @@ void symex_target_equationt::convert_assertions(
         decision_procedure.set_to_false(step.cond_expr);
         step.cond_handle = false_exprt();
 
+        std::cout << "\n~~~~~~~LUGR: in assert. when only one"  << "\n";
+        step.output(std::cout);
+
         with_solver_hardness(
           decision_procedure, hardness_register_ssa(step_index, step));
         return; // prevent further assumptions!
@@ -569,6 +608,9 @@ void symex_target_equationt::convert_assertions(
         step.output(mstream);
         mstream << messaget::eom;
       });
+
+      std::cout << "\n~~~~~~~LUGR: in assert. when multiple"  << "\n";
+        step.output(std::cout);
 
       implies_exprt implication(
         assumption,
