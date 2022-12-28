@@ -291,9 +291,6 @@ protected:
   // for unique I/O identifiers
   std::size_t io_count = 0;
 
-  // LUGR: for unique healthy variables
-  std::size_t comp_healthy = 0;
-
   // for unique function call argument identifiers
   std::size_t argument_count = 0;
 };

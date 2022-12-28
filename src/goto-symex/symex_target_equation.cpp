@@ -23,11 +23,16 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <util/format_expr.h> // LUGR debug
 
 /*
-LUGR Todo
+LUGR Todo vor Bespr. 06. Dez.:
  - decision procedure (output) ?
  - fault-localization interface ?
  - line number and bool-type enough for healthy variables ?
  - need to register healthy var. in symbol table, or declaration in ssa step? -> trace ?
+
+ Bespr. 06. Dez.:
+  - simple hack here, use cbmc only for output formula (maybe some cnf)
+  - healthy variables: use line number (but care for file/function/multiple commandos in line)
+  - probably no need to register variable, but make some mapping to output variable
 */
 
 static std::function<void(solver_hardnesst &)>
@@ -371,6 +376,8 @@ void symex_target_equationt::convert_assignments(
   decision_proceduret &decision_procedure)
 {
   std::size_t step_index = 0;
+  //std::map<std::string,SSA_stepst> healthyVars; // LUGR: map healthy variables to corresponing ssa steps (for future implementation, if seperate commands in one line..)
+  //int comp_healthy = 0; // LUGR: Numbering of healthy variables (for future implementation, if seperate commands in one line..)
   for(auto &step : SSA_steps)
   {
     if(step.is_assignment() && !step.ignore && !step.converted)
@@ -380,29 +387,60 @@ void symex_target_equationt::convert_assignments(
         mstream << messaget::eom;
       });
 
-      // LUGR: fault localization test:
-      if(step.source.pc->source_location().is_built_in()) {
-        std::cout << "\n~~~~~~~LUGR: in CPROVER built in assignment."  << "\n";
+      // LUGR: decide whether to insert a healthy variable for fault-localization,
+      // i.e. check whether this assignment really corresponds to a line of code we want to enable/disble:
+      bool insertFaultLoc = false;
+      // LUGR: check if not a built-in step:
+      if(!step.source.pc->source_location().is_built_in()) {
+        // check types of assignments:
+        switch(step.assignment_type)
+        {
+        case symex_targett::assignment_typet::STATE:
+          insertFaultLoc = true;
+          break;
+        case symex_targett::assignment_typet::GUARD:
+          insertFaultLoc = true;
+          break;
+        case symex_targett::assignment_typet::PHI:
+          insertFaultLoc = false; // this is a path merge
+          break;
+        // LUGR TODO: check how to handle other assignment types:
+        case symex_targett::assignment_typet::HIDDEN:
+          log.error() << "\n~~~~~~~LUGR WARNING: Assignment type not considered so far"
+               << messaget::eom;
+          break;
+        case symex_targett::assignment_typet::VISIBLE_ACTUAL_PARAMETER:
+          log.error() << "\n~~~~~~~LUGR WARNING: Assignment type not considered so far"
+               << messaget::eom;
+          break;
+        case symex_targett::assignment_typet::HIDDEN_ACTUAL_PARAMETER:
+          log.error() << "\n~~~~~~~LUGR WARNING: Assignment type not considered so far"
+               << messaget::eom;
+          break;
+        default:
+          log.error() << "\n~~~~~~~LUGR WARNING: Assignment type not considered so far"
+               << messaget::eom;
+        }
       }
-      else {
-        std::cout << "\n~~~~~~~LUGR: in assignment"  << "\n";
 
-        std::cout << "~~~~~~~LUGR: line: " << id2string(step.source.pc->source_location().get_line()) << "\n";
-
+      // LUGR: actually insert our variables:
+      if(insertFaultLoc) {
         // create healthy variable for fault-loc:
-        const irep_idt identifier =
-            "symex::compHealthy::" + std::to_string(comp_healthy++); // take just line number?
+        std::string myFile = id2string(step.source.pc->source_location().get_file());
+        std::string myLine = id2string(step.source.pc->source_location().get_line());
+        const irep_idt identifier = "compHealthy::" + myFile + "::" + myLine;
         symbol_exprt healthySymbol(identifier,bool_typet());
-        //std::cout << format(mySymb) << '\n';
+        // TODO Pointer idea: check guard, put together with same constants c: [(not)] func::c4::varName!c1@c2#c3 = address(hans::X)
+        // otherwise each ssa_step gets own healthy var?? (are there other cases which should be put together, which?)
 
         implies_exprt implication(
-          //true_exprt(),
           healthySymbol,
           step.cond_expr);
         
         step.cond_expr = implication;
       }
-      step.output(std::cout);
+      std::cout << "\n";
+      step.output(std::cout); // LUGR show all steps
       
 
       decision_procedure.set_to_true(step.cond_expr);
