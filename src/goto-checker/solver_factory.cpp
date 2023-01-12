@@ -27,10 +27,12 @@ Author: Daniel Kroening, Peter Schrammel
 #include <solvers/stack_decision_procedure.h>
 
 #include <solvers/flattening/bv_dimacs.h>
+#include <solvers/flattening/bv_wcnf.h>
 #include <solvers/prop/prop.h>
 #include <solvers/prop/solver_resource_limits.h>
 #include <solvers/refinement/bv_refinement.h>
 #include <solvers/sat/dimacs_cnf.h>
+#include <solvers/sat/wcnf_cnf.h>
 #include <solvers/sat/external_sat.h>
 #include <solvers/sat/satcheck.h>
 #include <solvers/smt2_incremental/smt2_incremental_decision_procedure.h>
@@ -135,6 +137,8 @@ std::unique_ptr<solver_factoryt::solvert> solver_factoryt::get_solver()
 {
   if(options.get_bool_option("dimacs"))
     return get_dimacs();
+  if(options.get_bool_option("wcnf"))
+    return get_wcnf();
   if(options.is_set("external-sat-solver"))
     return get_external_sat();
   if(
@@ -254,6 +258,21 @@ std::unique_ptr<solver_factoryt::solvert> solver_factoryt::get_dimacs()
     util_make_unique<bv_dimacst>(ns, *prop, message_handler, filename);
 
   return util_make_unique<solvert>(std::move(bv_dimacs), std::move(prop));
+}
+
+std::unique_ptr<solver_factoryt::solvert> solver_factoryt::get_wcnf()
+{
+  no_beautification();
+  no_incremental_check();
+
+  auto prop = util_make_unique<wcnf_cnft>(message_handler);
+
+  std::string filename = options.get_option("outfile");
+
+  auto bv_wcnf =
+    util_make_unique<bv_wcnft>(ns, *prop, message_handler, filename);
+
+  return util_make_unique<solvert>(std::move(bv_wcnf), std::move(prop));
 }
 
 std::unique_ptr<solver_factoryt::solvert> solver_factoryt::get_external_sat()
@@ -496,6 +515,8 @@ static void parse_sat_options(const cmdlinet &cmdline, optionst &options)
 
   if(cmdline.isset("dimacs"))
     options.set_option("dimacs", true);
+  if(cmdline.isset("wcnf"))
+    options.set_option("wcnf", true);
 }
 
 static void parse_smt2_options(const cmdlinet &cmdline, optionst &options)

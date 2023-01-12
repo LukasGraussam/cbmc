@@ -227,6 +227,7 @@ void cbmc_parse_optionst::get_command_line_options(optionst &options)
 
   if(cmdline.isset("stop-on-fail") ||
      cmdline.isset("dimacs") ||
+     cmdline.isset("wcnf") ||
      cmdline.isset("outfile"))
     options.set_option("stop-on-fail", true);
 
@@ -261,7 +262,7 @@ void cbmc_parse_optionst::get_command_line_options(optionst &options)
   }
 
   // constant propagation
-  if(cmdline.isset("no-propagation"))
+  if(cmdline.isset("no-propagation") || cmdline.isset("wcnf"))
     options.set_option("propagation", false);
 
   // transform self loops to assumptions
@@ -538,6 +539,24 @@ int cbmc_parse_optionst::doit()
 
   if(
     options.get_bool_option("dimacs") || !options.get_option("outfile").empty())
+  {
+    if(options.get_bool_option("paths"))
+    {
+      stop_on_fail_verifiert<single_path_symex_checkert> verifier(
+        options, ui_message_handler, goto_model);
+      (void)verifier();
+    }
+    else
+    {
+      stop_on_fail_verifiert<multi_path_symex_checkert> verifier(
+        options, ui_message_handler, goto_model);
+      (void)verifier();
+    }
+
+    return CPROVER_EXIT_SUCCESS;
+  }
+  if(
+    options.get_bool_option("wcnf") || !options.get_option("outfile").empty())
   {
     if(options.get_bool_option("paths"))
     {

@@ -131,6 +131,7 @@ SRC = $(BOOLEFORCE_SRC) \
       flattening/boolbv_width.cpp \
       flattening/boolbv_with.cpp \
       flattening/bv_dimacs.cpp \
+      flattening/bv_wcnf.cpp \
       flattening/bv_minimize.cpp \
       flattening/bv_pointers.cpp \
       flattening/bv_utils.cpp \
@@ -182,6 +183,7 @@ SRC = $(BOOLEFORCE_SRC) \
       sat/cnf.cpp \
       sat/cnf_clause_list.cpp \
       sat/dimacs_cnf.cpp \
+      sat/wcnf_cnf.cpp \
       sat/external_sat.cpp \
       sat/pbs_dimacs_cnf.cpp \
       sat/resolution_proof.cpp \

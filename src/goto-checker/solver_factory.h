@@ -72,6 +72,7 @@ protected:
 
   std::unique_ptr<solvert> get_default();
   std::unique_ptr<solvert> get_dimacs();
+  std::unique_ptr<solvert> get_wcnf();
   std::unique_ptr<solvert> get_external_sat();
   std::unique_ptr<solvert> get_bv_refinement();
   std::unique_ptr<solvert> get_string_refinement();
@@ -108,6 +109,7 @@ void parse_solver_options(const cmdlinet &cmdline, optionst &options);
   "(no-sat-preprocessor)"                                                      \
   "(beautify)"                                                                 \
   "(dimacs)"                                                                   \
+  "(wcnf)"                                                                     \
   "(refine)"                                                                   \
   "(max-node-refinement):"                                                     \
   "(refine-arrays)"                                                            \
@@ -119,6 +121,7 @@ void parse_solver_options(const cmdlinet &cmdline, optionst &options);
   " --external-sat-solver cmd    command to invoke SAT solver process\n"       \
   " --no-sat-preprocessor        disable the SAT solver's simplifier\n"        \
   " --dimacs                     generate CNF in DIMACS format\n"              \
+  " --wcnf                       generate WCNF format for fault localization\n"\
   " --beautify                   beautify the counterexample\n"                \
   "                              (greedy heuristic)\n"                         \
   " --smt1                       use default SMT1 solver (obsolete)\n"         \
