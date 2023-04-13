@@ -404,15 +404,13 @@ void symex_target_equationt::convert_assignments(
         case symex_targett::assignment_typet::PHI:
           insertFaultLoc = false; // this is a path merge
           break;
-        // LUGR TODO: check how to handle other assignment types:
         case symex_targett::assignment_typet::HIDDEN:
-          log.error() << "\n~~~~~~~LUGR WARNING: Assignment type not considered so far"
-               << messaget::eom;
+          insertFaultLoc = false; // hidden assignments, e.g. for return values of function calls...
           break;
         case symex_targett::assignment_typet::VISIBLE_ACTUAL_PARAMETER:
-          log.error() << "\n~~~~~~~LUGR WARNING: Assignment type not considered so far"
-               << messaget::eom;
+          insertFaultLoc = false; // used somehow in function calls
           break;
+        // LUGR TODO: check how to handle other assignment types:
         case symex_targett::assignment_typet::HIDDEN_ACTUAL_PARAMETER:
           log.error() << "\n~~~~~~~LUGR WARNING: Assignment type not considered so far"
                << messaget::eom;

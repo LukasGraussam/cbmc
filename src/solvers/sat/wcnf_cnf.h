@@ -2,7 +2,7 @@
 
 Module:
 
-Author: Daniel Kroening, kroening@kroening.com
+Author: Lukas Graussam, l.g@lukas-graussam.at
 
 \*******************************************************************/
 
