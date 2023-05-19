@@ -514,6 +514,8 @@ void cfg_baset<T, P, I>::compute_edges(
   case ATOMIC_END:
   case DECL:
   case DEAD:
+  case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
     if(next_PC!=goto_program.instructions.end())
       this->add_edge(entry, entry_map[next_PC]);
     break;

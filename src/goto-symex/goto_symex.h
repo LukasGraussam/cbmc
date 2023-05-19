@@ -316,6 +316,12 @@ protected:
   /// Symbolically execute an ATOMIC_END instruction
   /// \param state: Symbolic execution state for current instruction
   virtual void symex_atomic_end(statet &state);
+  /// Symbolically execute an OBSERVATION_BEGIN instruction (LUGR: for wcnf option)
+  /// \param state: Symbolic execution state for current instruction
+  virtual void symex_observation_begin(statet &state);
+  /// Symbolically execute an OBSERVATION instruction (LUGR: for wcnf option)
+  /// \param state: Symbolic execution state for current instruction
+  virtual void symex_observation_end(statet &state);
   /// Symbolically execute a DECL instruction
   /// \param state: Symbolic execution state for current instruction
   virtual void symex_decl(statet &state);

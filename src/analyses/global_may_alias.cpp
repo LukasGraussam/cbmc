@@ -144,6 +144,8 @@ void global_may_alias_domaint::transform(
   case ASSUME:       // Ignoring is a valid over-approximation
   case SKIP:         // No action required
   case END_FUNCTION: // No action required
+  case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
     break;
   case OTHER:
     DATA_INVARIANT(false, "Unclear what is a safe over-approximation of OTHER");

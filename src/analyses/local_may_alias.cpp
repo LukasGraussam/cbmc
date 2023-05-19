@@ -438,6 +438,8 @@ void local_may_aliast::build(const goto_functiont &goto_function)
     case END_FUNCTION: // No action required
     case ASSERT:       // No action required
     case ASSUME:       // Ignoring is a valid over-approximation
+    case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
+    case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
       break;
     case OTHER:
 #if 0

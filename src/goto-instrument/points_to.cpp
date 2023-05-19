@@ -89,6 +89,8 @@ bool points_tot::transform(const cfgt::nodet &e)
   case ASSUME:
   case INCOMPLETE_GOTO:
   case NO_INSTRUCTION_TYPE:
+  case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
     break;
   }
 

@@ -62,6 +62,8 @@ bool value_set_domain_fit::transform(
   case ASSUME:
   case INCOMPLETE_GOTO:
   case NO_INSTRUCTION_TYPE:
+  case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
     // do nothing
     break;
   }

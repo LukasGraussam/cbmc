@@ -50,6 +50,8 @@ enum goto_program_instruction_typet
   THROW = 17,            // throw an exception
   CATCH = 18,            // push, pop or enter an exception handler
   INCOMPLETE_GOTO = 19   // goto where target is yet to be determined
+  ,OBSERVATION_BEGIN = 31,// LUGR: for wcnf option (Fault-loc.)
+  OBSERVATION_END = 32   // LUGR: for wcnf option (Fault-loc.)
 };
 
 std::ostream &operator<<(std::ostream &, goto_program_instruction_typet);
@@ -487,6 +489,8 @@ public:
     bool is_end_thread      () const { return _type == END_THREAD;       }
     bool is_end_function    () const { return _type == END_FUNCTION;     }
     bool is_incomplete_goto () const { return _type == INCOMPLETE_GOTO;  }
+    bool is_observation_begin () const { return _type == OBSERVATION_BEGIN;} // LUGR: for wcnf option (Fault-loc.)
+    bool is_observation_end () const { return _type == OBSERVATION_END;  } // LUGR: for wcnf option (Fault-loc.)
     // clang-format on
 
     instructiont():
@@ -992,6 +996,30 @@ public:
       static_cast<const goto_instruction_codet &>(get_nil_irep()),
       l,
       ATOMIC_END,
+      nil_exprt(),
+      {});
+  }
+
+  // LUGR: for wcnf option (Fault-loc.):
+  static instructiont
+  make_observation_begin(const source_locationt &l = source_locationt::nil())
+  {
+    return instructiont(
+      static_cast<const goto_instruction_codet &>(get_nil_irep()),
+      l,
+      OBSERVATION_BEGIN,
+      nil_exprt(),
+      {});
+  }
+
+  // LUGR: for wcnf option (Fault-loc.):
+  static instructiont
+  make_observation_end(const source_locationt &l = source_locationt::nil())
+  {
+    return instructiont(
+      static_cast<const goto_instruction_codet &>(get_nil_irep()),
+      l,
+      OBSERVATION_END,
       nil_exprt(),
       {});
   }

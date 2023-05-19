@@ -110,6 +110,8 @@ void value_set_domain_templatet<VST>::transform(
   case CATCH:
   case INCOMPLETE_GOTO:
   case NO_INSTRUCTION_TYPE:
+  case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
   {
     // do nothing
   }

@@ -129,6 +129,16 @@ public:
     return type == goto_trace_stept::typet::ATOMIC_END;
   }
 
+  bool is_observation_begin() const
+  {
+    return type == goto_trace_stept::typet::OBSERVATION_BEGIN;
+  }
+
+  bool is_observation_end() const
+  {
+    return type == goto_trace_stept::typet::OBSERVATION_END;
+  }
+
   /// Returns the property ID if this is a step resulting from an ASSERT, or
   /// builds a unique name for an unwinding assertion.
   irep_idt get_property_id() const;

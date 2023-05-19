@@ -19,6 +19,8 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include <chrono> // IWYU pragma: keep
 
+#include <util/options.h> // LUGR: for wcnf option
+
 #include <iostream> // LUGR debug
 #include <util/format_expr.h> // LUGR debug
 
@@ -122,6 +124,30 @@ void symex_target_equationt::atomic_end(
   SSA_stept &SSA_step=SSA_steps.back();
   SSA_step.guard=guard;
   SSA_step.atomic_section_id=atomic_section_id;
+
+  merge_ireps(SSA_step);
+}
+
+/// LUGR: start observation (for wcnf fault-localization option)
+void symex_target_equationt::observation_begin(
+  const exprt &guard,
+  const sourcet &source)
+{
+  SSA_steps.emplace_back(source, goto_trace_stept::typet::OBSERVATION_BEGIN);
+  SSA_stept &SSA_step=SSA_steps.back();
+  SSA_step.guard=guard;
+
+  merge_ireps(SSA_step);
+}
+
+/// LUGR: end observation (for wcnf fault-localization option)
+void symex_target_equationt::observation_end(
+  const exprt &guard,
+  const sourcet &source)
+{
+  SSA_steps.emplace_back(source, goto_trace_stept::typet::OBSERVATION_END);
+  SSA_stept &SSA_step=SSA_steps.back();
+  SSA_step.guard=guard;
 
   merge_ireps(SSA_step);
 }
@@ -358,12 +384,14 @@ void symex_target_equationt::convert_without_assertions(
   convert_constraints(decision_procedure);
 }
 
-void symex_target_equationt::convert(decision_proceduret &decision_procedure)
+void symex_target_equationt::convert(
+  decision_proceduret &decision_procedure,
+  bool wcnfIsSet) // LUGR: WCNF Fault localization option
 {
   const auto convert_SSA_start = std::chrono::steady_clock::now();
 
   convert_without_assertions(decision_procedure);
-  convert_assertions(decision_procedure);
+  convert_assertions(decision_procedure, true,  wcnfIsSet);
 
   const auto convert_SSA_stop = std::chrono::steady_clock::now();
   std::chrono::duration<double> convert_SSA_runtime =
@@ -376,8 +404,8 @@ void symex_target_equationt::convert_assignments(
   decision_proceduret &decision_procedure)
 {
   std::size_t step_index = 0;
-  //std::map<std::string,SSA_stepst> healthyVars; // LUGR: map healthy variables to corresponing ssa steps (for future implementation, if seperate commands in one line..)
-  //int comp_healthy = 0; // LUGR: Numbering of healthy variables (for future implementation, if seperate commands in one line..)
+  std::size_t observation_index = 0; // LUGR: For wcnf (fault-localization): keep track of observations
+  bool inObservation = false; // keep whether we are in an observation
   for(auto &step : SSA_steps)
   {
     if(step.is_assignment() && !step.ignore && !step.converted)
@@ -387,10 +415,73 @@ void symex_target_equationt::convert_assignments(
         mstream << messaget::eom;
       });
 
+      // LUGR: Parse observations:
+      if(inObservation) {
+        if(step.source.pc->source_location().is_built_in())  {
+          log.error() << "\n~~~~~~~LUGR WARNING: built in location within Observation??"
+               << messaget::eom;
+          ++step_index;
+          continue; // Go to next iteration of for-loop
+        }
+        if(step.assignment_type != symex_targett::assignment_typet::STATE) {
+          log.error() << "\n~~~~~~~LUGR WARNING: Non STATE Assignment within observation??"
+              << messaget::eom;
+          ++step_index;
+          continue; // Go to next iteration of for-loop
+        }
+        // Check whether we have a equality expression:
+        if(!can_cast_expr<equal_exprt>(step.cond_expr)) {
+          log.error() << "\n~~~~~~~LUGR WARNING: Non Equality expression within observation??"
+              << messaget::eom;
+          ++step_index;
+          continue; // Go to next iteration of for-loop
+
+        }
+
+        // Cast condition expression of current step to a equality expression:
+        equal_exprt curAssignment = to_equal_expr(step.cond_expr);
+
+        if(!curAssignment.rhs().is_constant()) {
+          log.error() << "\n~~~~~~~LUGR WARNING: RHS must be constant in observation"
+              << messaget::eom;
+          ++step_index;
+          continue; // Go to next iteration of for-loop
+        }
+        if(!can_cast_expr<symbol_exprt>(curAssignment.lhs())) {
+          log.error() << "\n~~~~~~~LUGR WARNING: LHS must be a symbol in observation"
+              << messaget::eom;
+          ++step_index;
+          continue; // Go to next iteration of for-loop
+        }
+
+        // Cast lhs of assignment to symbol:
+        symbol_exprt curAssignVar = to_symbol_expr(curAssignment.lhs());
+
+        // Give the symbol the new name:
+        const irep_idt newVarName = "WCNF_OBS_" + std::to_string(observation_index) + "_" + id2string(curAssignVar.get_identifier()); // todo obs index
+        curAssignVar.set_identifier(newVarName);
+
+        // build new equality expression with replaced variable name:
+        equal_exprt newCond(curAssignVar,curAssignment.rhs());
+        step.cond_expr = newCond;
+
+        std::cout << "\n";
+        step.output(std::cout); // LUGR show all steps
+
+        decision_procedure.set_to_true(step.cond_expr);
+        step.converted = true;
+        with_solver_hardness(
+          decision_procedure, hardness_register_ssa(step_index, step));
+
+        ++step_index;
+        continue; // Go to next iteration of for-loop
+      }
+
       // LUGR: decide whether to insert a healthy variable for fault-localization,
       // i.e. check whether this assignment really corresponds to a line of code we want to enable/disble:
       bool insertFaultLoc = false;
       // LUGR: check if not a built-in step:
+      // LUGR TODO: Put this decision into a function
       if(!step.source.pc->source_location().is_built_in()) {
         // check types of assignments:
         switch(step.assignment_type)
@@ -445,6 +536,25 @@ void symex_target_equationt::convert_assignments(
       step.converted = true;
       with_solver_hardness(
         decision_procedure, hardness_register_ssa(step_index, step));
+    }
+    else if (step.is_observation_begin() && !step.ignore && !step.converted) {
+      if(inObservation) {
+        log.error() << "\n~~~~~~~LUGR ERROR: Nesting of OBSERVATION_BEGIN not allowed"
+               << messaget::eom;
+      }
+      inObservation=true;
+      step.converted = true;
+      std::cout << "\n~~~~~~~~~~~~~~~~~~~~LUGR: Starting observation\n";
+    }
+    else if (step.is_observation_end() && !step.ignore && !step.converted) {
+      if(!inObservation) {
+        log.error() << "\n~~~~~~~LUGR ERROR: OBSERVATION_END requires preceeding OBSERVATION_BEGIN"
+               << messaget::eom;
+      }
+      inObservation=false;
+      observation_index++;
+      step.converted = true;
+      std::cout << "\n~~~~~~~~~~~~~~~~~~~~LUGR: Ending observation\n";
     }
     ++step_index;
   }
@@ -576,7 +686,8 @@ void symex_target_equationt::convert_constraints(
 
 void symex_target_equationt::convert_assertions(
   decision_proceduret &decision_procedure,
-  bool optimized_for_single_assertions)
+  bool optimized_for_single_assertions,
+  bool wcnfIsSet) // LUGR: WCNF Fault localization option (default: false)
 {
   // we find out if there is only _one_ assertion,
   // which allows for a simpler formula
@@ -602,6 +713,9 @@ void symex_target_equationt::convert_assertions(
         step.cond_handle = false_exprt();
 
         std::cout << "\n~~~~~~~LUGR: in assert. when only one"  << "\n";
+        if(wcnfIsSet) {
+          std::cout << "\n~~~~~~~LUGR: WCNF option is fucking set!!!~~~~~~~~~~~~~~~~~~~~~~~~"  << "\n";
+        }
         step.output(std::cout);
 
         with_solver_hardness(
@@ -647,6 +761,7 @@ void symex_target_equationt::convert_assertions(
 
       std::cout << "\n~~~~~~~LUGR: in assert. when multiple"  << "\n";
         step.output(std::cout);
+      // LUGR TODO: WCNF Handling
 
       implies_exprt implication(
         assumption,

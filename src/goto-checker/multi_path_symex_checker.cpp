@@ -72,6 +72,7 @@ std::chrono::duration<double>
 multi_path_symex_checkert::prepare_property_decider(propertiest &properties)
 {
   std::chrono::duration<double> solver_runtime = ::prepare_property_decider(
+  options, // LUGR: needed for WCNF option
     properties, equation, property_decider, ui_message_handler);
 
   return solver_runtime;

@@ -466,7 +466,7 @@ void _check_with_strategy(
         options, ui_message_handler, resume.equation, ns);
 
       const auto solver_runtime = prepare_property_decider(
-        properties, resume.equation, property_decider, ui_message_handler);
+        options, properties, resume.equation, property_decider, ui_message_handler);
 
       run_property_decider(
         result,

@@ -106,6 +106,12 @@ void SSA_stept::output(std::ostream &out) const
   case goto_trace_stept::typet::GOTO:
     out << "IF " << format(cond_expr) << " GOTO\n";
     break;
+  case goto_trace_stept::typet::OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
+    out << "OBSERVATION_BEGIN\n";
+    break;
+  case goto_trace_stept::typet::OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+    out << "OBSERVATION_END\n";
+    break;
 
   case goto_trace_stept::typet::NONE:
     UNREACHABLE;
@@ -181,6 +187,8 @@ void SSA_stept::validate(const namespacet &ns, const validation_modet vm) const
   case goto_trace_stept::typet::MEMORY_BARRIER:
   case goto_trace_stept::typet::ATOMIC_BEGIN:
   case goto_trace_stept::typet::ATOMIC_END:
+  case goto_trace_stept::typet::OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
+  case goto_trace_stept::typet::OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
     break;
   }
 }

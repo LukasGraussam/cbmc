@@ -504,6 +504,8 @@ goto_programt::targett string_abstractiont::abstract(
   case SKIP:
   case OTHER:
   case LOCATION:
+  case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
     break;
 
   case INCOMPLETE_GOTO:

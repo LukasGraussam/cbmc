@@ -365,6 +365,16 @@ solver_hardnesst::goto_instruction2string(goto_programt::const_targett pc)
   case ATOMIC_END:
     out << "ATOMIC_END";
     break;
+  
+
+  case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
+    out << "OBSERVATION_BEGIN";
+    break;
+
+  case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+    out << "OBSERVATION_END";
+    break;
+
 
   case START_THREAD:
     out << "START THREAD " << instruction.get_target()->target_number;

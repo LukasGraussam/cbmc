@@ -34,6 +34,7 @@ struct trace_optionst;
 class ui_message_handlert;
 
 void convert_symex_target_equation(
+  const optionst &options, // LUGR: WCNF Fault localization
   symex_target_equationt &equation,
   decision_proceduret &decision_procedure,
   message_handlert &message_handler);
@@ -146,6 +147,7 @@ void update_status_of_unknown_properties(
 /// \param [in,out] ui_message_handler: For logging
 /// \return The runtime for converting the equation
 std::chrono::duration<double> prepare_property_decider(
+  const optionst &options, // LUGR: needed for WCNF option
   propertiest &properties,
   symex_target_equationt &equation,
   goto_symex_property_decidert &property_decider,

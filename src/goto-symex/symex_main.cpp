@@ -28,6 +28,8 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include "path_storage.h"
 
+#include <iostream> // LUGR debug
+
 symex_configt::symex_configt(const optionst &options)
   : max_depth(options.get_unsigned_int_option("depth")),
     doing_path_exploration(options.is_set("paths")),
@@ -715,6 +717,19 @@ void goto_symext::execute_next_instruction(
 
   case ATOMIC_END:
     symex_atomic_end(state);
+    symex_transition(state);
+    break;
+
+  // LUGR TODO: implement functions
+  case OBSERVATION_BEGIN:
+    std::cout << "\n~~~~~~~LUGR: In symex_main.cpp in case OBS. Begin - should be alright"  << "\n";
+    symex_observation_begin(state);
+    symex_transition(state);
+    break;
+
+  case OBSERVATION_END:
+    std::cout << "\n~~~~~~~LUGR: In symex_main.cpp in case OBS. End - should be alright"  << "\n";
+    symex_observation_end(state);
     symex_transition(state);
     break;
 

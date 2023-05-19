@@ -86,6 +86,8 @@ void invariant_set_domaint::transform(
     case LOCATION:     // No action required
     case END_THREAD:   // Require a concurrent analysis at higher level
     case SKIP:         // No action required
+    case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
+    case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
       break;
     case INCOMPLETE_GOTO:
     case NO_INSTRUCTION_TYPE:

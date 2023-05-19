@@ -92,6 +92,8 @@ public:
     MEMORY_BARRIER,
     ATOMIC_BEGIN,
     ATOMIC_END
+    ,OBSERVATION_BEGIN,
+    OBSERVATION_END
   };
 
   typet type;

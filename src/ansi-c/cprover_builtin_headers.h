@@ -40,6 +40,9 @@ void __CPROVER_input(const char *id, ...);
 void __CPROVER_output(const char *id, ...);
 void __CPROVER_cover(__CPROVER_bool condition);
 
+void __CPROVER_observation_begin(); // LUGR: for wcnf option (fault localization)
+void __CPROVER_observation_end(); // LUGR: for wcnf option (fault localization)
+
 // concurrency-related
 void __CPROVER_atomic_begin();
 void __CPROVER_atomic_end();

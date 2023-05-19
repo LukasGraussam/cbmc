@@ -149,6 +149,7 @@ void output_graphml(
 }
 
 void convert_symex_target_equation(
+  const optionst &options, // LUGR: for WCNF option
   symex_target_equationt &equation,
   decision_proceduret &decision_procedure,
   message_handlert &message_handler)
@@ -156,7 +157,9 @@ void convert_symex_target_equation(
   messaget msg(message_handler);
   msg.status() << "converting SSA" << messaget::eom;
 
-  equation.convert(decision_procedure);
+  bool wcnfIsSet = options.get_bool_option("wcnf"); // LUGR: pass wcnf option on to convert function
+
+  equation.convert(decision_procedure, wcnfIsSet);
 }
 
 std::unique_ptr<memory_model_baset>
@@ -356,6 +359,7 @@ void postprocess_equation(
 }
 
 std::chrono::duration<double> prepare_property_decider(
+  const optionst &options, // LUGR: needed for WCNF option
   propertiest &properties,
   symex_target_equationt &equation,
   goto_symex_property_decidert &property_decider,
@@ -370,6 +374,7 @@ std::chrono::duration<double> prepare_property_decider(
     << messaget::eom;
 
   convert_symex_target_equation(
+  options, // LUGR: needed for WCNF option
     equation, property_decider.get_decision_procedure(), ui_message_handler);
   property_decider.update_properties_goals_from_symex_target_equation(
     properties);

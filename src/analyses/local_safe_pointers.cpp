@@ -122,6 +122,8 @@ void local_safe_pointerst::operator()(const goto_programt &goto_program)
     case END_FUNCTION:
     case ATOMIC_BEGIN:
     case ATOMIC_END:
+    case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
+    case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
       break;
 
     // Possible checks:

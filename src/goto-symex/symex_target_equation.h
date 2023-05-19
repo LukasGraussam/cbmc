@@ -166,12 +166,26 @@ public:
     const exprt &guard,
     unsigned atomic_section_id,
     const sourcet &source);
+  
+  // LUGR for wcnf option (fault localization):
+  /// \copydoc symex_targett::observation_begin()
+  virtual void observation_begin(
+    const exprt &guard,
+    const sourcet &source);
+  
+  // LUGR for wcnf option (fault localization):
+  /// \copydoc symex_targett::observation_end()
+  virtual void observation_end(
+    const exprt &guard,
+    const sourcet &source);
 
   /// Interface method to initiate the conversion into a decision procedure
   /// format. The method iterates over the equation, i.e. over the SSA steps and
   /// converts each type of step separately.
   /// \param decision_procedure: A handle to a decision procedure interface
-  void convert(decision_proceduret &decision_procedure);
+  void convert(
+  decision_proceduret &decision_procedure,
+  bool wcnfIsSet = false); // LUGR: WCNF Fault localization option
 
   /// Interface method to initiate the conversion into a decision procedure
   /// format. The method iterates over the equation, i.e. over the SSA steps and
@@ -203,7 +217,8 @@ public:
   ///   single assertions (unsound for incremental conversions)
   void convert_assertions(
     decision_proceduret &decision_procedure,
-    bool optimized_for_single_assertions = true);
+    bool optimized_for_single_assertions = true,
+    bool wcnfIsSet = false); // LUGR: WCNF Fault localization option
 
   /// Converts constraints: set the represented condition to _True_.
   /// \param decision_procedure: A handle to a decision procedure interface

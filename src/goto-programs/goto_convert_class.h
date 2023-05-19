@@ -697,6 +697,18 @@ protected:
     const exprt::operandst &arguments,
     goto_programt &dest,
     const irep_idt &mode);
+  
+  // LUGR: for wcnf option (Fault-loc.):
+  void do_observation_begin(
+    const exprt &lhs,
+    const symbol_exprt &function,
+    const exprt::operandst &arguments,
+    goto_programt &dest);
+  void do_observation_end(
+    const exprt &lhs,
+    const symbol_exprt &function,
+    const exprt::operandst &arguments,
+    goto_programt &dest);
 
   exprt get_array_argument(const exprt &src);
 };

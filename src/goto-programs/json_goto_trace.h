@@ -184,6 +184,8 @@ void convert(
     case goto_trace_stept::typet::SHARED_WRITE:
     case goto_trace_stept::typet::CONSTRAINT:
     case goto_trace_stept::typet::NONE:
+    case goto_trace_stept::typet::OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
+    case goto_trace_stept::typet::OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
       const auto default_step = ::default_step(step, previous_source_location);
       if(default_step)
       {

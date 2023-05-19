@@ -148,6 +148,8 @@ void uncaught_exceptions_domaint::transform(
   case ASSUME:       // Ignoring is a valid over-approximation
   case LOCATION:     // No action required
   case SKIP:         // No action required
+  case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
     break;
   case OTHER:
 #if 0

@@ -22,6 +22,8 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include <sstream>
 
+#include <iostream> // LUGR debug
+
 void goto_program2codet::operator()()
 {
   // labels stored for cleanup
@@ -221,6 +223,19 @@ goto_programt::const_targett goto_program2codet::convert_instruction(
         code_function_callt f(symbol_exprt(
           target->is_atomic_begin() ? CPROVER_PREFIX "atomic_begin"
                                     : CPROVER_PREFIX "atomic_end",
+          void_t));
+        dest.add(std::move(f));
+        return target;
+      }
+    
+    case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
+    case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+      {
+        std::cout << "\n~~~~~~~LUGR: in goto_program2code.cpp convert_instruction observation case"  << "\n";
+        const code_typet void_t({}, empty_typet());
+        code_function_callt f(symbol_exprt(
+          target->is_observation_begin() ? CPROVER_PREFIX "observation_begin"
+                                    : CPROVER_PREFIX "observation_end",
           void_t));
         dest.add(std::move(f));
         return target;

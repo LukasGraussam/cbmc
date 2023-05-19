@@ -35,6 +35,8 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <map>
 #include <sstream>
 
+#include <iostream> // LUGR debug
+
 // clang-format off
 
 expr2c_configurationt expr2c_configurationt::default_configuration
@@ -3046,6 +3048,16 @@ std::string expr2ct::convert_code(
 
   if(can_cast_expr<code_outputt>(src))
     return convert_code_output(src, indent);
+
+  // LUGR TODO: Look here?
+  if(statement==ID_observation_begin) {
+    std::cout << "\n~~~~~~~LUGR: expr2c.cpp in if ID_observation_begin"  << "\n";
+    return indent_str(indent) + CPROVER_PREFIX + "observation_begin("+  ");";
+  }
+  if(statement==ID_observation_end) {
+    std::cout << "\n~~~~~~~LUGR: expr2c.cpp in if ID_observation_end"  << "\n";
+    return indent_str(indent) + CPROVER_PREFIX + "observation_end("+  ");";
+  }
 
   if(statement==ID_assume)
     return convert_code_assume(src, indent);

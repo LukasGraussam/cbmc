@@ -554,6 +554,10 @@ void custom_bitvector_domaint::transform(
   case NO_INSTRUCTION_TYPE:
     DATA_INVARIANT(false, "Only complete instructions can be analyzed");
     break;
+  case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+    std::cout << "\n~~~~~~~LUGR: in Obs. Begin/End case in cutom_bitvector_analysis.cpp"  << "\n"; // TODO remove this
+    break;
   }
 }
 
