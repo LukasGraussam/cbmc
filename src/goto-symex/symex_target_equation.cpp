@@ -415,6 +415,7 @@ void symex_target_equationt::convert_assignments(
         mstream << messaget::eom;
       });
 
+      // LUGR TODO: Refactor wcnf stuff into functions and only do it when option is set
       // LUGR: Parse observations:
       if(inObservation) {
         if(step.source.pc->source_location().is_built_in())  {
@@ -709,13 +710,18 @@ void symex_target_equationt::convert_assertions(
       if(step.is_assert() && !step.ignore && !step.converted)
       {
         step.converted = true;
-        decision_procedure.set_to_false(step.cond_expr);
+        if(wcnfIsSet) {
+           // LUGR: for fault-localization the assertion needs to be positive:
+           std::cout << "\n~~~~~~~LUGR: added positive assertion for wcnf"  << "\n";
+          decision_procedure.set_to_true(step.cond_expr);
+        }
+        else {
+          decision_procedure.set_to_false(step.cond_expr);
+        }
+        
         step.cond_handle = false_exprt();
 
-        std::cout << "\n~~~~~~~LUGR: in assert. when only one"  << "\n";
-        if(wcnfIsSet) {
-          std::cout << "\n~~~~~~~LUGR: WCNF option is fucking set!!!~~~~~~~~~~~~~~~~~~~~~~~~"  << "\n";
-        }
+        
         step.output(std::cout);
 
         with_solver_hardness(
@@ -759,7 +765,7 @@ void symex_target_equationt::convert_assertions(
         mstream << messaget::eom;
       });
 
-      std::cout << "\n~~~~~~~LUGR: in assert. when multiple"  << "\n";
+      std::cout << "\n~~~~~~~LUGR: in assert. when multiple - wcnf handling TODO"  << "\n";
         step.output(std::cout);
       // LUGR TODO: WCNF Handling
 
