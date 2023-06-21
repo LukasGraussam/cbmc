@@ -259,7 +259,6 @@ exprt wp(
     return post; // ignored
   else if(statement==ID_fence)
     return post; // ignored
-    // LUGR TODO: Look here?
   INVARIANT_WITH_DIAGNOSTICS(
     false, "sorry, wp(", id2string(statement), "...) is not implemented");
 }

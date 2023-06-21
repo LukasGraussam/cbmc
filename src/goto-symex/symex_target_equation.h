@@ -194,12 +194,33 @@ public:
   /// e.g. for incremental solving.
   /// \param decision_procedure: A handle to a particular decision procedure
   ///   interface
-  void convert_without_assertions(decision_proceduret &decision_procedure);
+  void convert_without_assertions(decision_proceduret &decision_procedure,
+  bool wcnfIsSet = false); // LUGR: WCNF Fault localization option
 
   /// Converts assignments: set the equality _lhs==rhs_ to _True_.
   /// \param decision_procedure: A handle to a decision procedure
   ///  interface
   void convert_assignments(decision_proceduret &decision_procedure);
+
+  /// Convert an observation step for decision procedure by renaming
+  /// the assigned variable to "WCNF_OBS_[observation_index]_[old-var-name]"
+  /// if the step is in the right format
+  /// \param step: Step to be converted
+  /// \param observation_index: current observation index
+  /// \return true if step is converted, false otherwise (e.g. step in wrong format)
+  bool convert_observation_step(SSA_stept &step, std::size_t observation_index);
+
+  /// Insert a compHealthy variable for enabling/disabling a step for wcnf-fault localization,
+  /// or leave the step unchanged if it should not be a possible fault location.
+  /// i.e. set step.cond_expr to implication "compHealthy::fileName::lineNr --> old_cond_epr
+  /// \param step: Step to be converted
+  void convert_wcnf_assignment_step(SSA_stept &step);
+
+  /// Convert assignments: set the equality _lhs==rhs_ to _True_
+  /// Introduce healthy variables and observations-parsing for wcnf option
+  /// \param decision_procedure: A handle to a decision procedure
+  ///  interface
+  void convert_assignments_wcnf(decision_proceduret &decision_procedure);
 
   /// Converts declarations: these are effectively ignored by the decision
   /// procedure.

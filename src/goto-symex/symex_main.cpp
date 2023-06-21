@@ -720,7 +720,6 @@ void goto_symext::execute_next_instruction(
     symex_transition(state);
     break;
 
-  // LUGR TODO: implement functions
   case OBSERVATION_BEGIN:
     std::cout << "\n~~~~~~~LUGR: In symex_main.cpp in case OBS. Begin - should be alright"  << "\n";
     symex_observation_begin(state);

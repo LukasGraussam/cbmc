@@ -24,19 +24,6 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <iostream> // LUGR debug
 #include <util/format_expr.h> // LUGR debug
 
-/*
-LUGR Todo vor Bespr. 06. Dez.:
- - decision procedure (output) ?
- - fault-localization interface ?
- - line number and bool-type enough for healthy variables ?
- - need to register healthy var. in symbol table, or declaration in ssa step? -> trace ?
-
- Bespr. 06. Dez.:
-  - simple hack here, use cbmc only for output formula (maybe some cnf)
-  - healthy variables: use line number (but care for file/function/multiple commandos in line)
-  - probably no need to register variable, but make some mapping to output variable
-*/
-
 static std::function<void(solver_hardnesst &)>
 hardness_register_ssa(std::size_t step_index, const SSA_stept &step)
 {
@@ -368,14 +355,20 @@ void symex_target_equationt::constraint(
 }
 
 void symex_target_equationt::convert_without_assertions(
-  decision_proceduret &decision_procedure)
+  decision_proceduret &decision_procedure,
+  bool wcnfIsSet) // LUGR: WCNF Fault localization option)
 {
   with_solver_hardness(decision_procedure, [&](solver_hardnesst &hardness) {
     hardness.register_ssa_size(SSA_steps.size());
   });
 
   convert_guards(decision_procedure);
-  convert_assignments(decision_procedure);
+  if(wcnfIsSet) {
+    convert_assignments_wcnf(decision_procedure);
+  }
+  else {
+    convert_assignments(decision_procedure);
+  }
   convert_decls(decision_procedure);
   convert_assumptions(decision_procedure);
   convert_goto_instructions(decision_procedure);
@@ -390,7 +383,7 @@ void symex_target_equationt::convert(
 {
   const auto convert_SSA_start = std::chrono::steady_clock::now();
 
-  convert_without_assertions(decision_procedure);
+  convert_without_assertions(decision_procedure, wcnfIsSet);
   convert_assertions(decision_procedure, true,  wcnfIsSet);
 
   const auto convert_SSA_stop = std::chrono::steady_clock::now();
@@ -401,6 +394,130 @@ void symex_target_equationt::convert(
 }
 
 void symex_target_equationt::convert_assignments(
+  decision_proceduret &decision_procedure)
+{
+  std::size_t step_index = 0;
+  for(auto &step : SSA_steps)
+  {
+    if(step.is_assignment() && !step.ignore && !step.converted)
+    {
+      log.conditional_output(log.debug(), [&step](messaget::mstreamt &mstream) {
+        step.output(mstream);
+        mstream << messaget::eom;
+      });
+
+      decision_procedure.set_to_true(step.cond_expr);
+      step.converted = true;
+      with_solver_hardness(
+        decision_procedure, hardness_register_ssa(step_index, step));
+    }
+    ++step_index;
+  }
+}
+
+bool symex_target_equationt::convert_observation_step(SSA_stept &step,
+  std::size_t observation_index)
+{
+  if(step.source.pc->source_location().is_built_in())  {
+    log.error() << "\n~~~~~~~WARNING: built in location not expected within Observation??"
+          << messaget::eom;
+    return false;
+  }
+  if(step.assignment_type != symex_targett::assignment_typet::STATE) {
+    log.error() << "\n~~~~~~~WARNING: Non STATE Assignment not expected within observation??"
+        << messaget::eom;
+    return false;
+  }
+  // Check whether we have a equality expression:
+  if(!can_cast_expr<equal_exprt>(step.cond_expr)) {
+    log.error() << "\n~~~~~~~WARNING: Non Equality expression not expected within observation??"
+        << messaget::eom;
+    return false;
+  }
+
+  // Cast condition expression of current step to a equality expression:
+  equal_exprt curAssignment = to_equal_expr(step.cond_expr);
+
+  if(!curAssignment.rhs().is_constant()) {
+    log.error() << "\n~~~~~~~LUGR WARNING: RHS must be constant in observation"
+        << messaget::eom;
+    return false;
+  }
+  if(!can_cast_expr<symbol_exprt>(curAssignment.lhs())) {
+    log.error() << "\n~~~~~~~LUGR WARNING: LHS must be a symbol in observation"
+        << messaget::eom;
+    return false;
+  }
+
+  // Cast lhs of assignment to symbol:
+  symbol_exprt curAssignVar = to_symbol_expr(curAssignment.lhs());
+
+  // Give the symbol the new name:
+  const irep_idt newVarName = "WCNF_OBS_" + std::to_string(observation_index) + "_" + id2string(curAssignVar.get_identifier());
+  curAssignVar.set_identifier(newVarName);
+
+  // build new equality expression with replaced variable name:
+  equal_exprt newCond(curAssignVar,curAssignment.rhs());
+  step.cond_expr = newCond;
+
+  return true;
+}
+
+void symex_target_equationt::convert_wcnf_assignment_step(SSA_stept &step)
+{
+  // LUGR: decide whether to insert a healthy variable for fault-localization,
+  // i.e. check whether this assignment really corresponds to a line of code we want to enable/disble:
+  bool insertFaultLoc = false;
+  // LUGR: check if not a built-in step:
+  if(!step.source.pc->source_location().is_built_in()) {
+    // check types of assignments:
+    switch(step.assignment_type)
+    {
+    case symex_targett::assignment_typet::STATE:
+      insertFaultLoc = true;
+      break;
+    case symex_targett::assignment_typet::GUARD:
+      insertFaultLoc = true;
+      break;
+    case symex_targett::assignment_typet::PHI:
+      insertFaultLoc = false; // this is a path merge
+      break;
+    case symex_targett::assignment_typet::HIDDEN:
+      insertFaultLoc = false; // hidden assignments, e.g. for return values of function calls...
+      break;
+    case symex_targett::assignment_typet::VISIBLE_ACTUAL_PARAMETER:
+      insertFaultLoc = false; // used somehow in function calls
+      break;
+    // LUGR TODO: check how to handle other assignment types:
+    case symex_targett::assignment_typet::HIDDEN_ACTUAL_PARAMETER:
+      log.error() << "\n~~~~~~~LUGR WARNING: Assignment type not considered so far"
+            << messaget::eom;
+      break;
+    default:
+      log.error() << "\n~~~~~~~LUGR WARNING: Assignment type not considered so far"
+            << messaget::eom;
+    }
+  }
+
+  // LUGR: actually insert our variables:
+  if(insertFaultLoc) {
+    // create healthy variable for fault-loc:
+    std::string myFile = id2string(step.source.pc->source_location().get_file());
+    std::string myLine = id2string(step.source.pc->source_location().get_line());
+    const irep_idt identifier = "compHealthy::" + myFile + "::" + myLine;
+    symbol_exprt healthySymbol(identifier,bool_typet());
+    // TODO Pointer idea: check guard, put together with same constants c: [(not)] func::c4::varName!c1@c2#c3 = address(hans::X)
+    // otherwise each ssa_step gets own healthy var?? (are there other cases which should be put together, which?)
+
+    implies_exprt implication(
+      healthySymbol,
+      step.cond_expr);
+    
+    step.cond_expr = implication;
+  }
+}
+
+void symex_target_equationt::convert_assignments_wcnf(
   decision_proceduret &decision_procedure)
 {
   std::size_t step_index = 0;
@@ -415,123 +532,25 @@ void symex_target_equationt::convert_assignments(
         mstream << messaget::eom;
       });
 
-      // LUGR TODO: Refactor wcnf stuff into functions and only do it when option is set
-      // LUGR: Parse observations:
+      // Parse observations:
       if(inObservation) {
-        if(step.source.pc->source_location().is_built_in())  {
-          log.error() << "\n~~~~~~~LUGR WARNING: built in location within Observation??"
-               << messaget::eom;
-          ++step_index;
-          continue; // Go to next iteration of for-loop
+        if(convert_observation_step(step,observation_index)) {
+          std::cout << "\n";
+          step.output(std::cout); // LUGR show all steps
+
+          decision_procedure.set_to_true(step.cond_expr);
+          step.converted = true;
+          with_solver_hardness(
+            decision_procedure, hardness_register_ssa(step_index, step));
         }
-        if(step.assignment_type != symex_targett::assignment_typet::STATE) {
-          log.error() << "\n~~~~~~~LUGR WARNING: Non STATE Assignment within observation??"
-              << messaget::eom;
-          ++step_index;
-          continue; // Go to next iteration of for-loop
-        }
-        // Check whether we have a equality expression:
-        if(!can_cast_expr<equal_exprt>(step.cond_expr)) {
-          log.error() << "\n~~~~~~~LUGR WARNING: Non Equality expression within observation??"
-              << messaget::eom;
-          ++step_index;
-          continue; // Go to next iteration of for-loop
-
-        }
-
-        // Cast condition expression of current step to a equality expression:
-        equal_exprt curAssignment = to_equal_expr(step.cond_expr);
-
-        if(!curAssignment.rhs().is_constant()) {
-          log.error() << "\n~~~~~~~LUGR WARNING: RHS must be constant in observation"
-              << messaget::eom;
-          ++step_index;
-          continue; // Go to next iteration of for-loop
-        }
-        if(!can_cast_expr<symbol_exprt>(curAssignment.lhs())) {
-          log.error() << "\n~~~~~~~LUGR WARNING: LHS must be a symbol in observation"
-              << messaget::eom;
-          ++step_index;
-          continue; // Go to next iteration of for-loop
-        }
-
-        // Cast lhs of assignment to symbol:
-        symbol_exprt curAssignVar = to_symbol_expr(curAssignment.lhs());
-
-        // Give the symbol the new name:
-        const irep_idt newVarName = "WCNF_OBS_" + std::to_string(observation_index) + "_" + id2string(curAssignVar.get_identifier()); // todo obs index
-        curAssignVar.set_identifier(newVarName);
-
-        // build new equality expression with replaced variable name:
-        equal_exprt newCond(curAssignVar,curAssignment.rhs());
-        step.cond_expr = newCond;
-
-        std::cout << "\n";
-        step.output(std::cout); // LUGR show all steps
-
-        decision_procedure.set_to_true(step.cond_expr);
-        step.converted = true;
-        with_solver_hardness(
-          decision_procedure, hardness_register_ssa(step_index, step));
-
         ++step_index;
         continue; // Go to next iteration of for-loop
       }
 
-      // LUGR: decide whether to insert a healthy variable for fault-localization,
-      // i.e. check whether this assignment really corresponds to a line of code we want to enable/disble:
-      bool insertFaultLoc = false;
-      // LUGR: check if not a built-in step:
-      // LUGR TODO: Put this decision into a function
-      if(!step.source.pc->source_location().is_built_in()) {
-        // check types of assignments:
-        switch(step.assignment_type)
-        {
-        case symex_targett::assignment_typet::STATE:
-          insertFaultLoc = true;
-          break;
-        case symex_targett::assignment_typet::GUARD:
-          insertFaultLoc = true;
-          break;
-        case symex_targett::assignment_typet::PHI:
-          insertFaultLoc = false; // this is a path merge
-          break;
-        case symex_targett::assignment_typet::HIDDEN:
-          insertFaultLoc = false; // hidden assignments, e.g. for return values of function calls...
-          break;
-        case symex_targett::assignment_typet::VISIBLE_ACTUAL_PARAMETER:
-          insertFaultLoc = false; // used somehow in function calls
-          break;
-        // LUGR TODO: check how to handle other assignment types:
-        case symex_targett::assignment_typet::HIDDEN_ACTUAL_PARAMETER:
-          log.error() << "\n~~~~~~~LUGR WARNING: Assignment type not considered so far"
-               << messaget::eom;
-          break;
-        default:
-          log.error() << "\n~~~~~~~LUGR WARNING: Assignment type not considered so far"
-               << messaget::eom;
-        }
-      }
+      convert_wcnf_assignment_step(step);
 
-      // LUGR: actually insert our variables:
-      if(insertFaultLoc) {
-        // create healthy variable for fault-loc:
-        std::string myFile = id2string(step.source.pc->source_location().get_file());
-        std::string myLine = id2string(step.source.pc->source_location().get_line());
-        const irep_idt identifier = "compHealthy::" + myFile + "::" + myLine;
-        symbol_exprt healthySymbol(identifier,bool_typet());
-        // TODO Pointer idea: check guard, put together with same constants c: [(not)] func::c4::varName!c1@c2#c3 = address(hans::X)
-        // otherwise each ssa_step gets own healthy var?? (are there other cases which should be put together, which?)
-
-        implies_exprt implication(
-          healthySymbol,
-          step.cond_expr);
-        
-        step.cond_expr = implication;
-      }
       std::cout << "\n";
       step.output(std::cout); // LUGR show all steps
-      
 
       decision_procedure.set_to_true(step.cond_expr);
       step.converted = true;

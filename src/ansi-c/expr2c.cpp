@@ -3049,7 +3049,7 @@ std::string expr2ct::convert_code(
   if(can_cast_expr<code_outputt>(src))
     return convert_code_output(src, indent);
 
-  // LUGR TODO: Look here?
+  // LUGR TODO: remove unnecessary outputs
   if(statement==ID_observation_begin) {
     std::cout << "\n~~~~~~~LUGR: expr2c.cpp in if ID_observation_begin"  << "\n";
     return indent_str(indent) + CPROVER_PREFIX + "observation_begin("+  ");";
