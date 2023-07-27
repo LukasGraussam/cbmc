@@ -176,11 +176,12 @@ bool bv_wcnft::write_wcnf(std::ostream &out)
 
 
   out << "\n";
-  out << "c Activation variables:" << "\n";
+  out << "c ACTIVATION_VARIABLES_BEGIN" << "\n";
   for(const auto &s : activationVars)
   {
     out << "c " << s.first << " " << s.second.dimacs() << "\n";
   }
+  out << "c ACTIVATION_VARIABLES_END" << "\n";
 
   // we dump the mapping variable<->literals
   out << "\n";
