@@ -77,6 +77,7 @@ public:
     error_labels = _options.get_list_option("error-label");
     enable_pointer_primitive_check =
       _options.get_bool_option("pointer-primitive-check");
+    enable_wcnf = _options.get_bool_option("wcnf");
   }
 
   typedef goto_functionst::goto_functiont goto_functiont;
@@ -273,6 +274,7 @@ protected:
   bool retain_trivial;
   bool enable_assert_to_assume;
   bool enable_pointer_primitive_check;
+  bool enable_wcnf; // for wcnf fault-localization option
 
   /// Maps a named-check name to the corresponding boolean flag.
   std::map<irep_idt, bool *> name_to_flag{
@@ -289,7 +291,8 @@ protected:
     {"undefined-shift-check", &enable_undefined_shift_check},
     {"float-overflow-check", &enable_float_overflow_check},
     {"nan-check", &enable_nan_check},
-    {"pointer-primitive-check", &enable_pointer_primitive_check}};
+    {"pointer-primitive-check", &enable_pointer_primitive_check},
+    {"wcnf", &enable_wcnf}};
 
   typedef optionst::value_listt error_labelst;
   error_labelst error_labels;
@@ -1726,7 +1729,14 @@ void goto_check_ct::add_guarded_property(
 
     source_locationt annotated_location = source_location;
     annotated_location.set_comment(comment + " in " + source_expr_string);
-    annotated_location.set_property_class(property_class);
+    if(enable_wcnf) {
+      // In WCNF (fault-localization) mode, we start property_class string with WCNF_GOTO_CHECK
+      // which is used in symex_target_equation, to conveniently identify goto_check assertions:
+      annotated_location.set_property_class("WCNF_GOTO_CHECK " + property_class);
+    }
+    else {
+      annotated_location.set_property_class(property_class);
+    }
 
     add_all_disable_named_check_pragmas(annotated_location);
 

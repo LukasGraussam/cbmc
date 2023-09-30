@@ -405,6 +405,9 @@ void symex_target_equationt::convert_assignments(
         step.output(mstream);
         mstream << messaget::eom;
       });
+      
+      std::cout << "\n";
+      step.output(std::cout); // LUGR show all steps
 
       decision_procedure.set_to_true(step.cond_expr);
       step.converted = true;
@@ -483,7 +486,11 @@ void symex_target_equationt::convert_wcnf_assignment_step(SSA_stept &step)
       insertFaultLoc = false; // this is a path merge
       break;
     case symex_targett::assignment_typet::HIDDEN:
-      insertFaultLoc = false; // hidden assignments, e.g. for return values of function calls...
+      insertFaultLoc = false; // hidden assignments, e.g. for mapping return values when calling a function and using the return value...
+      // true if it is a return statement itself:
+      if(step.source.pc->type() == SET_RETURN_VALUE) {
+        insertFaultLoc = true;
+      }
       break;
     case symex_targett::assignment_typet::VISIBLE_ACTUAL_PARAMETER:
       insertFaultLoc = false; // used somehow in function calls
@@ -506,8 +513,6 @@ void symex_target_equationt::convert_wcnf_assignment_step(SSA_stept &step)
     std::string myLine = id2string(step.source.pc->source_location().get_line());
     const irep_idt identifier = "compHealthy::" + myFile + "::" + myLine;
     symbol_exprt healthySymbol(identifier,bool_typet());
-    // TODO Pointer idea: check guard, put together with same constants c: [(not)] func::c4::varName!c1@c2#c3 = address(hans::X)
-    // otherwise each ssa_step gets own healthy var?? (are there other cases which should be put together, which?)
 
     implies_exprt implication(
       healthySymbol,
@@ -559,22 +564,20 @@ void symex_target_equationt::convert_assignments_wcnf(
     }
     else if (step.is_observation_begin() && !step.ignore && !step.converted) {
       if(inObservation) {
-        log.error() << "\n~~~~~~~LUGR ERROR: Nesting of OBSERVATION_BEGIN not allowed"
+        log.error() << "convert_assignments_wcnf: Nesting of OBSERVATION_BEGIN not allowed"
                << messaget::eom;
       }
       inObservation=true;
       step.converted = true;
-      std::cout << "\n~~~~~~~~~~~~~~~~~~~~LUGR: Starting observation\n";
     }
     else if (step.is_observation_end() && !step.ignore && !step.converted) {
       if(!inObservation) {
-        log.error() << "\n~~~~~~~LUGR ERROR: OBSERVATION_END requires preceeding OBSERVATION_BEGIN"
+        log.error() << "convert_assignments_wcnf: OBSERVATION_END requires preceeding OBSERVATION_BEGIN"
                << messaget::eom;
       }
       inObservation=false;
       observation_index++;
       step.converted = true;
-      std::cout << "\n~~~~~~~~~~~~~~~~~~~~LUGR: Ending observation\n";
     }
     ++step_index;
   }
@@ -769,6 +772,7 @@ void symex_target_equationt::convert_assertions(
 
   std::vector<goto_programt::const_targett> involved_steps;
 
+  std::size_t step_index = 0; // Needed for WCNF
   for(auto &step : SSA_steps)
   {
     // hide already converted assertions in the error trace
@@ -784,9 +788,31 @@ void symex_target_equationt::convert_assertions(
         mstream << messaget::eom;
       });
 
-      std::cout << "\n~~~~~~~LUGR: in assert. when multiple - wcnf handling TODO"  << "\n";
-        step.output(std::cout);
-      // LUGR TODO: WCNF Handling
+      if(wcnfIsSet) {
+        // If WCNF (fault-localization) option is set, we have to insert a Healthy variable
+        // also for Assertions, that were created by goto_check_c, so they get havoced together with the actual
+        // assignment step of the source location:
+        if(id2string(step.source.pc->source_location().get_property_class()).rfind("WCNF_GOTO_CHECK ") == 0) {
+          // create healthy variable:
+          std::string myFile = id2string(step.source.pc->source_location().get_file());
+          std::string myLine = id2string(step.source.pc->source_location().get_line());
+          const irep_idt identifier = "compHealthy::" + myFile + "::" + myLine;
+          symbol_exprt healthySymbol(identifier,bool_typet());
+
+          implies_exprt implicationWcnf(
+            healthySymbol,
+            step.cond_expr);
+          step.cond_expr = implicationWcnf;
+        }
+
+        // ASSUME is currently not implemented for WCNF, we just care for the cond_expr:
+        decision_procedure.set_to_true(step.cond_expr);
+        with_solver_hardness(
+          decision_procedure, hardness_register_ssa(step_index, step));
+        
+        step_index++;
+        continue;
+      }
 
       implies_exprt implication(
         assumption,
@@ -806,6 +832,9 @@ void symex_target_equationt::convert_assertions(
     }
     else if(step.is_assume())
     {
+      if(wcnfIsSet) {
+        log.warning() << "ASSUME not implemented for WCNF option" << messaget::eom;
+      }
       // the assumptions have been converted before
       // avoid deep nesting of ID_and expressions
       if(assumption.id()==ID_and)
@@ -819,6 +848,12 @@ void symex_target_equationt::convert_assertions(
           involved_steps.push_back(step.source.pc);
         });
     }
+    step_index++; // WCNF
+  }
+
+  if(wcnfIsSet) {
+    // In WCNF mode we already asserted all assertions directly
+    return;
   }
 
   const auto assertion_disjunction = disjunction(disjuncts);
