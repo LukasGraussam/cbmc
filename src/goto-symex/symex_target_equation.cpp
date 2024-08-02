@@ -733,8 +733,25 @@ void symex_target_equationt::convert_assertions(
       {
         step.converted = true;
         if(wcnfIsSet) {
-           // LUGR: for fault-localization the assertion needs to be positive:
-           std::cout << "\n~~~~~~~LUGR: added positive assertion for wcnf"  << "\n";
+          // If WCNF (fault-localization) option is set, we have to insert a Healthy variable
+          // also for Assertions, that were created by goto_check_c, so they get havoced together with the actual
+          // assignment step of the source location:
+          if(id2string(step.source.pc->source_location().get_property_class()).rfind("WCNF_GOTO_CHECK ") == 0) {
+            // create healthy variable:
+            std::string myFile = id2string(step.source.pc->source_location().get_file());
+            std::string myLine = id2string(step.source.pc->source_location().get_line());
+            const irep_idt identifier = "compHealthy::" + myFile + "::" + myLine;
+            symbol_exprt healthySymbol(identifier,bool_typet());
+
+            implies_exprt implicationWcnf(
+              healthySymbol,
+              step.cond_expr);
+            step.cond_expr = implicationWcnf;
+          }
+          
+          // LUGR: for fault-localization the assertion needs to be positive:
+          std::cout << "\n~~~~~~~LUGR: added single positive assertion for wcnf"  << "\n";
+          step.output(std::cout); // LUGR show all steps
           decision_procedure.set_to_true(step.cond_expr);
         }
         else {
@@ -742,9 +759,6 @@ void symex_target_equationt::convert_assertions(
         }
         
         step.cond_handle = false_exprt();
-
-        
-        step.output(std::cout);
 
         with_solver_hardness(
           decision_procedure, hardness_register_ssa(step_index, step));
@@ -804,6 +818,9 @@ void symex_target_equationt::convert_assertions(
             step.cond_expr);
           step.cond_expr = implicationWcnf;
         }
+
+        std::cout << "\n~~~~~~~LUGR: added positive assertion for wcnf"  << "\n";
+        step.output(std::cout); // LUGR show all steps
 
         // ASSUME is currently not implemented for WCNF, we just care for the cond_expr:
         decision_procedure.set_to_true(step.cond_expr);
