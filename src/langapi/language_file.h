@@ -17,9 +17,9 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <string>
 #include <unordered_set>
 
-#include <util/message.h>
 #include <util/symbol_table_base.h>
 
+class message_handlert;
 class language_filet;
 class languaget;
 
@@ -50,7 +50,8 @@ public:
 
   void convert_lazy_method(
     const irep_idt &id,
-    symbol_table_baset &symbol_table);
+    symbol_table_baset &symbol_table,
+    message_handlert &message_handler);
 
   explicit language_filet(const std::string &filename);
   language_filet(const language_filet &rhs);
@@ -58,7 +59,7 @@ public:
   ~language_filet();
 };
 
-class language_filest:public messaget
+class language_filest
 {
 private:
   typedef std::map<std::string, language_filet> file_mapt;
@@ -101,31 +102,44 @@ public:
     file_map.clear();
   }
 
-  bool parse();
+  bool parse(message_handlert &message_handler);
 
-  void show_parse(std::ostream &out);
+  void show_parse(std::ostream &out, message_handlert &message_handler);
 
-  bool generate_support_functions(symbol_table_baset &symbol_table);
-
-  bool typecheck(
+  bool generate_support_functions(
     symbol_table_baset &symbol_table,
-    const bool keep_file_local = false);
+    message_handlert &message_handler);
+
+  bool
+
+  typecheck(
+    symbol_table_baset &symbol_table,
+    const bool keep_file_local,
+    message_handlert &message_handler);
+  bool
+  typecheck(symbol_table_baset &symbol_table, message_handlert &message_handler)
+  {
+    return typecheck(symbol_table, false, message_handler);
+  }
 
   bool final(symbol_table_baset &symbol_table);
 
-  bool interfaces(symbol_table_baset &symbol_table);
+  bool interfaces(
+    symbol_table_baset &symbol_table,
+    message_handlert &message_handler);
 
   // The method must have been added to the symbol table and registered
   // in lazy_method_map (currently always in language_filest::typecheck)
   // for this to be legal.
   void convert_lazy_method(
     const irep_idt &id,
-    symbol_table_baset &symbol_table)
+    symbol_table_baset &symbol_table,
+    message_handlert &message_handler)
   {
     PRECONDITION(symbol_table.has_symbol(id));
     lazy_method_mapt::iterator it=lazy_method_map.find(id);
     if(it!=lazy_method_map.end())
-      it->second->convert_lazy_method(id, symbol_table);
+      it->second->convert_lazy_method(id, symbol_table, message_handler);
   }
 
   bool can_convert_lazy_method(const irep_idt &id) const
@@ -144,12 +158,14 @@ protected:
   bool typecheck_module(
     symbol_table_baset &symbol_table,
     language_modulet &module,
-    const bool keep_file_local);
+    const bool keep_file_local,
+    message_handlert &message_handler);
 
   bool typecheck_module(
     symbol_table_baset &symbol_table,
     const std::string &module,
-    const bool keep_file_local);
+    const bool keep_file_local,
+    message_handlert &message_handler);
 };
 
 #endif // CPROVER_UTIL_LANGUAGE_FILE_H

@@ -79,7 +79,6 @@
 #  include "run.h"     // for Windows arg quoting
 #  include "unicode.h" // for widen function
 #  include <tchar.h>   // library for _tcscpy function
-#  include <util/make_unique.h>
 #  include <windows.h>
 #else
 #  include <fcntl.h>  // library for fcntl function
@@ -91,7 +90,6 @@
 #include "exception_utils.h"
 #include "invariant.h"
 #include "narrow.h"
-#include "optional.h"
 #include "piped_process.h"
 
 #include <cstring> // library for strerror function (on linux)
@@ -213,7 +211,7 @@ piped_processt::piped_processt(
   }
   // Create the child process
   STARTUPINFOW start_info;
-  proc_info = util_make_unique<PROCESS_INFORMATION>();
+  proc_info = std::make_unique<PROCESS_INFORMATION>();
   ZeroMemory(proc_info.get(), sizeof(PROCESS_INFORMATION));
   ZeroMemory(&start_info, sizeof(STARTUPINFOW));
   start_info.cb = sizeof(STARTUPINFOW);
@@ -277,10 +275,10 @@ piped_processt::piped_processt(
     dup2(pipe_output[1], STDOUT_FILENO);
     dup2(pipe_output[1], STDERR_FILENO);
 
-    // Create a char** for the arguments (all the contents of commandvec
-    // except the first element, i.e. the command itself).
-    char **args =
-      reinterpret_cast<char **>(malloc((commandvec.size()) * sizeof(char *)));
+    // Create a char** for the arguments plus a NULL terminator (by convention,
+    // the first "argument" is the command itself)
+    char **args = reinterpret_cast<char **>(
+      malloc((commandvec.size() + 1) * sizeof(char *)));
     // Add all the arguments to the args array of char *.
     unsigned long i = 0;
     while(i < commandvec.size())
@@ -344,8 +342,8 @@ piped_processt::~piped_processt()
 #  endif
 }
 
-NODISCARD
-piped_processt::send_responset piped_processt::send(const std::string &message)
+[[nodiscard]] piped_processt::send_responset
+piped_processt::send(const std::string &message)
 {
   if(process_state != statet::RUNNING)
   {
@@ -449,7 +447,7 @@ piped_processt::statet piped_processt::get_status()
   return process_state;
 }
 
-bool piped_processt::can_receive(optionalt<std::size_t> wait_time)
+bool piped_processt::can_receive(std::optional<std::size_t> wait_time)
 {
   // unwrap the optional argument here
   const int timeout = wait_time ? narrow<int>(*wait_time) : -1;

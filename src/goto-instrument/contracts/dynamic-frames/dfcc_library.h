@@ -14,7 +14,8 @@ Author: Remi Delmas, delmasrd@amazon.com
 
 #include <util/irep.h>
 #include <util/message.h>
-#include <util/optional.h>
+
+#include <goto-programs/goto_instruction_code.h>
 
 #include <map>
 #include <set>
@@ -87,6 +88,8 @@ enum class dfcc_funt
   WRITE_SET_ADD_FREEABLE,
   /// \see __CPROVER_contracts_write_set_add_allocated
   WRITE_SET_ADD_ALLOCATED,
+  /// \see __CPROVER_contracts_write_set_add_decl
+  WRITE_SET_ADD_DECL,
   /// \see __CPROVER_contracts_write_set_record_dead
   WRITE_SET_RECORD_DEAD,
   /// \see __CPROVER_contracts_write_set_record_deallocated
@@ -125,6 +128,8 @@ enum class dfcc_funt
   LINK_DEALLOCATED,
   /// \see __CPROVER_contracts_is_fresh
   IS_FRESH,
+  /// \see __CPROVER_contracts_pointer_in_range_dfcc
+  POINTER_IN_RANGE_DFCC,
   /// \see __CPROVER_contracts_is_freeable
   IS_FREEABLE,
   /// \see __CPROVER_contracts_was_freed
@@ -142,7 +147,6 @@ class message_handlert;
 class symbolt;
 class symbol_exprt;
 class typet;
-class dfcc_utilst;
 
 /// Class interface to library types and functions defined in
 /// `cprover_contracts.c`.
@@ -151,7 +155,6 @@ class dfcc_libraryt
 public:
   dfcc_libraryt(
     goto_modelt &goto_model,
-    dfcc_utilst &utils,
     message_handlert &lmessage_handler);
 
 protected:
@@ -169,7 +172,6 @@ protected:
   static bool malloc_free_fixed;
 
   goto_modelt &goto_model;
-  dfcc_utilst &utils;
   message_handlert &message_handler;
   messaget log;
 
@@ -220,7 +222,7 @@ public:
   void load(std::set<irep_idt> &to_instrument);
 
   /// Returns the dfcc_funt that corresponds to the given id if any.
-  optionalt<dfcc_funt> get_dfcc_fun(const irep_idt &id) const;
+  std::optional<dfcc_funt> get_dfcc_fun(const irep_idt &id) const;
 
   /// Returns the name of the given dfcc_funt.
   const irep_idt &get_dfcc_fun_name(dfcc_funt fun) const;
@@ -239,12 +241,10 @@ public:
   /// __CPROVER_object_from
   /// __CPROVER_assignable
   /// __CPROVER_freeable
-  /// To make sure they cannot be used in a proof unexpectedly
-  /// without causing verification errors.
+  /// An error will be triggered in case calls to these functions occur outside
+  /// of a contrat clause and were hence not mapped to their library
+  /// implementation.
   void inhibit_front_end_builtins();
-
-  /// Sets the given hide flag on all instructions of all library functions
-  void set_hide(bool hide);
 
   /// Adds "checked" pragmas to instructions of all library functions
   /// instructions. By default checks are not disabled.
@@ -263,7 +263,7 @@ public:
   /// Returns the library instrumentation hook for the given built-in.
   /// function_id must be one of `__CPROVER_assignable`,
   /// `__CPROVER_object_whole`, `__CPROVER_object_from`, `__CPROVER_object_upto`
-  optionalt<dfcc_funt> get_havoc_hook(const irep_idt &function_id) const;
+  std::optional<dfcc_funt> get_havoc_hook(const irep_idt &function_id) const;
 
   /// \brief Returns the "__dfcc_instrumented_functions" symbol or creates it if
   /// it does not exist already.
@@ -280,6 +280,175 @@ public:
     const std::set<irep_idt> &instrumented_functions,
     const source_locationt &source_location,
     goto_programt &dest);
+
+  /// \brief Builds call to \ref __CPROVER_contracts_write_set_create
+  const code_function_callt write_set_create_call(
+    const exprt &write_set_ptr,
+    const exprt &contract_assigns_size,
+    const exprt &contract_frees_size,
+    const exprt &assume_requires_ctx,
+    const exprt &assert_requires_ctx,
+    const exprt &assume_ensures_ctx,
+    const exprt &assert_ensures_ctx,
+    const exprt &allow_allocate,
+    const exprt &allow_deallocate,
+    const source_locationt &source_location);
+
+  /// \brief Builds call to \ref __CPROVER_contracts_write_set_create
+  const code_function_callt write_set_create_call(
+    const exprt &write_set_ptr,
+    const exprt &contract_assigns_size,
+    const source_locationt &source_location);
+
+  /// \brief Builds call to \ref __CPROVER_contracts_write_set_release
+  const code_function_callt write_set_release_call(
+    const exprt &write_set_ptr,
+    const source_locationt &source_location);
+
+  /// \brief Builds call to \ref __CPROVER_contracts_write_set_add_allocated
+  const code_function_callt write_set_add_allocated_call(
+    const exprt &write_set_ptr,
+    const exprt &ptr,
+    const source_locationt &source_location);
+
+  /// \brief Builds call to \ref __CPROVER_contracts_write_set_add_decl
+  const code_function_callt write_set_add_decl_call(
+    const exprt &write_set_ptr,
+    const exprt &ptr,
+    const source_locationt &source_location);
+
+  /// \brief Builds call to \ref __CPROVER_contracts_write_set_record_dead
+  const code_function_callt write_set_record_dead_call(
+    const exprt &write_set_ptr,
+    const exprt &ptr,
+    const source_locationt &source_location);
+
+  /// \brief Builds call to
+  /// \ref __CPROVER_contracts_write_set_record_deallocated
+  const code_function_callt write_set_record_deallocated_call(
+    const exprt &write_set_ptr,
+    const exprt &ptr,
+    const source_locationt &source_location);
+
+  /// \brief Builds call to
+  /// \ref __CPROVER_contracts_write_set_check_allocated_deallocated_is_empty
+  const code_function_callt write_set_check_allocated_deallocated_is_empty_call(
+    const exprt &check_var,
+    const exprt &write_set_ptr,
+    const source_locationt &source_location);
+
+  /// \brief Builds call to
+  /// \ref __CPROVER_contracts_write_set_check_assignment
+  const code_function_callt write_set_check_assignment_call(
+    const exprt &check_var,
+    const exprt &write_set_ptr,
+    const exprt &ptr,
+    const exprt &size,
+    const source_locationt &source_location);
+
+  /// \brief Builds call to
+  /// \ref __CPROVER_contracts_write_set_check_array_set
+  const code_function_callt write_set_check_array_set_call(
+    const exprt &check_var,
+    const exprt &write_set_ptr,
+    const exprt &dest,
+    const source_locationt &source_location);
+
+  /// \brief Builds call to
+  /// \ref __CPROVER_contracts_write_set_check_array_copy
+  const code_function_callt write_set_check_array_copy_call(
+    const exprt &check_var,
+    const exprt &write_set_ptr,
+    const exprt &dest,
+    const source_locationt &source_location);
+
+  /// \brief Builds call to
+  /// \ref __CPROVER_contracts_write_set_check_array_replace
+  const code_function_callt write_set_check_array_replace_call(
+    const exprt &check_var,
+    const exprt &write_set_ptr,
+    const exprt &dest,
+    const exprt &src,
+    const source_locationt &source_location);
+
+  /// \brief Builds call to
+  /// \ref __CPROVER_contracts_write_set_check_havoc_object
+  const code_function_callt write_set_check_havoc_object_call(
+    const exprt &check_var,
+    const exprt &write_set_ptr,
+    const exprt &ptr,
+    const source_locationt &source_location);
+
+  /// \brief Builds call to
+  /// \ref __CPROVER_contracts_write_set_check_deallocate
+  const code_function_callt write_set_check_deallocate_call(
+    const exprt &check_var,
+    const exprt &write_set_ptr,
+    const exprt &ptr,
+    const source_locationt &source_location);
+
+  /// \brief Builds call to
+  /// \ref __CPROVER_contracts_write_set_check_assigns_clause_inclusion
+  const code_function_callt write_set_check_assigns_clause_inclusion_call(
+    const exprt &check_var,
+    const exprt &reference_write_set_ptr,
+    const exprt &candidate_write_set_ptr,
+    const source_locationt &source_location);
+
+  /// \brief Builds call to
+  /// \ref __CPROVER_contracts_write_set_check_frees_clause_inclusion
+  const code_function_callt write_set_check_frees_clause_inclusion_call(
+    const exprt &check_var,
+    const exprt &reference_write_set_ptr,
+    const exprt &candidate_write_set_ptr,
+    const source_locationt &source_location);
+
+  /// \brief Builds call to
+  /// \ref __CPROVER_contracts_write_set_deallocate_freeable
+  const code_function_callt write_set_deallocate_freeable_call(
+    const exprt &write_set_ptr,
+    const exprt &target_write_set_ptr,
+    const source_locationt &source_location);
+
+  /// \brief Builds call to
+  /// \ref __CPROVER_contracts_link_is_fresh
+  const code_function_callt link_is_fresh_call(
+    const exprt &write_set_ptr,
+    const exprt &is_fresh_obj_set_ptr,
+    const source_locationt &source_location);
+
+  /// \brief Builds call to
+  /// \ref __CPROVER_contracts_link_allocated
+  const code_function_callt link_allocated_call(
+    const exprt &write_set_postconditions_ptr,
+    const exprt &write_set_to_link_ptr,
+    const source_locationt &source_location);
+
+  /// \brief Builds call to
+  /// \ref __CPROVER_contracts_link_deallocated
+  const code_function_callt link_deallocated_call(
+    const exprt &write_set_postconditions_ptr,
+    const exprt &write_set_to_link_ptr,
+    const source_locationt &source_location);
+
+  /// \brief Builds call to
+  /// \ref __CPROVER_contracts_check_replace_ensures_was_freed_preconditions
+  const code_function_callt check_replace_ensures_was_freed_preconditions_call(
+    const exprt &ptr,
+    const exprt &write_set_ptr,
+    const source_locationt &source_location);
+
+  /// \brief Builds call to
+  /// \ref __CPROVER_contracts_obj_set_create_indexed_by_object_id
+  const code_function_callt obj_set_create_indexed_by_object_id_call(
+    const exprt &obj_set_ptr,
+    const source_locationt &source_location);
+
+  /// \brief Builds call to
+  /// \ref __CPROVER_contracts_obj_set_release
+  const code_function_callt obj_set_release_call(
+    const exprt &obj_set_ptr,
+    const source_locationt &source_location);
 };
 
 #endif

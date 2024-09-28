@@ -16,19 +16,17 @@ Author: Remi Delmas, delmarsd@amazon.com
 #include <util/mathematical_expr.h>
 #include <util/mathematical_types.h>
 #include <util/namespace.h>
-#include <util/optional.h>
 #include <util/pointer_expr.h>
 #include <util/pointer_offset_size.h>
 #include <util/pointer_predicates.h>
 #include <util/prefix.h>
 #include <util/std_expr.h>
+#include <util/string_utils.h>
 
-#include <goto-programs/goto_convert_functions.h>
 #include <goto-programs/goto_functions.h>
 #include <goto-programs/goto_inline.h>
 #include <goto-programs/goto_model.h>
 #include <goto-programs/initialize_goto_model.h>
-#include <goto-programs/link_to_library.h>
 #include <goto-programs/remove_skip.h>
 #include <goto-programs/remove_unused_functions.h>
 
@@ -36,8 +34,9 @@ Author: Remi Delmas, delmarsd@amazon.com
 #include <ansi-c/c_expr.h>
 #include <ansi-c/c_object_factory_parameters.h>
 #include <ansi-c/cprover_library.h>
+#include <ansi-c/goto-conversion/goto_convert_functions.h>
+#include <ansi-c/goto-conversion/link_to_library.h>
 #include <goto-instrument/contracts/cfg_info.h>
-#include <goto-instrument/contracts/instrument_spec_assigns.h>
 #include <goto-instrument/contracts/utils.h>
 #include <goto-instrument/nondet_static.h>
 #include <langapi/language.h>
@@ -45,67 +44,108 @@ Author: Remi Delmas, delmarsd@amazon.com
 #include <langapi/mode.h>
 #include <linking/static_lifetime_init.h>
 
-void dfcc(
-  const optionst &options,
-  goto_modelt &goto_model,
-  const irep_idt &harness_id,
-  const optionalt<irep_idt> &to_check,
-  const bool allow_recursive_calls,
-  const std::set<irep_idt> &to_replace,
-  const bool apply_loop_contracts,
-  const std::set<std::string> &to_exclude_from_nondet_static,
-  message_handlert &message_handler)
-{
-  std::map<irep_idt, irep_idt> to_replace_map;
-  for(const auto &function_id : to_replace)
-    to_replace_map.insert({function_id, function_id});
+#include "dfcc_lift_memory_predicates.h"
 
-  dfcc(
-    options,
-    goto_model,
-    harness_id,
-    to_check.has_value()
-      ? optionalt<std::pair<irep_idt, irep_idt>>(
-          std::pair<irep_idt, irep_idt>(to_check.value(), to_check.value()))
-      : optionalt<std::pair<irep_idt, irep_idt>>{},
-    allow_recursive_calls,
-    to_replace_map,
-    apply_loop_contracts,
-    to_exclude_from_nondet_static,
-    message_handler);
+invalid_function_contract_pair_exceptiont::
+  invalid_function_contract_pair_exceptiont(
+    std::string reason,
+    std::string correct_format)
+  : cprover_exception_baset(std::move(reason)),
+    correct_format(std::move(correct_format))
+{
+}
+
+std::string invalid_function_contract_pair_exceptiont::what() const
+{
+  std::string res;
+
+  res += "Invalid function-contract mapping";
+  res += "\nReason: " + reason;
+
+  if(!correct_format.empty())
+  {
+    res += "\nFormat: " + correct_format;
+  }
+
+  return res;
+}
+
+static std::pair<irep_idt, irep_idt>
+parse_function_contract_pair(const irep_idt &cli_flag)
+{
+  auto const correct_format_message =
+    "the format for function and contract pairs is "
+    "`<function_name>[/<contract_name>]`";
+
+  std::string cli_flag_str = id2string(cli_flag);
+
+  auto split = split_string(cli_flag_str, '/', true, false);
+
+  if(split.size() == 1)
+  {
+    return std::make_pair(cli_flag, cli_flag);
+  }
+  else if(split.size() == 2)
+  {
+    auto function_name = split[0];
+    if(function_name.empty())
+    {
+      throw invalid_function_contract_pair_exceptiont{
+        "couldn't find function name before '/' in '" + cli_flag_str + "'",
+        correct_format_message};
+    }
+    auto contract_name = split[1];
+    if(contract_name.empty())
+    {
+      throw invalid_function_contract_pair_exceptiont{
+        "couldn't find contract name after '/' in '" + cli_flag_str + "'",
+        correct_format_message};
+    }
+    return std::make_pair(function_name, contract_name);
+  }
+  else
+  {
+    throw invalid_function_contract_pair_exceptiont{
+      "couldn't parse '" + cli_flag_str + "'", correct_format_message};
+  }
 }
 
 void dfcc(
   const optionst &options,
   goto_modelt &goto_model,
   const irep_idt &harness_id,
-  const optionalt<std::pair<irep_idt, irep_idt>> &to_check,
+  const std::optional<irep_idt> &to_check,
   const bool allow_recursive_calls,
-  const std::map<irep_idt, irep_idt> &to_replace,
-  const bool apply_loop_contracts,
+  const std::set<irep_idt> &to_replace,
+  const loop_contract_configt loop_contract_config,
   const std::set<std::string> &to_exclude_from_nondet_static,
   message_handlert &message_handler)
 {
-  dfcct{
+  std::map<irep_idt, irep_idt> to_replace_map;
+  for(const auto &cli_flag : to_replace)
+    to_replace_map.insert(parse_function_contract_pair(cli_flag));
+
+  dfcct(
     options,
     goto_model,
     harness_id,
-    to_check,
+    to_check.has_value() ? parse_function_contract_pair(to_check.value())
+                         : std::optional<std::pair<irep_idt, irep_idt>>{},
     allow_recursive_calls,
-    to_replace,
-    apply_loop_contracts,
+    to_replace_map,
+    loop_contract_config,
     message_handler,
-    to_exclude_from_nondet_static};
+    to_exclude_from_nondet_static);
 }
 
 dfcct::dfcct(
   const optionst &options,
   goto_modelt &goto_model,
   const irep_idt &harness_id,
-  const optionalt<std::pair<irep_idt, irep_idt>> &to_check,
+  const std::optional<std::pair<irep_idt, irep_idt>> &to_check,
   const bool allow_recursive_calls,
   const std::map<irep_idt, irep_idt> &to_replace,
-  const bool apply_loop_contracts,
+  const loop_contract_configt loop_contract_config,
   message_handlert &message_handler,
   const std::set<std::string> &to_exclude_from_nondet_static)
   : options(options),
@@ -114,26 +154,32 @@ dfcct::dfcct(
     to_check(to_check),
     allow_recursive_calls(allow_recursive_calls),
     to_replace(to_replace),
-    apply_loop_contracts(apply_loop_contracts),
+    loop_contract_config(loop_contract_config),
     to_exclude_from_nondet_static(to_exclude_from_nondet_static),
     message_handler(message_handler),
     log(message_handler),
-    utils(goto_model, message_handler),
-    library(goto_model, utils, message_handler),
+    library(goto_model, message_handler),
     ns(goto_model.symbol_table),
-    instrument(goto_model, message_handler, utils, library),
-    spec_functions(goto_model, message_handler, utils, library, instrument),
+    spec_functions(goto_model, message_handler, library),
+    contract_clauses_codegen(goto_model, message_handler, library),
+    instrument(
+      goto_model,
+      message_handler,
+      library,
+      spec_functions,
+      contract_clauses_codegen),
+    memory_predicates(goto_model, library, instrument, message_handler),
     contract_handler(
       goto_model,
       message_handler,
-      utils,
       library,
       instrument,
-      spec_functions),
+      memory_predicates,
+      spec_functions,
+      contract_clauses_codegen),
     swap_and_wrap(
       goto_model,
       message_handler,
-      utils,
       library,
       instrument,
       spec_functions,
@@ -147,7 +193,7 @@ void dfcct::check_transform_goto_model_preconditions()
 {
   // check that harness function exists
   PRECONDITION_WITH_DIAGNOSTICS(
-    utils.function_symbol_with_body_exists(harness_id),
+    dfcc_utilst::function_symbol_with_body_exists(goto_model, harness_id),
     "Harness function '" + id2string(harness_id) +
       "' either not found or has no body");
 
@@ -155,12 +201,12 @@ void dfcct::check_transform_goto_model_preconditions()
   {
     auto pair = to_check.value();
     PRECONDITION_WITH_DIAGNOSTICS(
-      utils.function_symbol_with_body_exists(pair.first),
+      dfcc_utilst::function_symbol_with_body_exists(goto_model, pair.first),
       "Function to check '" + id2string(pair.first) +
         "' either not found or has no body");
 
     // triggers signature compatibility checking
-    contract_handler.get_pure_contract_symbol(pair.second);
+    contract_handler.get_pure_contract_symbol(pair.second, pair.first);
 
     PRECONDITION_WITH_DIAGNOSTICS(
       pair.first != harness_id,
@@ -188,11 +234,11 @@ void dfcct::check_transform_goto_model_preconditions()
     // for functions to replace with contracts we don't require the replaced
     // function to have a body because only the contract is actually used
     PRECONDITION_WITH_DIAGNOSTICS(
-      utils.function_symbol_exists(pair.first),
+      dfcc_utilst::function_symbol_exists(goto_model, pair.first),
       "Function to replace '" + id2string(pair.first) + "' not found");
 
     // triggers signature compatibility checking
-    contract_handler.get_pure_contract_symbol(pair.second);
+    contract_handler.get_pure_contract_symbol(pair.second, pair.first);
 
     PRECONDITION_WITH_DIAGNOSTICS(
       pair.first != harness_id,
@@ -217,7 +263,7 @@ void dfcct::partition_function_symbols(
     const symbolt &symbol = entry.second;
 
     // not a function symbol
-    if(symbol.type.id() != ID_code)
+    if(symbol.type.id() != ID_code || symbol.is_macro)
       continue;
 
     // is it a pure contract ?
@@ -264,9 +310,21 @@ void dfcct::instrument_harness_function()
                << messaget::eom;
 
   instrument.instrument_harness_function(
-    harness_id, function_pointer_contracts);
+    harness_id, loop_contract_config, function_pointer_contracts);
 
   other_symbols.erase(harness_id);
+}
+
+void dfcct::lift_memory_predicates()
+{
+  std::set<irep_idt> predicates =
+    memory_predicates.lift_predicates(function_pointer_contracts);
+  for(const auto &predicate : predicates)
+  {
+    log.debug() << "Memory predicate" << predicate << messaget::eom;
+    if(other_symbols.find(predicate) != other_symbols.end())
+      other_symbols.erase(predicate);
+  }
 }
 
 void dfcct::wrap_checked_function()
@@ -281,6 +339,7 @@ void dfcct::wrap_checked_function()
                  << contract_id << "' in CHECK mode" << messaget::eom;
 
     swap_and_wrap.swap_and_wrap_check(
+      loop_contract_config,
       wrapper_id,
       contract_id,
       function_pointer_contracts,
@@ -289,7 +348,7 @@ void dfcct::wrap_checked_function()
     if(other_symbols.find(wrapper_id) != other_symbols.end())
       other_symbols.erase(wrapper_id);
 
-    // upate max contract size
+    // update max contract size
     const std::size_t assigns_clause_size =
       contract_handler.get_assigns_clause_size(contract_id);
     if(assigns_clause_size > max_assigns_clause_size)
@@ -361,7 +420,7 @@ void dfcct::wrap_discovered_function_pointer_contracts()
       {
         // we need to swap it with itself
         PRECONDITION_WITH_DIAGNOSTICS(
-          utils.function_symbol_exists(str),
+          dfcc_utilst::function_symbol_exists(goto_model, str),
           "Function pointer contract '" + str + "' not found.");
 
         // triggers signature compatibility checking
@@ -397,32 +456,51 @@ void dfcct::instrument_other_functions()
 
     log.status() << "Instrumenting '" << function_id << "'" << messaget::eom;
 
-    instrument.instrument_function(function_id, function_pointer_contracts);
+    instrument.instrument_function(
+      function_id, loop_contract_config, function_pointer_contracts);
   }
 
   goto_model.goto_functions.update();
-
-  if(to_check.has_value())
-  {
-    log.status() << "Specializing cprover_contracts functions for assigns "
-                    "clauses of at most "
-                 << max_assigns_clause_size << " targets" << messaget::eom;
-    library.specialize(max_assigns_clause_size);
-  }
 }
 
 void dfcct::transform_goto_model()
 {
   check_transform_goto_model_preconditions();
   link_model_and_load_dfcc_library();
+  lift_memory_predicates();
   instrument_harness_function();
   wrap_checked_function();
   wrap_replaced_functions();
   wrap_discovered_function_pointer_contracts();
   instrument_other_functions();
+
+  // take the max of function of loop contracts assigns clauses
+  auto assigns_clause_size = instrument.get_max_assigns_clause_size();
+  if(assigns_clause_size > max_assigns_clause_size)
+    max_assigns_clause_size = assigns_clause_size;
+
+  log.status() << "Specializing cprover_contracts functions for assigns "
+                  "clauses of at most "
+               << max_assigns_clause_size << " targets" << messaget::eom;
+  library.specialize(max_assigns_clause_size);
+
   library.inhibit_front_end_builtins();
 
-  // TODO implement and use utils.inhibit_unreachable_functions(harness);
+  // TODO implement a means to inhibit unreachable functions (possibly via the
+  // code that implements drop-unused-functions followed by
+  // generate-function-bodies):
+  // Traverse the call tree from the given entry point to identify
+  // functions symbols that are effectively called in the model,
+  // Then goes over all functions of the model and turns the bodies of all
+  // functions that are not in the used function set into:
+  //  ```c
+  //  assert(false, "function identified as unreachable");
+  //  assume(false);
+  //  ```
+  // That way, if the analysis mistakenly pruned some functions, assertions
+  // will be violated and the analysis will fail.
+  // TODO: add a command line flag to tell the instrumentation to not prune
+  // a function.
   goto_model.goto_functions.update();
 
   remove_skip(goto_model);
@@ -448,8 +526,8 @@ void dfcct::reinitialize_model()
   swap_and_wrap.get_swapped_functions(instrumented_functions);
 
   log.status() << "Updating init function" << messaget::eom;
-  utils.create_initialize_function();
-  goto_model.goto_functions.update();
+  if(goto_model.can_produce_function(INITIALIZE_FUNCTION))
+    recreate_initialize_function(goto_model, message_handler);
   nondet_static(goto_model, to_exclude_from_nondet_static);
 
   // Initialize the map of instrumented functions by adding extra instructions
@@ -469,7 +547,7 @@ void dfcct::reinitialize_model()
     goto_model.symbol_table.symbols.find(goto_functionst::entry_point()));
   // regenerate the CPROVER start function
   generate_ansi_c_start_function(
-    utils.get_function_symbol(harness_id),
+    dfcc_utilst::get_function_symbol(goto_model.symbol_table, harness_id),
     goto_model.symbol_table,
     message_handler,
     c_object_factory_parameterst(options));

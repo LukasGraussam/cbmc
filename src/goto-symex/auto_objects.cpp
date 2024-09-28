@@ -9,38 +9,39 @@ Author: Daniel Kroening, kroening@kroening.com
 /// \file
 /// Symbolic Execution of ANSI-C
 
-#include "goto_symex.h"
-
+#include <util/fresh_symbol.h>
 #include <util/pointer_expr.h>
-#include <util/prefix.h>
 #include <util/std_code.h>
 #include <util/std_expr.h>
 
+#include "goto_symex.h"
+
 exprt goto_symext::make_auto_object(const typet &type, statet &state)
 {
-  dynamic_counter++;
-
   // produce auto-object symbol
-  symbolt symbol;
+  symbolt &symbol = get_fresh_aux_symbol(
+    type,
+    "symex",
+    "auto_object",
+    state.source.pc->source_location(),
+    ID_C,
+    state.symbol_table);
+  symbol.is_thread_local = false;
+  symbol.is_file_local = false;
 
-  symbol.base_name="auto_object"+std::to_string(dynamic_counter);
-  symbol.name="symex::"+id2string(symbol.base_name);
-  symbol.is_lvalue=true;
-  symbol.type=type;
-  symbol.mode=ID_C;
-
-  state.symbol_table.add(symbol);
-
-  return symbol_exprt(symbol.name, symbol.type);
+  return symbol.symbol_expr();
 }
 
 void goto_symext::initialize_auto_object(const exprt &expr, statet &state)
 {
-  const typet &type=ns.follow(expr.type());
+  DATA_INVARIANT(
+    expr.type().id() != ID_struct,
+    "no L2-renamed expression expected, all struct-like types should be tags");
 
-  if(type.id()==ID_struct)
+  if(
+    auto struct_tag_type = type_try_dynamic_cast<struct_tag_typet>(expr.type()))
   {
-    const struct_typet &struct_type=to_struct_type(type);
+    const struct_typet &struct_type = ns.follow_tag(*struct_tag_type);
 
     for(const auto &comp : struct_type.components())
     {
@@ -49,10 +50,9 @@ void goto_symext::initialize_auto_object(const exprt &expr, statet &state)
       initialize_auto_object(member_expr, state);
     }
   }
-  else if(type.id()==ID_pointer)
+  else if(auto pointer_type = type_try_dynamic_cast<pointer_typet>(expr.type()))
   {
-    const pointer_typet &pointer_type=to_pointer_type(type);
-    const typet &base_type = pointer_type.base_type();
+    const typet &base_type = pointer_type->base_type();
 
     // we don't like function pointers and
     // we don't like void *
@@ -61,11 +61,11 @@ void goto_symext::initialize_auto_object(const exprt &expr, statet &state)
       // could be NULL nondeterministically
 
       address_of_exprt address_of_expr(
-        make_auto_object(base_type, state), pointer_type);
+        make_auto_object(base_type, state), *pointer_type);
 
       if_exprt rhs(
         side_effect_expr_nondett(bool_typet(), expr.source_location()),
-        null_pointer_exprt(pointer_type),
+        null_pointer_exprt(*pointer_type),
         address_of_expr);
 
       symex_assign(state, expr, rhs);
@@ -85,7 +85,7 @@ void goto_symext::trigger_auto_object(const exprt &expr, statet &state)
       {
         const symbolt &symbol = ns.lookup(obj_identifier);
 
-        if(has_prefix(id2string(symbol.base_name), "auto_object"))
+        if(symbol.base_name.starts_with("symex::auto_object"))
         {
           // done already?
           if(!state.get_level2().current_names.has_key(

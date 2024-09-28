@@ -192,7 +192,10 @@ Enable memory cleanup checks: assert that all dynamically allocated memory is
 explicitly freed before terminating the program.
 .TP
 \fB\-\-div\-by\-zero\-check\fR
-enable division by zero checks
+enable division by zero checks for integer division
+.TP
+\fB\-\-float\-div\-by\-zero\-check\fR
+enable division by zero checks for floating-point division
 .TP
 \fB\-\-signed\-overflow\-check\fR
 enable signed arithmetic over\- and underflow checks
@@ -346,7 +349,7 @@ void \fBtest_get_message\fP() {
 
 The harness verifies that \fIget_message\fR assigns non-decreasing time stamps
 to the returned messages. However, simply treating \fIclock\fR as
-non-deterministic would not allow to prove this property. Thus, we can supply a
+non-deterministic would not suffice to prove this property. Thus, we can supply a
 model for reads from \fIclock\fR:
 
 .EX
@@ -391,6 +394,10 @@ add nondeterministic initialization of variables with static lifetime
 \fB\-\-nondet\-static\-exclude\fR \fIe\fR
 same as nondet\-static except for the variable \fIe\fR
 (use multiple times if required)
+.TP
+\fB\-\-nondet\-static\-matching\fR \fIr\fR
+add nondeterministic initialization of variables
+with static lifetime matching regex \fIr\fR
 .TP
 \fB\-\-function\-enter\fR \fIf\fR
 .TQ
@@ -693,6 +700,9 @@ set malloc failure mode to assert\-then\-assume
 \fB\-\-malloc\-fail\-null\fR
 set malloc failure mode to return null
 .TP
+\fB\-\-no\-malloc\-may\-fail\fR
+do not allow malloc calls to fail by default
+.TP
 \fB\-\-string\-abstraction\fR
 track C string lengths and zero\-termination
 .TP
@@ -839,7 +849,7 @@ empty the function pointer is removed using the standard
 show the loops in the program
 .TP
 \fB\-\-unwind\fR \fInr\fR
-unwind nr times
+unwind all loops \fInr\fR times
 .TP
 \fB\-\-unwindset\fR [\fIT\fR:]\fIL\fR:\fIB\fR,...
 unwind loop \fIL\fR with a bound of \fIB\fR
@@ -850,10 +860,16 @@ unwind loop \fIL\fR with a bound of \fIB\fR
 read unwindset from file
 .TP
 \fB\-\-partial\-loops\fR
-permit paths with partial loops
+permit paths that execute loops only partially (up to the given unwinding bound)
+and then continue beyond the loop even when the loop condition would still hold
+(such paths may be spurious, resulting in false alarms)
+.TP
+\fB\-\-no\-unwinding\-assertions\fR
+do not generate unwinding assertions
 .TP
 \fB\-\-unwinding\-assertions\fR
-generate unwinding assertions
+generate unwinding assertions (which are enabled by default; overrides
+\fB\-\-no\-unwinding\-assertions\fR when both of these are given)
 .TP
 \fB\-\-continue\-as\-loops\fR
 add loop for remaining iterations after unwound part
@@ -968,6 +984,10 @@ list \fIf\fR.
 remove instructions that cannot appear on a trace
 from entry point to a property
 .TP
+\fB\-\-reachability\-slice\-fb\fR
+remove instructions that cannot appear on a trace
+from entry point through a property
+.TP
 \fB\-\-full\-slice\fR
 slice away instructions that don't affect assertions
 .TP
@@ -997,10 +1017,19 @@ force aggressive slicer to preserve all direct paths
 .SS "Code contracts:"
 .TP
 \fB\-\-apply\-loop\-contracts\fR
-check and use loop contracts when provided
 .TP
-\fB\-\-synthesize\-loop\-invariants\fR
-synthesize and apply loop invariants
+\fB\-disable\-loop\-contracts\-side\-effect\-check\fR
+UNSOUND OPTION. Disable checking the absence of side effects in loop
+contract clauses. In absence of such checking, loop contracts clauses will
+accept more expressions, such as pure functions and statement expressions.
+But user have to make sure the loop contracts are side-effect free by them self
+to get a sound result.
+.TP
+\fB\-loop\-contracts\-no\-unwind\fR
+do not unwind transformed loops
+.TP
+\fB\-loop\-contracts\-file\fR \fIfile\fR
+annotate loop contracts from the file to the goto program
 .TP
 \fB\-\-replace\-call\-with\-contract\fR \fIfun\fR
 replace calls to \fIfun\fR with \fIfun\fR's contract

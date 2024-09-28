@@ -274,12 +274,10 @@ public:
   {
   }
 
-#ifndef USE_STD_STRING
   explicit json_stringt(const irep_idt &_value)
     : jsont(kindt::J_STRING, id2string(_value))
   {
   }
-#endif
 
   /// Constructon from string literal.
   explicit json_stringt(const char *_value) : jsont(kindt::J_STRING, _value)

@@ -13,8 +13,6 @@ Author: Daniel Kroening, kroening@kroening.com
 typedef __typeof__(sizeof(int)) __CPROVER_size_t;
 void *__CPROVER_allocate(__CPROVER_size_t size, __CPROVER_bool zero);
 extern const void *__CPROVER_deallocated;
-extern const void *__CPROVER_new_object;
-extern __CPROVER_bool __CPROVER_malloc_is_new_array;
 extern const void *__CPROVER_memory_leak;
 
 void __CPROVER_assume(__CPROVER_bool assumption) __attribute__((__noreturn__));
@@ -30,8 +28,8 @@ void __CPROVER_observation_begin(); // LUGR: for wcnf option (fault localization
 void __CPROVER_observation_end(); // LUGR: for wcnf option (fault localization)
 
 // concurrency-related
-void __CPROVER_atomic_begin();
-void __CPROVER_atomic_end();
+void __CPROVER_atomic_begin(void);
+void __CPROVER_atomic_end(void);
 void __CPROVER_fence(const char *kind, ...);
 
 // pointers

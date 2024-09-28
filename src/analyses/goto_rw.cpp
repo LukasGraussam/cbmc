@@ -15,7 +15,6 @@ Date: April 2010
 #include <util/byte_operators.h>
 #include <util/endianness_map.h>
 #include <util/expr_util.h>
-#include <util/make_unique.h>
 #include <util/namespace.h>
 #include <util/pointer_expr.h>
 #include <util/pointer_offset_size.h>
@@ -251,7 +250,9 @@ void rw_range_sett::get_objects_member(
     return;
   }
 
-  const struct_typet &struct_type = to_struct_type(ns.follow(type));
+  const struct_typet &struct_type = type.id() == ID_struct
+                                      ? to_struct_type(type)
+                                      : ns.follow_tag(to_struct_tag_type(type));
 
   auto offset_bits =
     member_offset_bits(struct_type, expr.get_component_name(), ns);
@@ -330,8 +331,8 @@ void rw_range_sett::get_objects_array(
 
   if(!subtype_bits.has_value())
   {
-    forall_operands(it, expr)
-      get_objects_rec(mode, *it, range_spect{0}, range_spect::unknown());
+    for(const auto &op : expr.operands())
+      get_objects_rec(mode, op, range_spect{0}, range_spect::unknown());
 
     return;
   }
@@ -346,7 +347,7 @@ void rw_range_sett::get_objects_array(
       ? sub_size * range_spect::to_range_spect(expr.operands().size())
       : full_r_s + size;
 
-  forall_operands(it, expr)
+  for(const auto &op : expr.operands())
   {
     if(full_r_s<=offset+sub_size && full_r_e>offset)
     {
@@ -355,7 +356,7 @@ void rw_range_sett::get_objects_array(
       range_spect cur_r_e=
         full_r_e>offset+sub_size ? sub_size : full_r_e-offset;
 
-      get_objects_rec(mode, *it, cur_r_s, cur_r_e-cur_r_s);
+      get_objects_rec(mode, op, cur_r_s, cur_r_e - cur_r_s);
     }
 
     offset+=sub_size;
@@ -368,8 +369,10 @@ void rw_range_sett::get_objects_struct(
   const range_spect &range_start,
   const range_spect &size)
 {
-  const struct_typet &struct_type=
-    to_struct_type(ns.follow(expr.type()));
+  const struct_typet &struct_type =
+    expr.type().id() == ID_struct
+      ? to_struct_type(expr.type())
+      : ns.follow_tag(to_struct_tag_type(expr.type()));
 
   auto struct_bits = pointer_offset_bits(struct_type, ns);
 
@@ -384,9 +387,9 @@ void rw_range_sett::get_objects_struct(
                            ? range_spect::unknown()
                            : full_r_s + size;
 
-  forall_operands(it, expr)
+  for(const auto &op : expr.operands())
   {
-    auto it_bits = pointer_offset_bits(it->type(), ns);
+    auto it_bits = pointer_offset_bits(op.type(), ns);
 
     range_spect sub_size = it_bits.has_value()
                              ? range_spect::to_range_spect(*it_bits)
@@ -394,7 +397,7 @@ void rw_range_sett::get_objects_struct(
 
     if(offset.is_unknown())
     {
-      get_objects_rec(mode, *it, range_spect{0}, sub_size);
+      get_objects_rec(mode, op, range_spect{0}, sub_size);
     }
     else if(sub_size.is_unknown())
     {
@@ -403,7 +406,7 @@ void rw_range_sett::get_objects_struct(
         range_spect cur_r_s =
           full_r_s <= offset ? range_spect{0} : full_r_s - offset;
 
-        get_objects_rec(mode, *it, cur_r_s, range_spect::unknown());
+        get_objects_rec(mode, op, cur_r_s, range_spect::unknown());
       }
 
       offset = range_spect::unknown();
@@ -415,7 +418,7 @@ void rw_range_sett::get_objects_struct(
         range_spect cur_r_s =
           full_r_s <= offset ? range_spect{0} : full_r_s - offset;
 
-        get_objects_rec(mode, *it, cur_r_s, sub_size-cur_r_s);
+        get_objects_rec(mode, op, cur_r_s, sub_size - cur_r_s);
       }
 
       offset+=sub_size;
@@ -427,7 +430,7 @@ void rw_range_sett::get_objects_struct(
       range_spect cur_r_e=
         full_r_e>offset+sub_size ? sub_size : full_r_e-offset;
 
-      get_objects_rec(mode, *it, cur_r_s, cur_r_e-cur_r_s);
+      get_objects_rec(mode, op, cur_r_s, cur_r_e - cur_r_s);
 
       offset+=sub_size;
     }
@@ -528,7 +531,7 @@ void rw_range_sett::add(
        .first;
 
   if(entry->second==nullptr)
-    entry->second=util_make_unique<range_domaint>();
+    entry->second = std::make_unique<range_domaint>();
 
   static_cast<range_domaint&>(*entry->second).push_back(
     {range_start, range_end});
@@ -619,8 +622,8 @@ void rw_range_sett::get_objects_rec(
     // possibly affects the full object size, even if range_start/size
     // are only a subset of the bytes (e.g., when using the result of
     // arithmetic operations)
-    forall_operands(it, expr)
-      get_objects_rec(mode, *it);
+    for(const auto &op : expr.operands())
+      get_objects_rec(mode, op);
   }
   else if(expr.id() == ID_null_object ||
           expr.id() == ID_string_constant)
@@ -629,8 +632,8 @@ void rw_range_sett::get_objects_rec(
   }
   else if(mode==get_modet::LHS_W)
   {
-    forall_operands(it, expr)
-      get_objects_rec(mode, *it);
+    for(const auto &op : expr.operands())
+      get_objects_rec(mode, op);
   }
   else
     throw "rw_range_sett: assignment to '" + expr.id_string() + "' not handled";
@@ -683,7 +686,7 @@ void rw_range_set_value_sett::get_objects_dereference(
     size);
 
   exprt object=deref;
-  dereference(function, target, object, ns, value_sets);
+  dereference(function, target, object, ns, value_sets, message_handler);
 
   auto type_bits = pointer_offset_bits(object.type(), ns);
 
@@ -766,7 +769,7 @@ void rw_guarded_range_set_value_sett::add(
       .first;
 
   if(entry->second==nullptr)
-    entry->second=util_make_unique<guarded_range_domaint>();
+    entry->second = std::make_unique<guarded_range_domaint>();
 
   static_cast<guarded_range_domaint&>(*entry->second).insert(
     {range_start, {range_end, guard.as_expr()}});

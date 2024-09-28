@@ -13,7 +13,8 @@ Author: Daniel Kroening, kroening@kroening.com
 #define CPROVER_GOTO_PROGRAMS_SHOW_PROPERTIES_H
 
 #include <util/irep.h>
-#include <util/optional.h>
+
+#include <optional>
 
 class json_arrayt;
 class namespacet;
@@ -23,13 +24,11 @@ class goto_functionst;
 class source_locationt;
 class ui_message_handlert;
 
-// clang-format off
 #define OPT_SHOW_PROPERTIES \
   "(show-properties)"
 
-#define HELP_SHOW_PROPERTIES \
-  " --show-properties            show the properties, but don't run analysis\n" // NOLINT(*)
-// clang-format on
+#define HELP_SHOW_PROPERTIES                                                   \
+  " {y--show-properties} \t show the properties, but don't run analysis\n"
 
 void show_properties(
   const goto_modelt &,
@@ -47,9 +46,8 @@ void show_properties(
 ///   the property
 /// \return optional<source_locationt> the location of the
 ///   property, if found.
-optionalt<source_locationt> find_property(
-    const irep_idt &property,
-    const goto_functionst &goto_functions);
+std::optional<source_locationt>
+find_property(const irep_idt &property, const goto_functionst &goto_functions);
 
 /// \brief Collects the properties in the goto program into a `json_arrayt`
 /// \param json_properties: JSON array to hold the properties

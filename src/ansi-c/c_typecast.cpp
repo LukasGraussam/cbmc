@@ -289,9 +289,17 @@ typet c_typecastt::follow_with_qualifiers(const typet &src_type)
   // collect qualifiers
   c_qualifierst qualifiers(src_type);
 
-  while(result_type.id() == ID_struct_tag || result_type.id() == ID_union_tag)
+  if(
+    auto struct_tag_type = type_try_dynamic_cast<struct_tag_typet>(result_type))
   {
-    const typet &followed_type = ns.follow(result_type);
+    const typet &followed_type = ns.follow_tag(*struct_tag_type);
+    result_type = followed_type;
+    qualifiers += c_qualifierst(followed_type);
+  }
+  else if(
+    auto union_tag_type = type_try_dynamic_cast<union_tag_typet>(result_type))
+  {
+    const typet &followed_type = ns.follow_tag(*union_tag_type);
     result_type = followed_type;
     qualifiers += c_qualifierst(followed_type);
   }
@@ -698,13 +706,13 @@ void c_typecastt::implicit_typecast_arithmetic(
     }
     else if(c_type1==COMPLEX)
     {
-      assert(c_type1==COMPLEX && c_type2!=COMPLEX);
+      INVARIANT(c_type2 != COMPLEX, "both types were COMPLEX");
       do_typecast(expr2, to_complex_type(type1).subtype());
       do_typecast(expr2, type1);
     }
     else
     {
-      assert(c_type1!=COMPLEX && c_type2==COMPLEX);
+      INVARIANT(c_type2 == COMPLEX, "neither type was COMPLEX");
       do_typecast(expr1, to_complex_type(type2).subtype());
       do_typecast(expr1, type2);
     }
@@ -739,6 +747,15 @@ void c_typecastt::do_typecast(exprt &expr, const typet &dest_type)
 
   if(src_type.id()==ID_array)
   {
+    // This is the promotion from an array
+    // to a pointer to the first element.
+    auto error_opt = check_address_can_be_taken(expr.type());
+    if(error_opt.has_value())
+    {
+      errors.push_back(error_opt.value());
+      return;
+    }
+
     index_exprt index(expr, from_integer(0, c_index_type()));
     expr = typecast_exprt::conditional_cast(address_of_exprt(index), dest_type);
     return;
@@ -764,4 +781,32 @@ void c_typecastt::do_typecast(exprt &expr, const typet &dest_type)
       expr = typecast_exprt(expr, dest_type);
     }
   }
+}
+
+std::optional<std::string>
+c_typecastt::check_address_can_be_taken(const typet &type)
+{
+  if(type.id() == ID_c_bit_field)
+    return std::string("cannot take address of a bit field");
+
+  if(type.id() == ID_bool)
+    return std::string("cannot take address of a proper Boolean");
+
+  if(can_cast_type<bitvector_typet>(type))
+  {
+    // The width of the bitvector must be a multiple of CHAR_BIT.
+    auto width = to_bitvector_type(type).get_width();
+    if(width % config.ansi_c.char_width != 0)
+    {
+      return std::string(
+        "bitvector must have width that is a multiple of CHAR_BIT");
+    }
+    else
+      return {};
+  }
+
+  if(type.id() == ID_array)
+    return check_address_can_be_taken(to_array_type(type).element_type());
+
+  return {}; // ok
 }

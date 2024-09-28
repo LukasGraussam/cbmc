@@ -8,6 +8,7 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include "std_expr.h"
 
+#include "config.h"
 #include "namespace.h"
 #include "pointer_expr.h"
 #include "range.h"
@@ -21,30 +22,49 @@ bool constant_exprt::value_is_zero_string() const
   return val.find_first_not_of('0')==std::string::npos;
 }
 
+bool constant_exprt::is_null_pointer() const
+{
+  if(type().id() != ID_pointer)
+    return false;
+
+  if(get_value() == ID_NULL)
+    return true;
+
+  // We used to support "0" (when NULL_is_zero), but really front-ends should
+  // resolve this and generate ID_NULL instead.
+  INVARIANT(
+    !value_is_zero_string() || !config.ansi_c.NULL_is_zero,
+    "front-end should use ID_NULL");
+  return false;
+}
+
 void constant_exprt::check(const exprt &expr, const validation_modet vm)
 {
-  DATA_CHECK(
-    vm, !expr.has_operands(), "constant expression must not have operands");
+  nullary_exprt::check(expr, vm);
+
+  const auto value = expr.get(ID_value);
 
   DATA_CHECK(
     vm,
-    !can_cast_type<bitvector_typet>(expr.type()) ||
-      !id2string(to_constant_expr(expr).get_value()).empty(),
+    !can_cast_type<bitvector_typet>(expr.type()) || !value.empty(),
     "bitvector constant must have a non-empty value");
 
   DATA_CHECK(
     vm,
     !can_cast_type<bitvector_typet>(expr.type()) ||
       can_cast_type<pointer_typet>(expr.type()) ||
-      id2string(to_constant_expr(expr).get_value())
-          .find_first_not_of("0123456789ABCDEF") == std::string::npos,
+      expr.type().id() == ID_verilog_unsignedbv ||
+      expr.type().id() == ID_verilog_signedbv ||
+      id2string(value).find_first_not_of("0123456789ABCDEF") ==
+        std::string::npos,
     "negative bitvector constant must use two's complement");
 
   DATA_CHECK(
     vm,
     !can_cast_type<bitvector_typet>(expr.type()) ||
-      to_constant_expr(expr).get_value() == ID_0 ||
-      id2string(to_constant_expr(expr).get_value())[0] != '0',
+      expr.type().id() == ID_verilog_unsignedbv ||
+      expr.type().id() == ID_verilog_signedbv || value == ID_0 ||
+      id2string(value)[0] != '0',
     "bitvector constant must not have leading zeros");
 }
 
@@ -79,8 +99,11 @@ auto component(T &struct_expr, const irep_idt &name, const namespacet &ns)
 {
   static_assert(
     std::is_base_of<struct_exprt, T>::value, "T must be a struct_exprt.");
-  const auto index =
-    to_struct_type(ns.follow(struct_expr.type())).component_number(name);
+  const struct_typet &struct_type =
+    struct_expr.type().id() == ID_struct_tag
+      ? ns.follow_tag(to_struct_tag_type(struct_expr.type()))
+      : to_struct_type(struct_expr.type());
+  const auto index = struct_type.component_number(name);
   DATA_INVARIANT(
     index < struct_expr.operands().size(),
     "component matching index should exist");
@@ -116,9 +139,11 @@ void member_exprt::validate(
 
   const auto &member_expr = to_member_expr(expr);
 
-  const typet &compound_type = ns.follow(member_expr.compound().type());
+  const typet &compound_type = member_expr.compound().type();
   const auto *struct_union_type =
-    type_try_dynamic_cast<struct_union_typet>(compound_type);
+    (compound_type.id() == ID_struct_tag || compound_type.id() == ID_union_tag)
+      ? &ns.follow_tag(to_struct_or_union_tag_type(compound_type))
+      : type_try_dynamic_cast<struct_union_typet>(compound_type);
   DATA_CHECK(
     vm,
     struct_union_type != nullptr,
@@ -164,6 +189,37 @@ void let_exprt::validate(const exprt &expr, const validation_modet vm)
       binding.first.type() == binding.second.type(),
       "let bindings must be type consistent");
   }
+}
+
+with_exprt update_exprt::make_with_expr() const
+{
+  const exprt::operandst &designators = designator();
+  PRECONDITION(!designators.empty());
+
+  with_exprt result{exprt{}, exprt{}, exprt{}};
+  exprt *dest = &result;
+
+  for(const auto &expr : designators)
+  {
+    with_exprt tmp{exprt{}, exprt{}, exprt{}};
+
+    if(expr.id() == ID_index_designator)
+    {
+      tmp.where() = to_index_designator(expr).index();
+    }
+    else if(expr.id() == ID_member_designator)
+    {
+      // irep_idt component_name=
+      //  to_member_designator(*it).get_component_name();
+    }
+    else
+      UNREACHABLE;
+
+    *dest = tmp;
+    dest = &to_with_expr(*dest).new_value();
+  }
+
+  return result;
 }
 
 exprt binding_exprt::instantiate(const operandst &values) const

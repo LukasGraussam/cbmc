@@ -14,6 +14,7 @@ Author:
 
 #include <util/message.h>
 
+#include <cstdint>
 #include <fstream>
 #include <map>
 #include <string>
@@ -74,6 +75,6 @@ private:
   void process_sections_64(uint32_t nsects, bool need_swap);
 };
 
-bool is_osx_mach_object(char hdr[8]);
+bool is_osx_mach_object(char hdr[4]);
 
 #endif // CPROVER_GOTO_PROGRAMS_OSX_FAT_READER_H

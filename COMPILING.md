@@ -1,6 +1,6 @@
 # What architecture?
 
-CPROVER now needs a C++11 compliant compiler and is known to work in the
+CPROVER now needs a C++17 compliant compiler and is known to work in the
 following environments:
 
 - Linux
@@ -16,7 +16,7 @@ The environments below have been used successfully in the
 past, but are not actively tested:
 
 - Solaris 11
-- FreeBSD 11
+- FreeBSD 13
 
 # Building using CMake
 
@@ -82,7 +82,7 @@ files.
    to generate IDE projects by supplying the `-G` flag.  Run `cmake -G` for a
    comprehensive list of supported back-ends.
 
-   As part of this step, CMake will download the back-end solver (see Section
+   As part of this step, CMake will download the back-end solvers (see Section
    "Compiling with alternative SAT solvers" in this document for configuration
    options). Should it be necessary to perform this step without network access,
    a solver can be downloaded ahead of the above `cmake` invocation as follows:
@@ -152,7 +152,7 @@ We assume that you have a Debian/Ubuntu or Red Hat-like distribution.
    ```
    dnf install gcc gcc-c++ flex bison curl patch
    ```
-   Note that you need g++ version 5.0 or newer.
+   Note that you need g++ version 7.0 or newer.
 
    On Amazon Linux and similar distributions, do as root:
    ```
@@ -246,11 +246,11 @@ Maven 3 manually.
 
 1. As root, get the necessary tools:
    ```
-   pkg install bash gmake git www/p5-libwww patch flex bison
+   pkg install bash gmake git www/p5-libwww python python3 patch flex bison cvc5 z3
    ```
    To compile JBMC, additionally install
    ```
-   pkg install openjdk8 wget maven3
+   pkg install openjdk8 wget maven
    ```
 2. As a user, get the CBMC source via
    ```
@@ -371,28 +371,40 @@ compilation flag:
 ## Compiling with alternative SAT solvers
 
 For the packaged builds of CBMC on our release page we currently build CBMC
-with the MiniSat2 SAT solver statically linked at compile time. However it is
-also possible to build CBMC using alternative SAT solvers.
+with the MiniSat2 and CaDiCaL SAT solvers statically linked at compile time.
+However it is also possible to build CBMC using alternative SAT solvers.
 
 ### Compiling CBMC Using Solver Native Interfaces
 
 The following solvers are supported by CBMC using custom interfaces and can
-by downloaded and compiled by the build process: MiniSAT2, CaDiCaL, and Glucose.
+be downloaded and compiled by the build process: MiniSAT2, CaDiCaL, and Glucose.
 
-For `make` alternatives to the default (i.e. not MiniSAT) can be built with the
-following commands for CaDiCaL:
-```
-make -C src cadical-download
-make -C src CADICAL=../../cadical
-```
-and for glucose
+For `make`, alternatives to the default (i.e. not MiniSAT and CaDiCaL) can be
+built with the following commands for glucose:
 ```
 make -C src glucose-download
 make -C src GLUCOSE=../../glucose-syrup
 ```
+CBMC can be built with multiple solvers, which can then be selected at runtime
+using the `--sat-solver` option.
+For example, to build CBMC with MiniSAT2 and Glucose, do:
+```
+make -C src minisat2-download glucose-download
+make -C src MINISAT2=../../minisat-2.2.1 GLUCOSE=../../glucose-syrup
+```
+The build sets the default solver based on the priority defined by the
+`#if/#elif` tree defined at the end of
+[`src/solvers/sat/satcheck.h`](https://github.com/diffblue/cbmc/blob/develop/src/solvers/sat/satcheck.h).
+In the above example, MiniSAT2 will be set as the default solver because it is
+listed before Glucose. To switch to glucose at runtime, run CBMC with
+`--sat-solver glucose`.
 
 For CMake the alternatives can be built with the following arguments to `cmake`
-for CaDiCaL `-Dsat_impl=cadical` and for glucose `-Dsat_impl=glucose`.
+for glucose `-Dsat_impl=glucose`.
+To build CBMC with multiple solvers, specify the solvers in a semicolon-separated list to `-Dsat_impl`, e.g.:
+```
+cmake -S . -Bbuild -Dsat_impl="minisat2;glucose"
+```
 
 
 ### Compiling with IPASIR Interface
@@ -520,7 +532,7 @@ successfully on Windows or macOS.
 This document assumes you have already been able to build CPROVER on
 your chosen architecture.
 
-#RUNNING REGRESSION AND UNIT TESTS
+# RUNNING REGRESSION AND UNIT TESTS
 
 Regression and unit tests can be run using cmake or make. Your choice here
 should be the same as the compiling of the project itself.
@@ -562,3 +574,16 @@ then run make as follows.
 cd unit
 make test
 ```
+
+## Rust API
+
+CBMC is now offering a [Rust API](src/libcprover-rust/).
+
+The Rust API used to be built along with CBMC, but we have since decoupled that
+to be built on its own. Instructions for doing so are in the project's
+[`readme.md`](src/libcprover-rust/readme.md), which are also mirrored
+on the crate's webpage at [crates.io](https://crates.io/crates/libcprover_rust).
+
+If you come across any issues during the configuration or the build of the Rust API,
+please let us know by filing a [bug report](https://github.com/diffblue/cbmc/issues/new)
+and mark it with the label `Rust API` if possible.

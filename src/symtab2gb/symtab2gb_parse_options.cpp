@@ -8,25 +8,24 @@ Author: Diffblue Ltd.
 
 #include "symtab2gb_parse_options.h"
 
-#include <fstream>
-#include <iostream>
-#include <string>
-
-#include <ansi-c/ansi_c_language.h>
-
-#include <goto-programs/goto_convert_functions.h>
-#include <goto-programs/goto_model.h>
-#include <goto-programs/write_goto_binary.h>
-
-#include <json-symtab-language/json_symtab_language.h>
-#include <langapi/mode.h>
-
-#include <linking/linking.h>
-
 #include <util/config.h>
 #include <util/exception_utils.h>
 #include <util/exit_codes.h>
+#include <util/help_formatter.h>
 #include <util/version.h>
+
+#include <goto-programs/goto_model.h>
+#include <goto-programs/write_goto_binary.h>
+
+#include <ansi-c/ansi_c_language.h>
+#include <ansi-c/goto-conversion/goto_convert_functions.h>
+#include <json-symtab-language/json_symtab_language.h>
+#include <langapi/mode.h>
+#include <linking/linking.h>
+
+#include <fstream>
+#include <iostream>
+#include <string>
 
 symtab2gb_parse_optionst::symtab2gb_parse_optionst(int argc, const char *argv[])
   : parse_options_baset{SYMTAB2GB_OPTIONS,
@@ -43,7 +42,8 @@ static inline bool failed(bool error_indicator)
 
 static void run_symtab2gb(
   const std::vector<std::string> &symtab_filenames,
-  const std::string &gb_filename)
+  const std::string &gb_filename,
+  const std::string &cmdline_verbosity)
 {
   // try opening all the files first to make sure we can
   // even read/write what we want
@@ -65,9 +65,10 @@ static void run_symtab2gb(
   }
 
   stream_message_handlert message_handler{std::cerr};
+  messaget::eval_verbosity(
+    cmdline_verbosity, messaget::M_STATUS, message_handler);
 
   auto const symtab_language = new_json_symtab_language();
-  symtab_language->set_message_handler(message_handler);
 
   symbol_tablet linked_symbol_table;
 
@@ -75,7 +76,8 @@ static void run_symtab2gb(
   {
     auto const &symtab_filename = symtab_filenames[ix];
     auto &symtab_file = symtab_files[ix];
-    if(failed(symtab_language->parse(symtab_file, symtab_filename)))
+    if(failed(
+         symtab_language->parse(symtab_file, symtab_filename, message_handler)))
     {
       source_locationt source_location;
       source_location.set_file(symtab_filename);
@@ -83,7 +85,7 @@ static void run_symtab2gb(
         "failed to parse symbol table", source_location};
     }
     symbol_tablet symtab{};
-    if(failed(symtab_language->typecheck(symtab, "<unused>")))
+    if(failed(symtab_language->typecheck(symtab, "<unused>", message_handler)))
     {
       source_locationt source_location;
       source_location.set_file(symtab_filename);
@@ -138,29 +140,29 @@ int symtab2gb_parse_optionst::doit()
   }
   register_languages();
   config.set(cmdline);
-  run_symtab2gb(symtab_filenames, gb_filename);
+  run_symtab2gb(symtab_filenames, gb_filename, cmdline.get_value("verbosity"));
   return CPROVER_EXIT_SUCCESS;
 }
 
 void symtab2gb_parse_optionst::help()
 {
-  log.status()
-    << '\n'
-    << banner_string("symtab2gb", CBMC_VERSION) << '\n'
-    << align_center_with_border("Copyright (C) 2019") << '\n'
-    << align_center_with_border("Diffblue Ltd.") << '\n'
-    << align_center_with_border("info@diffblue.com") << '\n'
-    << '\n'
-    << "Usage:                                   Purpose:\n"
-    << '\n'
-    << "symtab2gb [-?] [-h] [--help]             show help\n"
-       "symtab2gb                                compile .json_symtabs\n"
-       "  <json-symtab-file>+                    to a single goto-binary\n"
-       "  [--out <outfile>]\n\n"
-       "<json-symtab-file>                       a CBMC symbol table in\n"
-       "                                         JSON format\n"
-       "--out <outfile>                          specify the filename of\n"
-       "                                         the resulting binary\n"
-       "                                         (default: a.out)\n"
-    << messaget::eom;
+  log.status() << '\n'
+               << banner_string("symtab2gb", CBMC_VERSION) << '\n'
+               << align_center_with_border("Copyright (C) 2019") << '\n'
+               << align_center_with_border("Diffblue Ltd.") << '\n'
+               << align_center_with_border("info@diffblue.com") << '\n';
+
+  log.status() << help_formatter(
+    "\n"
+    "Usage:                                  \tPurpose:\n"
+    "\n"
+    " {bsymtab2gb} [{y-?}] [{y-h}] [{y--help}] \t show this help\n"
+    " {bsymtab2gb} [options] {ujson-symtab-file...} \t compile CBMC symbol"
+    " table(s) in JSON format to a single goto-binary\n"
+    "\n"
+    "Options:\n"
+    " {y--out} {uoutfile} \t specify the filename of the resulting binary"
+    " (default: a.out)\n"
+    " {y--verbosity} {u#} \t verbosity level\n");
+  log.status() << messaget::eom;
 }

@@ -24,6 +24,7 @@ Date: March 2016
 #include <linking/static_lifetime_init.h>
 
 #include <chrono> // IWYU pragma: keep
+#include <ctime>  // IWYU pragma: keep - For std::time_t
 #include <fstream> // IWYU pragma: keep
 #include <iostream>
 
@@ -80,7 +81,11 @@ protected:
     }
 
     unsigned hits;
-    std::map<goto_programt::const_targett, coverage_conditiont> conditions;
+    std::map<
+      goto_programt::const_targett,
+      coverage_conditiont,
+      goto_programt::target_less_than>
+      conditions;
   };
 
   typedef std::map<unsigned, coverage_linet> coverage_lines_mapt;
@@ -236,15 +241,12 @@ void goto_program_coverage_recordt::compute_coverage_lines(
     symex_coveraget::coveraget::const_iterator c_entry = coverage.find(it);
     if(c_entry != coverage.end())
     {
-      if(!(c_entry->second.size() == 1 || is_branch))
-      {
-        std::cerr << it->location_number << '\n';
-        for(const auto &cov : c_entry->second)
-          std::cerr << cov.second.succ->location_number << '\n';
-      }
-      DATA_INVARIANT(
-        c_entry->second.size() == 1 || is_branch,
-        "instructions other than branch instructions have exactly 1 successor");
+      DATA_INVARIANT_WITH_DIAGNOSTICS(
+        c_entry->second.size() == 1 || is_branch || it->is_function_call(),
+        "instructions other than branch instructions or function calls have "
+        "exactly 1 successor",
+        "found at goto program instruction number " +
+          std::to_string(it->location_number));
 
       for(const auto &cov : c_entry->second)
       {

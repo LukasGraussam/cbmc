@@ -27,7 +27,6 @@ Author: Daniel Kroening, Peter Schrammel
 #include <solvers/decision_procedure.h>
 
 #include <util/json_stream.h>
-#include <util/make_unique.h>
 #include <util/ui_message.h>
 
 #include "goto_symex_property_decider.h"
@@ -57,7 +56,7 @@ ssa_step_matches_failing_property(const irep_idt &property_id)
   return [property_id](
            symex_target_equationt::SSA_stepst::const_iterator step,
            const decision_proceduret &decision_procedure) {
-    return step->is_assert() && step->get_property_id() == property_id &&
+    return step->is_assert() && step->property_id == property_id &&
            decision_procedure.get(step->cond_handle).is_false();
   };
 }
@@ -168,11 +167,11 @@ get_memory_model(const optionst &options, const namespacet &ns)
   const std::string mm = options.get_option("mm");
 
   if(mm.empty() || mm == "sc")
-    return util_make_unique<memory_model_sct>(ns);
+    return std::make_unique<memory_model_sct>(ns);
   else if(mm == "tso")
-    return util_make_unique<memory_model_tsot>(ns);
+    return std::make_unique<memory_model_tsot>(ns);
   else if(mm == "pso")
-    return util_make_unique<memory_model_psot>(ns);
+    return std::make_unique<memory_model_psot>(ns);
   else
   {
     throw "invalid memory model '" + mm + "': use one of sc, tso, pso";
@@ -249,7 +248,7 @@ void update_properties_status_from_symex_target_equation(
     if(!step.is_assert())
       continue;
 
-    irep_idt property_id = step.get_property_id();
+    const irep_idt &property_id = step.property_id;
     CHECK_RETURN(!property_id.empty());
 
     // Don't update status of properties that are constant 'false';
@@ -354,8 +353,9 @@ void postprocess_equation(
   std::chrono::duration<double> postprocess_equation_runtime =
     std::chrono::duration<double>(
       postprocess_equation_stop - postprocess_equation_start);
-  log.status() << "Runtime Postprocess Equation: "
-               << postprocess_equation_runtime.count() << "s" << messaget::eom;
+  log.statistics() << "Runtime Postprocess Equation: "
+                   << postprocess_equation_runtime.count() << "s"
+                   << messaget::eom;
 }
 
 std::chrono::duration<double> prepare_property_decider(
@@ -412,16 +412,16 @@ void run_property_decider(
   auto const sat_solver_stop = std::chrono::steady_clock::now();
   std::chrono::duration<double> sat_solver_runtime =
     std::chrono::duration<double>(sat_solver_stop - sat_solver_start);
-  log.status() << "Runtime Solver: " << sat_solver_runtime.count() << "s"
-               << messaget::eom;
+  log.statistics() << "Runtime Solver: " << sat_solver_runtime.count() << "s"
+                   << messaget::eom;
 
   property_decider.update_properties_status_from_goals(
     properties, result.updated_properties, dec_result, set_pass);
 
   auto solver_stop = std::chrono::steady_clock::now();
   solver_runtime += std::chrono::duration<double>(solver_stop - solver_start);
-  log.status() << "Runtime decision procedure: " << solver_runtime.count()
-               << "s" << messaget::eom;
+  log.statistics() << "Runtime decision procedure: " << solver_runtime.count()
+                   << "s" << messaget::eom;
 
   if(dec_result == decision_proceduret::resultt::D_SATISFIABLE)
   {

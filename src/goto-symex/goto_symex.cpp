@@ -29,8 +29,6 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include <climits>
 
-unsigned goto_symext::dynamic_counter=0;
-
 void goto_symext::do_simplify(exprt &expr)
 {
   if(symex_config.simplify_opt)
@@ -106,7 +104,7 @@ void goto_symext::symex_assign(
       assignment_type = symex_targett::assignment_typet::HIDDEN;
 
     symex_assignt symex_assign{
-      state, assignment_type, ns, symex_config, target};
+      shadow_memory, state, assignment_type, ns, symex_config, target};
 
     // Try to constant propagate potential side effects of the assignment, when
     // simplification is turned on and there is one thread only. Constant
@@ -119,9 +117,28 @@ void goto_symext::symex_assign(
         return;
     }
 
+    // We may end up reading (and writing) all components of an object composed
+    // of multiple fields. In such cases, we must do so atomically to avoid
+    // overwriting components modified by another thread. Note that this also
+    // implies multiple shared reads on the rhs being treated as atomic.
+    const bool maybe_divisible =
+      lhs.id() == ID_index ||
+      (is_ssa_expr(lhs) &&
+       state.field_sensitivity.is_divisible(to_ssa_expr(lhs), false));
+    const bool need_atomic_section = maybe_divisible &&
+                                     state.threads.size() > 1 &&
+                                     state.atomic_section_id == 0;
+
+    if(need_atomic_section)
+      symex_atomic_begin(state);
+
     exprt::operandst lhs_if_then_else_conditions;
-    symex_assign.assign_rec(
-      lhs, expr_skeletont{}, rhs, lhs_if_then_else_conditions);
+    symex_assignt{
+      shadow_memory, state, assignment_type, ns, symex_config, target}
+      .assign_rec(lhs, expr_skeletont{}, rhs, lhs_if_then_else_conditions);
+
+    if(need_atomic_section)
+      symex_atomic_end(state);
   }
 }
 
@@ -330,22 +347,24 @@ void goto_symext::associate_array_to_pointer(
   const function_application_exprt array_to_pointer_app{
     function_symbol.symbol_expr(), {new_char_array, string_data}};
 
-  const symbolt &return_symbol = get_fresh_aux_symbol(
-    to_mathematical_function_type(function_symbol.type).codomain(),
-    "",
-    "return_value",
-    source_locationt(),
-    function_symbol.mode,
-    ns,
-    state.symbol_table);
+  symbol_exprt return_symbol_expr =
+    get_fresh_aux_symbol(
+      to_mathematical_function_type(function_symbol.type).codomain(),
+      "",
+      "return_value",
+      source_locationt(),
+      function_symbol.mode,
+      ns,
+      state.symbol_table)
+      .symbol_expr();
 
-  const ssa_exprt ssa_expr(return_symbol.symbol_expr());
+  const ssa_exprt ssa_expr(return_symbol_expr);
 
   symex_assign.assign_symbol(
     ssa_expr, expr_skeletont{}, array_to_pointer_app, {});
 }
 
-optionalt<std::reference_wrapper<const array_exprt>>
+std::optional<std::reference_wrapper<const array_exprt>>
 goto_symext::try_evaluate_constant_string(
   const statet &state,
   const exprt &content)
@@ -366,7 +385,7 @@ goto_symext::try_evaluate_constant_string(
   return try_get_string_data_array(s_pointer_opt->get(), ns);
 }
 
-optionalt<std::reference_wrapper<const constant_exprt>>
+std::optional<std::reference_wrapper<const constant_exprt>>
 goto_symext::try_evaluate_constant(const statet &state, const exprt &expr)
 {
   if(expr.id() != ID_symbol)
@@ -377,12 +396,12 @@ goto_symext::try_evaluate_constant(const statet &state, const exprt &expr)
   const auto constant_expr_opt =
     state.propagation.find(to_symbol_expr(expr).get_identifier());
 
-  if(!constant_expr_opt || constant_expr_opt->get().id() != ID_constant)
+  if(!constant_expr_opt || !constant_expr_opt->get().is_constant())
   {
     return {};
   }
 
-  return optionalt<std::reference_wrapper<const constant_exprt>>(
+  return std::optional<std::reference_wrapper<const constant_exprt>>(
     to_constant_expr(constant_expr_opt->get()));
 }
 

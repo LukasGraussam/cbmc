@@ -41,28 +41,10 @@ public:
 #else
   typet(irep_idt _id, typet _subtype) : irept(std::move(_id))
   {
-    subtype() = std::move(_subtype);
+    add_subtype() = std::move(_subtype);
   }
 #endif
 
-  // Deliberately protected -- use type-specific accessor methods instead.
-protected:
-  const typet &subtype() const
-  {
-    if(get_sub().empty())
-      return static_cast<const typet &>(get_nil_irep());
-    return static_cast<const typet &>(get_sub().front());
-  }
-
-  typet &subtype()
-  {
-    subt &sub=get_sub();
-    if(sub.empty())
-      sub.resize(1);
-    return static_cast<typet &>(sub.front());
-  }
-
-public:
   // This method allows the construction of a type with a subtype by
   // starting from a type without subtype.  It avoids copying the contents
   // of the type.  The primary use-case are parsers, where a copy could be
@@ -95,6 +77,39 @@ public:
   source_locationt &add_source_location()
   {
     return static_cast<source_locationt &>(add(ID_C_source_location));
+  }
+
+  /// This is a 'fluent style' method for creating a new type
+  /// with an added-on source location.
+  typet &&with_source_location(source_locationt location) &&
+  {
+    if(location.is_not_nil())
+      add_source_location() = std::move(location);
+    return std::move(*this);
+  }
+
+  /// This is a 'fluent style' method for adding a source location.
+  typet &with_source_location(source_locationt location) &
+  {
+    if(location.is_not_nil())
+      add_source_location() = std::move(location);
+    return *this;
+  }
+
+  /// This is a 'fluent style' method for creating a new type
+  /// with an added-on source location.
+  typet &&with_source_location(const typet &type) &&
+  {
+    return std::move(*this).with_source_location(type.source_location());
+  }
+
+  /// This is a 'fluent style' method for adding a source location.
+  typet &with_source_location(const typet &type) &
+  {
+    auto &location = type.source_location();
+    if(location.is_not_nil())
+      add_source_location() = location;
+    return *this;
   }
 
   typet &add_type(const irep_idt &name)

@@ -17,7 +17,6 @@ Author: Daniel Kroening, dkr@amazon.com
 #include <util/namespace.h>
 #include <util/pointer_offset_size.h>
 #include <util/pointer_predicates.h>
-#include <util/prefix.h>
 #include <util/string_constant.h>
 #include <util/symbol.h>
 
@@ -169,13 +168,13 @@ void axiomst::writeable_object()
   {
     if(a_it->object_identifier() == "return_value")
       continue;
-    else if(has_prefix(id2string(a_it->object_identifier()), "va_args::"))
+    else if(a_it->object_identifier().starts_with("va_args::"))
       continue;
-    else if(has_prefix(id2string(a_it->object_identifier()), "va_arg::"))
+    else if(a_it->object_identifier().starts_with("va_arg::"))
       continue;
-    else if(has_prefix(id2string(a_it->object_identifier()), "va_arg_array::"))
+    else if(a_it->object_identifier().starts_with("va_arg_array::"))
       continue;
-    else if(has_prefix(id2string(a_it->object_identifier()), "old::"))
+    else if(a_it->object_identifier().starts_with("old::"))
       continue;
 
     auto &symbol = ns.lookup(a_it->object_expr());
@@ -266,7 +265,7 @@ void axiomst::object_size()
         auto pointers_equal = same_object(a_it->address(), *b_it);
         auto size_equal = equal_exprt(
           *a_it,
-          from_integer(string_constant.get_value().size() + 1, a_it->type()));
+          from_integer(string_constant.value().size() + 1, a_it->type()));
         auto implication = implies_exprt(pointers_equal, size_equal);
         if(verbose)
           std::cout << "OBJECT_SIZE2: " << format(implication) << '\n';

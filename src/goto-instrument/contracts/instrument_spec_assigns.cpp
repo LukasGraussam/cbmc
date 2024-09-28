@@ -16,11 +16,14 @@ Date: January 2022
 #include <util/c_types.h>
 #include <util/expr_util.h>
 #include <util/format_expr.h>
+#include <util/fresh_symbol.h>
 #include <util/pointer_offset_size.h>
 #include <util/pointer_predicates.h>
+#include <util/prefix.h>
 #include <util/simplify_expr.h>
 
 #include <ansi-c/c_expr.h>
+#include <ansi-c/goto-conversion/destructor.h>
 #include <langapi/language_util.h>
 
 #include "cfg_info.h"
@@ -146,6 +149,13 @@ void instrument_spec_assignst::check_inclusion_assignment(
   const exprt &lhs,
   goto_programt &dest) const
 {
+  // Don't check assignable for CPROVER symbol
+  if(
+    lhs.id() == ID_symbol &&
+    has_prefix(id2string(to_symbol_expr(lhs).get_identifier()), CPROVER_PREFIX))
+  {
+    return;
+  }
   // create temporary car but do not track
   const auto car = create_car_expr(true_exprt{}, lhs);
   create_snapshot(car, dest);
@@ -410,8 +420,9 @@ void instrument_spec_assignst::track_spec_target_group(
   // clean up side effects from the guard expression if needed
   cleanert cleaner(st, log.get_message_handler());
   exprt condition(group.condition());
+  std::list<irep_idt> new_vars;
   if(has_subexpr(condition, ID_side_effect))
-    cleaner.clean(condition, dest, mode);
+    new_vars = cleaner.clean(condition, dest, mode);
 
   // create conditional address ranges by distributing the condition
   for(const auto &target : group.targets())
@@ -425,6 +436,8 @@ void instrument_spec_assignst::track_spec_target_group(
     // generate snapshot instructions for this target.
     create_snapshot(car, dest);
   }
+
+  destruct_locals(new_vars, dest, ns);
 }
 
 void instrument_spec_assignst::track_plain_spec_target(
@@ -441,12 +454,23 @@ void instrument_spec_assignst::track_plain_spec_target(
   create_snapshot(car, dest);
 }
 
-const symbolt instrument_spec_assignst::create_fresh_symbol(
+/// Creates a fresh symbolt with given suffix, scoped to the function of
+/// \p location.
+static symbol_exprt create_fresh_symbol(
   const std::string &suffix,
   const typet &type,
-  const source_locationt &location) const
+  const source_locationt &location,
+  const irep_idt &mode,
+  symbol_table_baset &symbol_table)
 {
-  return new_tmp_symbol(type, location, mode, st, suffix);
+  return get_fresh_aux_symbol(
+           type,
+           id2string(location.get_function()),
+           suffix,
+           location,
+           mode,
+           symbol_table)
+    .symbol_expr();
 }
 
 car_exprt instrument_spec_assignst::create_car_expr(
@@ -455,16 +479,13 @@ car_exprt instrument_spec_assignst::create_car_expr(
 {
   const source_locationt &source_location = target.source_location();
   const auto &valid_var =
-    create_fresh_symbol("__car_valid", bool_typet(), source_location)
-      .symbol_expr();
+    create_fresh_symbol("__car_valid", bool_typet(), source_location, mode, st);
 
-  const auto &lower_bound_var =
-    create_fresh_symbol("__car_lb", pointer_type(char_type()), source_location)
-      .symbol_expr();
+  const auto &lower_bound_var = create_fresh_symbol(
+    "__car_lb", pointer_type(char_type()), source_location, mode, st);
 
-  const auto &upper_bound_var =
-    create_fresh_symbol("__car_ub", pointer_type(char_type()), source_location)
-      .symbol_expr();
+  const auto &upper_bound_var = create_fresh_symbol(
+    "__car_ub", pointer_type(char_type()), source_location, mode, st);
 
   if(target.id() == ID_pointer_object)
   {
@@ -635,9 +656,9 @@ exprt instrument_spec_assignst::target_validity_expr(
   // (or is NULL if we allow it explicitly).
   // This assertion will be falsified whenever `start_address` is invalid or
   // not of the right size (or is NULL if we do not allow it explicitly).
-  auto result =
-    or_exprt{not_exprt{car.condition()},
-             w_ok_exprt{car.target_start_address(), car.target_size()}};
+  auto result = or_exprt{
+    boolean_negate(car.condition()),
+    w_ok_exprt{car.target_start_address(), car.target_size()}};
 
   if(allow_null_target)
     result.add_to_operands(null_object(car.target_start_address()));
@@ -708,9 +729,14 @@ void instrument_spec_assignst::inclusion_check_assertion(
   comment += " is assignable";
   source_location.set_comment(comment);
 
-  dest.add(goto_programt::make_assertion(
-    inclusion_check_full(car, allow_null_lhs, include_stack_allocated),
-    source_location));
+  exprt inclusion_check =
+    inclusion_check_full(car, allow_null_lhs, include_stack_allocated);
+  // Record what target is checked.
+  auto &checked_assigns =
+    static_cast<exprt &>(inclusion_check.add(ID_checked_assigns));
+  checked_assigns = car.target();
+
+  dest.add(goto_programt::make_assertion(inclusion_check, source_location));
 }
 
 exprt instrument_spec_assignst::inclusion_check_single(

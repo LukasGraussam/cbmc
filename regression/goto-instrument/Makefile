@@ -18,11 +18,12 @@ tests.log:
 	@../test.pl -e -p -c '../chain.sh $(exe) ../../../src/goto-instrument/goto-instrument ../../../src/cbmc/cbmc $(is_windows)'
 
 clean:
+	$(RM) tests.log
 	@for dir in *; do \
-		$(RM) tests.log; \
 		if [ -d "$$dir" ]; then \
 			cd "$$dir"; \
 			$(RM) *.out *.gb; \
 			cd ..; \
 		fi \
 	done
+	$(RM) ../cbmc/Recursion6/*.gb

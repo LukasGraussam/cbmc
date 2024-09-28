@@ -44,7 +44,7 @@ class sparse_bitvector_analysist
 public:
   const V &get(const std::size_t value_index) const
   {
-    assert(value_index<values.size());
+    PRECONDITION(value_index < values.size());
     return values[value_index]->first;
   }
 
@@ -114,9 +114,9 @@ inline bool operator<(
   const reaching_definitiont &a,
   const reaching_definitiont &b)
 {
-  if(a.definition_at<b.definition_at)
+  if(goto_programt::target_less_than()(a.definition_at, b.definition_at))
     return true;
-  if(b.definition_at<a.definition_at)
+  if(goto_programt::target_less_than()(b.definition_at, a.definition_at))
     return false;
 
   if(a.bit_begin.is_unknown() != b.bit_begin.is_unknown())
@@ -143,7 +143,8 @@ inline bool operator<(
 
   // we do not expect comparison of unrelated definitions
   // as this operator< is only used in sparse_bitvector_analysist
-  assert(a.identifier==b.identifier);
+  INVARIANT(
+    a.identifier == b.identifier, "comparison of unrelated definitions");
 
   return false;
 }
@@ -158,8 +159,12 @@ class rd_range_domaint:public ai_domain_baset
 {
 public:
   rd_range_domaint(
-    sparse_bitvector_analysist<reaching_definitiont> *_bv_container)
-    : ai_domain_baset(), has_values(false), bv_container(_bv_container)
+    sparse_bitvector_analysist<reaching_definitiont> *_bv_container,
+    message_handlert &message_handler)
+    : ai_domain_baset(),
+      has_values(false),
+      bv_container(_bv_container),
+      message_handler(message_handler)
   {
     PRECONDITION(bv_container != nullptr);
   }
@@ -208,11 +213,6 @@ public:
     has_values=tvt(false);
   }
 
-  void make_entry() final override
-  {
-    make_top();
-  }
-
   bool is_top() const override final
   {
     DATA_INVARIANT(!has_values.is_true() || values.empty(),
@@ -249,7 +249,8 @@ public:
 
   // each element x represents a range of bits [x.first, x.second)
   typedef std::multimap<range_spect, range_spect> rangest;
-  typedef std::map<locationt, rangest> ranges_at_loct;
+  typedef std::map<locationt, rangest, goto_programt::target_less_than>
+    ranges_at_loct;
 
   const ranges_at_loct &get(const irep_idt &identifier) const;
   void clear_cache(const irep_idt &identifier) const
@@ -273,11 +274,7 @@ private:
   sparse_bitvector_analysist<reaching_definitiont> *const bv_container;
 
   typedef std::set<std::size_t> values_innert;
-  #ifdef USE_DSTRING
   typedef std::map<irep_idt, values_innert> valuest;
-  #else
-  typedef std::unordered_map<irep_idt, values_innert> valuest;
-  #endif
   /// It is an ordered map from program variable names to `ID`s of
   /// `reaching_definitiont` instances stored in map pointed to by
   /// `bv_container`. The map is not empty only if `has_value` is `UNKNOWN`.
@@ -285,11 +282,7 @@ private:
   /// instruction.
   valuest values;
 
-  #ifdef USE_DSTRING
   typedef std::map<irep_idt, ranges_at_loct> export_cachet;
-  #else
-  typedef std::unordered_map<irep_idt, ranges_at_loct> export_cachet;
-  #endif
   /// It is a helper data structure. It consists of data already stored in
   /// `values` and `bv_container`. It is basically (an ordered) map from (a
   /// subset of) variables in `values` to iterators to GOTO instructions where
@@ -349,6 +342,8 @@ private:
   bool merge_inner(
     values_innert &dest,
     const values_innert &other);
+
+  message_handlert &message_handler;
 };
 
 class reaching_definitions_analysist:
@@ -357,7 +352,7 @@ class reaching_definitions_analysist:
 {
 public:
   // constructor
-  explicit reaching_definitions_analysist(const namespacet &_ns);
+  reaching_definitions_analysist(const namespacet &_ns, message_handlert &);
 
   virtual ~reaching_definitions_analysist();
 
@@ -365,19 +360,19 @@ public:
 
   value_setst &get_value_sets() const
   {
-    assert(value_sets);
+    PRECONDITION(value_sets);
     return *value_sets;
   }
 
   const is_threadedt &get_is_threaded() const
   {
-    assert(is_threaded);
+    PRECONDITION(is_threaded);
     return *is_threaded;
   }
 
   const dirtyt &get_is_dirty() const
   {
-    assert(is_dirty);
+    PRECONDITION(is_dirty);
     return *is_dirty;
   }
 

@@ -19,13 +19,8 @@ Author: CM Wintersteiger, 2006
 #include <sysexits.h>
 #endif
 
-#include <cstring>
-#include <fstream>
-#include <iostream>
-
 #include <util/cmdline.h>
 #include <util/config.h>
-#include <util/file_util.h>
 #include <util/invariant.h>
 #include <util/run.h>
 
@@ -33,6 +28,11 @@ Author: CM Wintersteiger, 2006
 #include "goto_cc_cmdline.h"
 #include "hybrid_binary.h"
 #include "linker_script_merge.h"
+
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
 
 static std::string
 linker_name(const cmdlinet &cmdline, const std::string &base_name)
@@ -62,21 +62,28 @@ ld_modet::ld_modet(goto_cc_cmdlinet &_cmdline, const std::string &_base_name)
 /// does it.
 int ld_modet::doit()
 {
-  if(cmdline.isset("help"))
-  {
-    help();
-    return EX_OK;
-  }
-
   native_tool_name = linker_name(cmdline, base_name);
 
-  if(cmdline.isset("version") || cmdline.isset("print-sysroot"))
+  // When --help is requested, just reproduce the output of the original
+  // compiler. This is so as not to confuse configure scripts that depend on
+  // particular information (such as the list of supported targets).
+  if(
+    cmdline.isset("help") || cmdline.isset("version") ||
+    cmdline.isset("print-sysroot"))
+  {
+    help();
     return run_ld();
+  }
 
   messaget::eval_verbosity(
     cmdline.get_value("verbosity"), messaget::M_ERROR, gcc_message_handler);
+  gcc_message_handler.print_warnings_as_errors(
+    cmdline.isset("fatal-warnings") && !cmdline.isset("no-fatal-warnings"));
 
-  compilet compiler(cmdline, gcc_message_handler, false);
+  compilet compiler(
+    cmdline,
+    gcc_message_handler,
+    cmdline.isset("fatal-warnings") && !cmdline.isset("no-fatal-warnings"));
 
   // determine actions to be undertaken
   compiler.mode = compilet::LINK_LIBRARY;
@@ -181,9 +188,9 @@ int ld_modet::ld_hybrid_binary(
 
   try
   {
-    file_rename(output_file, goto_binary);
+    std::filesystem::rename(output_file, goto_binary);
   }
-  catch(const cprover_exception_baset &e)
+  catch(const std::filesystem::filesystem_error &e)
   {
     log.error() << "Rename failed: " << e.what() << messaget::eom;
     return 1;

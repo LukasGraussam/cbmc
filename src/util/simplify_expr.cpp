@@ -150,16 +150,16 @@ simplify_exprt::simplify_popcount(const popcount_exprt &expr)
 simplify_exprt::resultt<>
 simplify_exprt::simplify_clz(const count_leading_zeros_exprt &expr)
 {
-  const auto const_bits_opt = expr2bits(
-    expr.op(),
-    config.ansi_c.endianness == configt::ansi_ct::endiannesst::IS_LITTLE_ENDIAN,
-    ns);
+  const bool is_little_endian =
+    config.ansi_c.endianness == configt::ansi_ct::endiannesst::IS_LITTLE_ENDIAN;
+
+  const auto const_bits_opt = expr2bits(expr.op(), is_little_endian, ns);
 
   if(!const_bits_opt.has_value())
     return unchanged(expr);
 
-  // expr2bits generates a bit string starting with the least-significant bit
-  std::size_t n_leading_zeros = const_bits_opt->rfind('1');
+  std::size_t n_leading_zeros =
+    is_little_endian ? const_bits_opt->rfind('1') : const_bits_opt->find('1');
   if(n_leading_zeros == std::string::npos)
   {
     if(!expr.zero_permitted())
@@ -167,7 +167,7 @@ simplify_exprt::simplify_clz(const count_leading_zeros_exprt &expr)
 
     n_leading_zeros = const_bits_opt->size();
   }
-  else
+  else if(is_little_endian)
     n_leading_zeros = const_bits_opt->size() - n_leading_zeros - 1;
 
   return from_integer(n_leading_zeros, expr.type());
@@ -176,16 +176,16 @@ simplify_exprt::simplify_clz(const count_leading_zeros_exprt &expr)
 simplify_exprt::resultt<>
 simplify_exprt::simplify_ctz(const count_trailing_zeros_exprt &expr)
 {
-  const auto const_bits_opt = expr2bits(
-    expr.op(),
-    config.ansi_c.endianness == configt::ansi_ct::endiannesst::IS_LITTLE_ENDIAN,
-    ns);
+  const bool is_little_endian =
+    config.ansi_c.endianness == configt::ansi_ct::endiannesst::IS_LITTLE_ENDIAN;
+
+  const auto const_bits_opt = expr2bits(expr.op(), is_little_endian, ns);
 
   if(!const_bits_opt.has_value())
     return unchanged(expr);
 
-  // expr2bits generates a bit string starting with the least-significant bit
-  std::size_t n_trailing_zeros = const_bits_opt->find('1');
+  std::size_t n_trailing_zeros =
+    is_little_endian ? const_bits_opt->find('1') : const_bits_opt->rfind('1');
   if(n_trailing_zeros == std::string::npos)
   {
     if(!expr.zero_permitted())
@@ -193,6 +193,8 @@ simplify_exprt::simplify_ctz(const count_trailing_zeros_exprt &expr)
 
     n_trailing_zeros = const_bits_opt->size();
   }
+  else if(!is_little_endian)
+    n_trailing_zeros = const_bits_opt->size() - n_trailing_zeros - 1;
 
   return from_integer(n_trailing_zeros, expr.type());
 }
@@ -200,20 +202,22 @@ simplify_exprt::simplify_ctz(const count_trailing_zeros_exprt &expr)
 simplify_exprt::resultt<>
 simplify_exprt::simplify_ffs(const find_first_set_exprt &expr)
 {
-  const auto const_bits_opt = expr2bits(
-    expr.op(),
-    config.ansi_c.endianness == configt::ansi_ct::endiannesst::IS_LITTLE_ENDIAN,
-    ns);
+  const bool is_little_endian =
+    config.ansi_c.endianness == configt::ansi_ct::endiannesst::IS_LITTLE_ENDIAN;
+
+  const auto const_bits_opt = expr2bits(expr.op(), is_little_endian, ns);
 
   if(!const_bits_opt.has_value())
     return unchanged(expr);
 
-  // expr2bits generates a bit string starting with the least-significant bit
-  std::size_t first_one_bit = const_bits_opt->find('1');
+  std::size_t first_one_bit =
+    is_little_endian ? const_bits_opt->find('1') : const_bits_opt->rfind('1');
   if(first_one_bit == std::string::npos)
     first_one_bit = 0;
-  else
+  else if(is_little_endian)
     ++first_one_bit;
+  else
+    first_one_bit = const_bits_opt->size() - first_one_bit;
 
   return from_integer(first_one_bit, expr.type());
 }
@@ -304,7 +308,7 @@ static simplify_exprt::resultt<> simplify_string_is_empty(
   const refined_string_exprt &s =
     to_string_expr(function_app.arguments().at(0));
 
-  if(s.length().id() != ID_constant)
+  if(!s.length().is_constant())
     return simplify_exprt::unchanged(expr);
 
   const auto numeric_length =
@@ -381,7 +385,7 @@ static simplify_exprt::resultt<> simplify_string_index_of(
   {
     auto &starting_index_expr = expr.arguments().at(2);
 
-    if(starting_index_expr.id() != ID_constant)
+    if(!starting_index_expr.is_constant())
     {
       return simplify_exprt::unchanged(expr);
     }
@@ -466,7 +470,7 @@ static simplify_exprt::resultt<> simplify_string_index_of(
           std::distance(s1_data.operands().begin(), it), expr.type());
     }
   }
-  else if(expr.arguments().at(1).id() == ID_constant)
+  else if(expr.arguments().at(1).is_constant())
   {
     // Second argument is a constant character
 
@@ -518,7 +522,7 @@ static simplify_exprt::resultt<> simplify_string_char_at(
   const function_application_exprt &expr,
   const namespacet &ns)
 {
-  if(expr.arguments().at(1).id() != ID_constant)
+  if(!expr.arguments().at(1).is_constant())
   {
     return simplify_exprt::unchanged(expr);
   }
@@ -661,7 +665,7 @@ static simplify_exprt::resultt<> simplify_string_startswith(
   if(expr.arguments().size() == 3)
   {
     auto &offset = expr.arguments()[2];
-    if(offset.id() != ID_constant)
+    if(!offset.is_constant())
       return simplify_exprt::unchanged(expr);
     offset_int = numeric_cast_v<mp_integer>(to_constant_expr(offset));
   }
@@ -816,9 +820,8 @@ simplify_exprt::simplify_typecast(const typecast_exprt &expr)
     // rewrite (T)(bool) to bool?1:0
     auto one = from_integer(1, expr_type);
     auto zero = from_integer(0, expr_type);
-    exprt new_expr = if_exprt(expr.op(), std::move(one), std::move(zero));
-    simplify_if_preorder(to_if_expr(new_expr));
-    return new_expr;
+    return changed(simplify_if_preorder(
+      if_exprt{expr.op(), std::move(one), std::move(zero)}));
   }
 
   // circular casts through types shorter than `int`
@@ -903,7 +906,7 @@ simplify_exprt::simplify_typecast(const typecast_exprt &expr)
       (op_plus_expr.op0().id() == ID_typecast &&
        to_typecast_expr(op_plus_expr.op0()).op().is_zero()) ||
       (op_plus_expr.op0().is_constant() &&
-       is_null_pointer(to_constant_expr(op_plus_expr.op0()))))
+       to_constant_expr(op_plus_expr.op0()).is_null_pointer()))
     {
       auto sub_size =
         pointer_offset_size(to_pointer_type(op_type).base_type(), ns);
@@ -1336,33 +1339,33 @@ simplify_exprt::simplify_typecast(const typecast_exprt &expr)
   return unchanged(expr);
 }
 
-bool simplify_exprt::simplify_typecast_preorder(typecast_exprt &expr)
+simplify_exprt::resultt<>
+simplify_exprt::simplify_typecast_preorder(const typecast_exprt &expr)
 {
-  const typet &expr_type = as_const(expr).type();
-  const typet &op_type = as_const(expr).op().type();
+  const typet &expr_type = expr.type();
+  const typet &op_type = expr.op().type();
 
   // (T)(a?b:c) --> a?(T)b:(T)c; don't do this for floating-point type casts as
   // the type cast itself may be costly
   if(
-    as_const(expr).op().id() == ID_if && expr_type.id() != ID_floatbv &&
+    expr.op().id() == ID_if && expr_type.id() != ID_floatbv &&
     op_type.id() != ID_floatbv)
   {
     if_exprt if_expr = lift_if(expr, 0);
-    simplify_if_preorder(if_expr);
-    expr.swap(if_expr);
-    return false;
+    return changed(simplify_if_preorder(if_expr));
   }
   else
   {
     auto r_it = simplify_rec(expr.op()); // recursive call
     if(r_it.has_changed())
     {
-      expr.op() = r_it.expr;
-      return false;
+      auto tmp = expr;
+      tmp.op() = r_it.expr;
+      return tmp;
     }
-    else
-      return true;
   }
+
+  return unchanged(expr);
 }
 
 simplify_exprt::resultt<>
@@ -1372,23 +1375,6 @@ simplify_exprt::simplify_dereference(const dereference_exprt &expr)
 
   if(pointer.type().id()!=ID_pointer)
     return unchanged(expr);
-
-  if(pointer.id()==ID_if && pointer.operands().size()==3)
-  {
-    const if_exprt &if_expr=to_if_expr(pointer);
-
-    auto tmp_op1 = expr;
-    tmp_op1.op() = if_expr.true_case();
-    exprt tmp_op1_result = simplify_dereference(tmp_op1);
-
-    auto tmp_op2 = expr;
-    tmp_op2.op() = if_expr.false_case();
-    exprt tmp_op2_result = simplify_dereference(tmp_op2);
-
-    if_exprt tmp{if_expr.cond(), tmp_op1_result, tmp_op2_result};
-
-    return changed(simplify_if(tmp));
-  }
 
   if(pointer.id()==ID_address_of)
   {
@@ -1424,6 +1410,30 @@ simplify_exprt::simplify_dereference(const dereference_exprt &expr)
 }
 
 simplify_exprt::resultt<>
+simplify_exprt::simplify_dereference_preorder(const dereference_exprt &expr)
+{
+  const exprt &pointer = expr.pointer();
+
+  if(pointer.id() == ID_if)
+  {
+    if_exprt if_expr = lift_if(expr, 0);
+    return changed(simplify_if_preorder(if_expr));
+  }
+  else
+  {
+    auto r_it = simplify_rec(pointer); // recursive call
+    if(r_it.has_changed())
+    {
+      auto tmp = expr;
+      tmp.pointer() = r_it.expr;
+      return tmp;
+    }
+  }
+
+  return unchanged(expr);
+}
+
+simplify_exprt::resultt<>
 simplify_exprt::simplify_lambda(const lambda_exprt &expr)
 {
   return unchanged(expr);
@@ -1439,24 +1449,27 @@ simplify_exprt::resultt<> simplify_exprt::simplify_with(const with_exprt &expr)
   // copy
   auto with_expr = expr;
 
-  const typet old_type_followed = ns.follow(with_expr.old().type());
-
   // now look at first operand
 
-  if(old_type_followed.id() == ID_struct)
+  if(
+    with_expr.old().type().id() == ID_struct ||
+    with_expr.old().type().id() == ID_struct_tag)
   {
-    if(with_expr.old().id() == ID_struct || with_expr.old().id() == ID_constant)
+    if(with_expr.old().id() == ID_struct || with_expr.old().is_constant())
     {
       while(with_expr.operands().size() > 1)
       {
         const irep_idt &component_name =
           with_expr.where().get(ID_component_name);
 
-        if(!to_struct_type(old_type_followed).has_component(component_name))
+        const struct_typet &old_type_followed =
+          with_expr.old().type().id() == ID_struct_tag
+            ? ns.follow_tag(to_struct_tag_type(with_expr.old().type()))
+            : to_struct_type(with_expr.old().type());
+        if(!old_type_followed.has_component(component_name))
           return unchanged(expr);
 
-        std::size_t number =
-          to_struct_type(old_type_followed).component_number(component_name);
+        std::size_t number = old_type_followed.component_number(component_name);
 
         if(number >= with_expr.old().operands().size())
           return unchanged(expr);
@@ -1475,7 +1488,7 @@ simplify_exprt::resultt<> simplify_exprt::simplify_with(const with_exprt &expr)
     with_expr.old().type().id() == ID_vector)
   {
     if(
-      with_expr.old().id() == ID_array || with_expr.old().id() == ID_constant ||
+      with_expr.old().id() == ID_array || with_expr.old().is_constant() ||
       with_expr.old().id() == ID_vector)
     {
       while(with_expr.operands().size() > 1)
@@ -1520,8 +1533,6 @@ simplify_exprt::simplify_update(const update_exprt &expr)
 
   for(const auto &e : designator)
   {
-    const typet &value_ptr_type=ns.follow(value_ptr->type());
-
     if(e.id()==ID_index_designator &&
        value_ptr->id()==ID_array)
     {
@@ -1541,7 +1552,9 @@ simplify_exprt::simplify_update(const update_exprt &expr)
       const irep_idt &component_name=
         e.get(ID_component_name);
       const struct_typet &value_ptr_struct_type =
-        to_struct_type(value_ptr_type);
+        value_ptr->type().id() == ID_struct_tag
+          ? ns.follow_tag(to_struct_tag_type(value_ptr->type()))
+          : to_struct_type(value_ptr->type());
       if(!value_ptr_struct_type.has_component(component_name))
         return unchanged(expr);
       auto &designator_as_struct_expr = to_struct_expr(*value_ptr);
@@ -1640,9 +1653,9 @@ simplify_exprt::resultt<>
 simplify_exprt::simplify_byte_extract(const byte_extract_exprt &expr)
 {
   // lift up any ID_if on the object
-  if(expr.op().id()==ID_if)
+  if(expr.op().id() == ID_if)
   {
-    if_exprt if_expr=lift_if(expr, 0);
+    if_exprt if_expr = lift_if(expr, 0);
     if_expr.true_case() =
       simplify_byte_extract(to_byte_extract_expr(if_expr.true_case()));
     if_expr.false_case() =
@@ -1660,8 +1673,10 @@ simplify_exprt::simplify_byte_extract(const byte_extract_exprt &expr)
   {
     auto tmp = expr;
 
-    tmp.offset() = simplify_plus(
-      plus_exprt(to_byte_extract_expr(expr.op()).offset(), expr.offset()));
+    tmp.offset() = simplify_rec(plus_exprt(
+      typecast_exprt::conditional_cast(
+        to_byte_extract_expr(expr.op()).offset(), expr.offset().type()),
+      expr.offset()));
     tmp.op() = to_byte_extract_expr(expr.op()).op();
 
     return changed(simplify_byte_extract(tmp)); // recursive call
@@ -1703,36 +1718,52 @@ simplify_exprt::simplify_byte_extract(const byte_extract_exprt &expr)
   if(!offset.has_value() || *offset < 0)
     return unchanged(expr);
 
-  // byte_extract(byte_update(root, offset_u, value), offset_e) so that the
-  // update does not affect what is being extracted simplifies to
-  // byte_extract(root, offset_e)
-  if(
-    expr.op().id() == ID_byte_update_big_endian ||
-    expr.op().id() == ID_byte_update_little_endian)
+  // try to simplify byte_extract(byte_update(...))
+  auto const bu = expr_try_dynamic_cast<byte_update_exprt>(expr.op());
+  std::optional<mp_integer> update_offset;
+  if(bu)
+    update_offset = numeric_cast<mp_integer>(bu->offset());
+  if(bu && el_size.has_value() && update_offset.has_value())
   {
-    const byte_update_exprt &bu = to_byte_update_expr(expr.op());
-    const auto update_offset = numeric_cast<mp_integer>(bu.offset());
-    if(el_size.has_value() && update_offset.has_value())
+    // byte_extract(byte_update(root, offset_u, value), offset_e) so that the
+    // update does not affect what is being extracted simplifies to
+    // byte_extract(root, offset_e)
+    //
+    // byte_extract(byte_update(root, offset_u, value), offset_e) so that the
+    // extracted range fully lies within the update value simplifies to
+    // byte_extract(value, offset_e - offset_u)
+    if(
+      *offset * expr.get_bits_per_byte() + *el_size <=
+      *update_offset * bu->get_bits_per_byte())
+    {
+      // extracting before the update
+      auto tmp = expr;
+      tmp.op() = bu->op();
+      return changed(simplify_byte_extract(tmp)); // recursive call
+    }
+    else if(
+      const auto update_size = pointer_offset_bits(bu->value().type(), ns))
     {
       if(
-        *offset * expr.get_bits_per_byte() + *el_size <=
-        *update_offset * bu.get_bits_per_byte())
+        *offset * expr.get_bits_per_byte() >=
+        *update_offset * bu->get_bits_per_byte() + *update_size)
       {
+        // extracting after the update
         auto tmp = expr;
-        tmp.op() = bu.op();
+        tmp.op() = bu->op();
         return changed(simplify_byte_extract(tmp)); // recursive call
       }
-      else
+      else if(
+        *offset >= *update_offset &&
+        *offset * expr.get_bits_per_byte() + *el_size <=
+          *update_offset * bu->get_bits_per_byte() + *update_size)
       {
-        const auto update_size = pointer_offset_bits(bu.value().type(), ns);
-        if(
-          update_size.has_value() &&
-          *offset >= *update_offset * bu.get_bits_per_byte() + *update_size)
-        {
-          auto tmp = expr;
-          tmp.op() = bu.op();
-          return changed(simplify_byte_extract(tmp)); // recursive call
-        }
+        // extracting from the update
+        auto tmp = expr;
+        tmp.op() = bu->value();
+        tmp.offset() =
+          from_integer(*offset - *update_offset, expr.offset().type());
+        return changed(simplify_byte_extract(tmp)); // recursive call
       }
     }
   }
@@ -1760,14 +1791,18 @@ simplify_exprt::simplify_byte_extract(const byte_extract_exprt &expr)
   }
 
   if(
-    (expr.type().id() == ID_union || expr.type().id() == ID_union_tag) &&
-    to_union_type(ns.follow(expr.type())).components().empty())
+    (expr.type().id() == ID_union &&
+     to_union_type(expr.type()).components().empty()) ||
+    (expr.type().id() == ID_union_tag &&
+     ns.follow_tag(to_union_tag_type(expr.type())).components().empty()))
   {
     return empty_union_exprt{expr.type()};
   }
   else if(
-    (expr.type().id() == ID_struct || expr.type().id() == ID_struct_tag) &&
-    to_struct_type(ns.follow(expr.type())).components().empty())
+    (expr.type().id() == ID_struct &&
+     to_struct_type(expr.type()).components().empty()) ||
+    (expr.type().id() == ID_struct_tag &&
+     ns.follow_tag(to_struct_tag_type(expr.type())).components().empty()))
   {
     return struct_exprt{{}, expr.type()};
   }
@@ -1777,8 +1812,9 @@ simplify_exprt::simplify_byte_extract(const byte_extract_exprt &expr)
   if(!el_size.has_value() || *el_size == 0)
     return unchanged(expr);
 
-  if(expr.op().id()==ID_array_of &&
-     to_array_of_expr(expr.op()).op().id()==ID_constant)
+  if(
+    expr.op().id() == ID_array_of &&
+    to_array_of_expr(expr.op()).op().is_constant())
   {
     const auto const_bits_opt = expr2bits(
       to_array_of_expr(expr.op()).op(),
@@ -1829,41 +1865,46 @@ simplify_exprt::simplify_byte_extract(const byte_extract_exprt &expr)
   const auto bits =
     expr2bits(expr.op(), expr.id() == ID_byte_extract_little_endian, ns);
 
-  // make sure we don't lose bits with structs containing flexible array members
-  const bool struct_has_flexible_array_member = has_subtype(
-    expr.type(),
-    [&](const typet &type) {
-      if(type.id() != ID_struct && type.id() != ID_struct_tag)
-        return false;
-
-      const struct_typet &st = to_struct_type(ns.follow(type));
-      const auto &comps = st.components();
-      if(comps.empty() || comps.back().type().id() != ID_array)
-        return false;
-
-      if(comps.back().type().get_bool(ID_C_flexible_array_member))
-        return true;
-
-      const auto size =
-        numeric_cast<mp_integer>(to_array_type(comps.back().type()).size());
-      return !size.has_value() || *size <= 1;
-    },
-    ns);
   if(
     bits.has_value() &&
-    mp_integer(bits->size()) >= *el_size + *offset * expr.get_bits_per_byte() &&
-    !struct_has_flexible_array_member)
+    mp_integer(bits->size()) >= *el_size + *offset * expr.get_bits_per_byte())
   {
-    std::string bits_cut = std::string(
-      bits.value(),
-      numeric_cast_v<std::size_t>(*offset * expr.get_bits_per_byte()),
-      numeric_cast_v<std::size_t>(*el_size));
+    // make sure we don't lose bits with structs containing flexible array
+    // members
+    const bool struct_has_flexible_array_member = has_subtype(
+      expr.type(),
+      [&](const typet &type) {
+        if(type.id() != ID_struct && type.id() != ID_struct_tag)
+          return false;
 
-    auto tmp = bits2expr(
-      bits_cut, expr.type(), expr.id() == ID_byte_extract_little_endian, ns);
+        const struct_typet &st = type.id() == ID_struct_tag
+                                   ? ns.follow_tag(to_struct_tag_type(type))
+                                   : to_struct_type(type);
+        const auto &comps = st.components();
+        if(comps.empty() || comps.back().type().id() != ID_array)
+          return false;
 
-    if(tmp.has_value())
-      return std::move(*tmp);
+        if(comps.back().type().get_bool(ID_C_flexible_array_member))
+          return true;
+
+        const auto size =
+          numeric_cast<mp_integer>(to_array_type(comps.back().type()).size());
+        return !size.has_value() || *size <= 1;
+      },
+      ns);
+    if(!struct_has_flexible_array_member)
+    {
+      std::string bits_cut = std::string(
+        bits.value(),
+        numeric_cast_v<std::size_t>(*offset * expr.get_bits_per_byte()),
+        numeric_cast_v<std::size_t>(*el_size));
+
+      auto tmp = bits2expr(
+        bits_cut, expr.type(), expr.id() == ID_byte_extract_little_endian, ns);
+
+      if(tmp.has_value())
+        return std::move(*tmp);
+    }
   }
 
   // push byte extracts into struct or union expressions, just like
@@ -1873,7 +1914,10 @@ simplify_exprt::simplify_byte_extract(const byte_extract_exprt &expr)
   {
     if(expr.type().id() == ID_struct || expr.type().id() == ID_struct_tag)
     {
-      const struct_typet &struct_type = to_struct_type(ns.follow(expr.type()));
+      const struct_typet &struct_type =
+        expr.type().id() == ID_struct_tag
+          ? ns.follow_tag(to_struct_tag_type(expr.type()))
+          : to_struct_type(expr.type());
       const struct_typet::componentst &components = struct_type.components();
 
       bool failed = false;
@@ -1918,7 +1962,10 @@ simplify_exprt::simplify_byte_extract(const byte_extract_exprt &expr)
     }
     else if(expr.type().id() == ID_union || expr.type().id() == ID_union_tag)
     {
-      const union_typet &union_type = to_union_type(ns.follow(expr.type()));
+      const union_typet &union_type =
+        expr.type().id() == ID_union_tag
+          ? ns.follow_tag(to_union_tag_type(expr.type()))
+          : to_union_type(expr.type());
       auto widest_member_opt = union_type.find_widest_union_component(ns);
       if(widest_member_opt.has_value())
       {
@@ -1976,10 +2023,48 @@ simplify_exprt::simplify_byte_extract(const byte_extract_exprt &expr)
   // try to refine it down to extracting from a member or an index in an array
   auto subexpr =
     get_subexpression_at_offset(expr.op(), *offset, expr.type(), ns);
-  if(!subexpr.has_value() || subexpr.value() == expr)
-    return unchanged(expr);
+  if(subexpr.has_value() && subexpr.value() != expr)
+    return changed(simplify_rec(subexpr.value())); // recursive call
 
-  return changed(simplify_rec(subexpr.value())); // recursive call
+  if(can_forward_propagatet(ns)(expr))
+    return changed(simplify_rec(lower_byte_extract(expr, ns)));
+
+  return unchanged(expr);
+}
+
+simplify_exprt::resultt<>
+simplify_exprt::simplify_byte_extract_preorder(const byte_extract_exprt &expr)
+{
+  // lift up any ID_if on the object
+  if(expr.op().id() == ID_if)
+  {
+    if_exprt if_expr = lift_if(expr, 0);
+    return changed(simplify_if_preorder(if_expr));
+  }
+  else
+  {
+    std::optional<exprt::operandst> new_operands;
+
+    for(std::size_t i = 0; i < expr.operands().size(); ++i)
+    {
+      auto r_it = simplify_rec(expr.operands()[i]); // recursive call
+      if(r_it.has_changed())
+      {
+        if(!new_operands.has_value())
+          new_operands = expr.operands();
+        (*new_operands)[i] = std::move(r_it.expr);
+      }
+    }
+
+    if(new_operands.has_value())
+    {
+      exprt result = expr;
+      std::swap(result.operands(), *new_operands);
+      return result;
+    }
+  }
+
+  return unchanged(expr);
 }
 
 simplify_exprt::resultt<>
@@ -2003,14 +2088,17 @@ simplify_exprt::simplify_byte_update(const byte_update_exprt &expr)
   const auto val_size = pointer_offset_bits(value.type(), ns);
   const auto root_size = pointer_offset_bits(root.type(), ns);
 
+  const auto matching_byte_extract_id =
+    expr.id() == ID_byte_update_little_endian ? ID_byte_extract_little_endian
+                                              : ID_byte_extract_big_endian;
+
   // byte update of full object is byte_extract(new value)
   if(
     offset.is_zero() && val_size.has_value() && *val_size > 0 &&
     root_size.has_value() && *root_size > 0 && *val_size >= *root_size)
   {
     byte_extract_exprt be(
-      expr.id() == ID_byte_update_little_endian ? ID_byte_extract_little_endian
-                                                : ID_byte_extract_big_endian,
+      matching_byte_extract_id,
       value,
       offset,
       expr.get_bits_per_byte(),
@@ -2061,14 +2149,11 @@ simplify_exprt::simplify_byte_update(const byte_update_exprt &expr)
    *             value)
    */
 
-  if(expr.id()!=ID_byte_update_little_endian)
-    return unchanged(expr);
-
   if(value.id()==ID_with)
   {
     const with_exprt &with=to_with_expr(value);
 
-    if(with.old().id()==ID_byte_extract_little_endian)
+    if(with.old().id() == matching_byte_extract_id)
     {
       const byte_extract_exprt &extract=to_byte_extract_expr(with.old());
 
@@ -2080,10 +2165,12 @@ simplify_exprt::simplify_byte_update(const byte_update_exprt &expr)
       if(!(offset==extract.offset()))
         return unchanged(expr);
 
-      const typet &tp=ns.follow(with.type());
-      if(tp.id()==ID_struct)
+      if(with.type().id() == ID_struct || with.type().id() == ID_struct_tag)
       {
-        const struct_typet &struct_type=to_struct_type(tp);
+        const struct_typet &struct_type =
+          with.type().id() == ID_struct_tag
+            ? ns.follow_tag(to_struct_tag_type(with.type()))
+            : to_struct_type(with.type());
         const irep_idt &component_name=with.where().get(ID_component_name);
         const typet &c_type = struct_type.get_component(component_name).type();
 
@@ -2108,9 +2195,10 @@ simplify_exprt::simplify_byte_update(const byte_update_exprt &expr)
           }
         }
       }
-      else if(tp.id()==ID_array)
+      else if(with.type().id() == ID_array)
       {
-        auto i = pointer_offset_size(to_array_type(tp).element_type(), ns);
+        auto i =
+          pointer_offset_size(to_array_type(with.type()).element_type(), ns);
         if(i.has_value())
         {
           const exprt &index=with.where();
@@ -2139,23 +2227,23 @@ simplify_exprt::simplify_byte_update(const byte_update_exprt &expr)
   if(!offset_int.has_value() || *offset_int < 0)
     return unchanged(expr);
 
-  const typet &op_type=ns.follow(root.type());
-
   // size must be known
   if(!val_size.has_value() || *val_size == 0)
     return unchanged(expr);
 
   // Are we updating (parts of) a struct? Do individual member updates
   // instead, unless there are non-byte-sized bit fields
-  if(op_type.id()==ID_struct)
+  if(root.type().id() == ID_struct || root.type().id() == ID_struct_tag)
   {
     exprt result_expr;
     result_expr.make_nil();
 
     auto update_size = pointer_offset_size(value.type(), ns);
 
-    const struct_typet &struct_type=
-      to_struct_type(op_type);
+    const struct_typet &struct_type =
+      root.type().id() == ID_struct_tag
+        ? ns.follow_tag(to_struct_tag_type(root.type()))
+        : to_struct_type(root.type());
     const struct_typet::componentst &components=
       struct_type.components();
 
@@ -2208,7 +2296,7 @@ simplify_exprt::simplify_byte_update(const byte_update_exprt &expr)
          *update_size > 0 && m_size_bytes > *update_size))
       {
         byte_update_exprt v(
-          ID_byte_update_little_endian,
+          expr.id(),
           member_exprt(root, component.get_name(), component.type()),
           from_integer(*offset_int - *m_offset, offset.type()),
           value,
@@ -2227,7 +2315,7 @@ simplify_exprt::simplify_byte_update(const byte_update_exprt &expr)
       else
       {
         byte_extract_exprt v(
-          ID_byte_extract_little_endian,
+          matching_byte_extract_id,
           value,
           from_integer(*m_offset - *offset_int, offset.type()),
           expr.get_bits_per_byte(),
@@ -2246,7 +2334,7 @@ simplify_exprt::simplify_byte_update(const byte_update_exprt &expr)
   if(root.id()==ID_array)
   {
     auto el_size =
-      pointer_offset_bits(to_type_with_subtype(op_type).subtype(), ns);
+      pointer_offset_bits(to_type_with_subtype(root.type()).subtype(), ns);
 
     if(
       !el_size.has_value() || *el_size == 0 ||
@@ -2273,7 +2361,7 @@ simplify_exprt::simplify_byte_update(const byte_update_exprt &expr)
           bytes_req = (*val_size) / expr.get_bits_per_byte() - val_offset;
 
         byte_extract_exprt new_val(
-          ID_byte_extract_little_endian,
+          matching_byte_extract_id,
           value,
           from_integer(val_offset, offset.type()),
           expr.get_bits_per_byte(),
@@ -2585,8 +2673,73 @@ simplify_exprt::simplify_overflow_result(const overflow_result_exprt &expr)
     if(op_type_id != ID_signedbv && op_type_id != ID_unsignedbv)
       return unchanged(expr);
 
+    // a special case of overflow-minus checking with operands (X + n) and X
+    if(expr.id() == ID_overflow_result_minus)
+    {
+      const exprt &tc_op0 = skip_typecast(expr.op0());
+      const exprt &tc_op1 = skip_typecast(expr.op1());
+
+      if(auto sum = expr_try_dynamic_cast<plus_exprt>(tc_op0))
+      {
+        if(skip_typecast(sum->op0()) == tc_op1 && sum->operands().size() == 2)
+        {
+          std::optional<exprt> offset;
+          if(sum->type().id() == ID_pointer)
+          {
+            offset = std::move(simplify_pointer_offset(
+                                 pointer_offset_exprt{*sum, expr.op0().type()})
+                                 .expr);
+            if(offset->id() == ID_pointer_offset)
+              return unchanged(expr);
+          }
+          else
+            offset = std::move(
+              simplify_typecast(typecast_exprt{sum->op1(), expr.op0().type()})
+                .expr);
+
+          exprt offset_op = skip_typecast(*offset);
+          if(
+            offset_op.type().id() != ID_signedbv &&
+            offset_op.type().id() != ID_unsignedbv)
+          {
+            return unchanged(expr);
+          }
+
+          const std::size_t width =
+            to_bitvector_type(expr.op0().type()).get_width();
+          const integer_bitvector_typet bv_type{op_type_id, width};
+
+          or_exprt not_representable{
+            binary_relation_exprt{
+              offset_op,
+              ID_lt,
+              from_integer(bv_type.smallest(), offset_op.type())},
+            binary_relation_exprt{
+              offset_op,
+              ID_gt,
+              from_integer(bv_type.largest(), offset_op.type())}};
+
+          return struct_exprt{
+            {*offset, simplify_rec(not_representable)}, expr.type()};
+        }
+      }
+    }
+
     if(!expr.op0().is_constant() || !expr.op1().is_constant())
       return unchanged(expr);
+
+    // preserve the sizeof type annotation
+    std::optional<typet> c_sizeof_type;
+    for(const auto &op : expr.operands())
+    {
+      const typet &sizeof_type =
+        static_cast<const typet &>(op.find(ID_C_c_sizeof_type));
+      if(sizeof_type.is_not_nil())
+      {
+        c_sizeof_type = sizeof_type;
+        break;
+      }
+    }
 
     const auto op0_value = numeric_cast<mp_integer>(expr.op0());
     const auto op1_value = numeric_cast<mp_integer>(expr.op1());
@@ -2605,6 +2758,11 @@ simplify_exprt::simplify_overflow_result(const overflow_result_exprt &expr)
     else
       UNREACHABLE;
 
+    exprt no_overflow_result_expr =
+      from_integer(no_overflow_result, expr.op0().type());
+    if(c_sizeof_type.has_value())
+      no_overflow_result_expr.set(ID_C_c_sizeof_type, *c_sizeof_type);
+
     const std::size_t width = to_bitvector_type(expr.op0().type()).get_width();
     const integer_bitvector_typet bv_type{op_type_id, width};
     if(
@@ -2612,21 +2770,20 @@ simplify_exprt::simplify_overflow_result(const overflow_result_exprt &expr)
       no_overflow_result > bv_type.largest())
     {
       return struct_exprt{
-        {from_integer(no_overflow_result, expr.op0().type()), true_exprt{}},
-        expr.type()};
+        {std::move(no_overflow_result_expr), true_exprt{}}, expr.type()};
     }
     else
     {
       return struct_exprt{
-        {from_integer(no_overflow_result, expr.op0().type()), false_exprt{}},
-        expr.type()};
+        {std::move(no_overflow_result_expr), false_exprt{}}, expr.type()};
     }
   }
 }
 
-bool simplify_exprt::simplify_node_preorder(exprt &expr)
+simplify_exprt::resultt<>
+simplify_exprt::simplify_node_preorder(const exprt &expr)
 {
-  bool result=true;
+  auto result = unchanged(expr);
 
   // The ifs below could one day be replaced by a switch()
 
@@ -2635,29 +2792,75 @@ bool simplify_exprt::simplify_node_preorder(exprt &expr)
     // the argument of this expression needs special treatment
   }
   else if(expr.id()==ID_if)
-    result=simplify_if_preorder(to_if_expr(expr));
-  else if(expr.id() == ID_typecast)
-    result = simplify_typecast_preorder(to_typecast_expr(expr));
-  else
   {
-    if(expr.has_operands())
+    result = simplify_if_preorder(to_if_expr(expr));
+  }
+  else if(expr.id() == ID_typecast)
+  {
+    result = simplify_typecast_preorder(to_typecast_expr(expr));
+  }
+  else if(
+    expr.id() == ID_byte_extract_little_endian ||
+    expr.id() == ID_byte_extract_big_endian)
+  {
+    result = simplify_byte_extract_preorder(to_byte_extract_expr(expr));
+  }
+  else if(expr.id() == ID_dereference)
+  {
+    result = simplify_dereference_preorder(to_dereference_expr(expr));
+  }
+  else if(expr.id() == ID_index)
+  {
+    result = simplify_index_preorder(to_index_expr(expr));
+  }
+  else if(expr.id() == ID_member)
+  {
+    result = simplify_member_preorder(to_member_expr(expr));
+  }
+  else if(
+    expr.id() == ID_is_dynamic_object || expr.id() == ID_is_invalid_pointer ||
+    expr.id() == ID_object_size || expr.id() == ID_pointer_object ||
+    expr.id() == ID_pointer_offset)
+  {
+    result = simplify_unary_pointer_predicate_preorder(to_unary_expr(expr));
+  }
+  else if(expr.has_operands())
+  {
+    std::optional<exprt::operandst> new_operands;
+
+    for(std::size_t i = 0; i < expr.operands().size(); ++i)
     {
-      Forall_operands(it, expr)
+      auto r_it = simplify_rec(expr.operands()[i]); // recursive call
+      if(r_it.has_changed())
       {
-        auto r_it = simplify_rec(*it); // recursive call
-        if(r_it.has_changed())
-        {
-          *it = r_it.expr;
-          result=false;
-        }
+        if(!new_operands.has_value())
+          new_operands = expr.operands();
+        (*new_operands)[i] = std::move(r_it.expr);
       }
+    }
+
+    if(new_operands.has_value())
+    {
+      std::swap(result.expr.operands(), *new_operands);
+      result.expr_changed = resultt<>::CHANGED;
+    }
+  }
+
+  if(as_const(result.expr).type().id() == ID_array)
+  {
+    const array_typet &array_type = to_array_type(as_const(result.expr).type());
+    resultt<> simp_size = simplify_rec(array_type.size());
+    if(simp_size.has_changed())
+    {
+      to_array_type(result.expr.type()).size() = simp_size.expr;
+      result.expr_changed = resultt<>::CHANGED;
     }
   }
 
   return result;
 }
 
-simplify_exprt::resultt<> simplify_exprt::simplify_node(exprt node)
+simplify_exprt::resultt<> simplify_exprt::simplify_node(const exprt &node)
 {
   if(!node.has_operands())
     return unchanged(node); // no change
@@ -2733,10 +2936,6 @@ simplify_exprt::resultt<> simplify_exprt::simplify_node(exprt node)
     const auto object_size = expr_try_dynamic_cast<object_size_exprt>(expr))
   {
     r = simplify_object_size(*object_size);
-  }
-  else if(expr.id()==ID_good_pointer)
-  {
-    r = simplify_good_pointer(to_unary_expr(expr));
   }
   else if(expr.id()==ID_div)
   {
@@ -2904,6 +3103,18 @@ simplify_exprt::resultt<> simplify_exprt::simplify_node(exprt node)
   {
     r = simplify_bitreverse(to_bitreverse_expr(expr));
   }
+  else if(
+    const auto prophecy_r_or_w_ok =
+      expr_try_dynamic_cast<prophecy_r_or_w_ok_exprt>(expr))
+  {
+    r = simplify_prophecy_r_or_w_ok(*prophecy_r_or_w_ok);
+  }
+  else if(
+    const auto prophecy_pointer_in_range =
+      expr_try_dynamic_cast<prophecy_pointer_in_range_exprt>(expr))
+  {
+    r = simplify_prophecy_pointer_in_range(*prophecy_pointer_in_range);
+  }
 
   if(!no_change_join_operands)
     r = changed(r);
@@ -2946,50 +3157,54 @@ simplify_exprt::resultt<> simplify_exprt::simplify_rec(const exprt &expr)
   #endif
 
   // We work on a copy to prevent unnecessary destruction of sharing.
-  exprt tmp=expr;
-  bool no_change = simplify_node_preorder(tmp);
+  auto simplify_node_preorder_result = simplify_node_preorder(expr);
 
-  auto simplify_node_result = simplify_node(tmp);
+  auto simplify_node_result = simplify_node(simplify_node_preorder_result.expr);
 
-  if(simplify_node_result.has_changed())
+  if(
+    !simplify_node_result.has_changed() &&
+    simplify_node_preorder_result.has_changed())
   {
-    no_change = false;
-    tmp = simplify_node_result.expr;
+    simplify_node_result.expr_changed =
+      simplify_node_preorder_result.expr_changed;
   }
 
 #ifdef USE_LOCAL_REPLACE_MAP
-  #if 1
-  replace_mapt::const_iterator it=local_replace_map.find(tmp);
+  exprt tmp = simplify_node_result.expr;
+#  if 1
+  replace_mapt::const_iterator it =
+    local_replace_map.find(simplify_node_result.expr);
   if(it!=local_replace_map.end())
+    simplify_node_result = changed(it->second);
+#  else
+  if(
+    !local_replace_map.empty() &&
+    !replace_expr(local_replace_map, simplify_node_result.expr))
   {
-    tmp=it->second;
-    no_change = false;
+    simplify_node_result = changed(simplify_rec(simplify_node_result.expr));
   }
-  #else
-  if(!local_replace_map.empty() &&
-     !replace_expr(local_replace_map, tmp))
-  {
-    simplify_rec(tmp);
-    no_change = false;
-  }
-  #endif
+#  endif
 #endif
 
-  if(no_change) // no change
+  if(!simplify_node_result.has_changed())
   {
     return unchanged(expr);
   }
-  else // change, new expression is 'tmp'
+  else
   {
     POSTCONDITION_WITH_DIAGNOSTICS(
-      as_const(tmp).type() == expr.type(), tmp.pretty(), expr.pretty());
+      (as_const(simplify_node_result.expr).type().id() == ID_array &&
+       expr.type().id() == ID_array) ||
+        as_const(simplify_node_result.expr).type() == expr.type(),
+      simplify_node_result.expr.pretty(),
+      expr.pretty());
 
 #ifdef USE_CACHE
     // save in cache
-    cache_result.first->second = tmp;
+    cache_result.first->second = simplify_node_result.expr;
 #endif
 
-    return std::move(tmp);
+    return simplify_node_result;
   }
 }
 

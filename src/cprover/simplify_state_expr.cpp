@@ -17,7 +17,6 @@ Author: Daniel Kroening, dkr@amazon.com
 #include <util/namespace.h>
 #include <util/pointer_offset_size.h>
 #include <util/pointer_predicates.h>
-#include <util/prefix.h>
 #include <util/simplify_expr.h>
 #include <util/std_expr.h>
 #include <util/symbol.h>
@@ -320,14 +319,14 @@ exprt simplify_live_object_expr(
   {
     auto identifier = to_object_address_expr(object).object_identifier();
 
-    if(has_prefix(id2string(identifier), "allocate-"))
+    if(identifier.starts_with("allocate-"))
     {
     }
     else if(identifier == "return_value")
     {
       return true_exprt(); // never dies
     }
-    else if(has_prefix(id2string(identifier), "va_args::"))
+    else if(identifier.starts_with("va_args::"))
     {
       return true_exprt(); // might be 'dead'
     }
@@ -435,10 +434,10 @@ exprt simplify_writeable_object_expr(
   {
     auto identifier = to_object_address_expr(object).object_identifier();
 
-    if(has_prefix(id2string(identifier), "allocate-"))
+    if(identifier.starts_with("allocate-"))
     {
     }
-    else if(has_prefix(id2string(identifier), "va_args::"))
+    else if(identifier.starts_with("va_args::"))
     {
       return true_exprt(); // always writeable
     }
@@ -517,6 +516,10 @@ exprt simplify_object_size_expr(
   if(src.state().id() == ID_update_state)
   {
     return src.with_state(to_update_state_expr(src.state()).state());
+  }
+  else if(src.state().id() == ID_exit_scope_state)
+  {
+    return src.with_state(to_exit_scope_state_expr(src.state()).state());
   }
 
   return std::move(src);
@@ -628,7 +631,7 @@ static bool is_one(const exprt &src)
 {
   if(src.id() == ID_typecast)
     return is_one(to_typecast_expr(src).op());
-  else if(src.id() == ID_constant)
+  else if(src.is_constant())
   {
     auto value_opt = numeric_cast<mp_integer>(src);
     return value_opt.has_value() && *value_opt == 1;

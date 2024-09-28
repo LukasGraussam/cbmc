@@ -14,7 +14,6 @@ Author: Daniel Kroening, dkr@amazon.com
 #include <util/c_types.h>
 #include <util/namespace.h>
 #include <util/pointer_expr.h>
-#include <util/prefix.h>
 #include <util/std_expr.h>
 #include <util/symbol.h>
 
@@ -92,7 +91,7 @@ bool prefix_of(const typet &a, const typet &b, const namespacet &ns)
   return a_struct.is_prefix_of(b_struct) || b_struct.is_prefix_of(a_struct);
 }
 
-static optionalt<object_address_exprt> find_object(const exprt &expr)
+static std::optional<object_address_exprt> find_object(const exprt &expr)
 {
   if(expr.id() == ID_object_address)
     return to_object_address_expr(expr);
@@ -115,15 +114,15 @@ bool stack_and_not_dirty(
   {
     auto symbol_expr = object->object_expr();
     auto identifier = symbol_expr.get_identifier();
-    if(has_prefix(id2string(identifier), "va_arg::"))
+    if(identifier.starts_with("va_arg::"))
       return true; // on the stack, and might alias
-    else if(has_prefix(id2string(identifier), "var_args::"))
+    else if(identifier.starts_with("var_args::"))
       return false; // on the stack -- can take address?
-    else if(has_prefix(id2string(identifier), "va_args::"))
+    else if(identifier.starts_with("va_args::"))
       return false; // on the stack -- can take address?
-    else if(has_prefix(id2string(identifier), "va_arg_array::"))
+    else if(identifier.starts_with("va_arg_array::"))
       return false; // on the stack -- can take address?
-    else if(has_prefix(id2string(identifier), "old::"))
+    else if(identifier.starts_with("old::"))
       return true; // on the stack, but can't take address
     else if(identifier == "return_value")
       return true; // on the stack, but can't take address
@@ -145,7 +144,7 @@ static exprt drop_pointer_typecasts(exprt src)
     return src;
 }
 
-optionalt<exprt>
+std::optional<exprt>
 same_address(const exprt &a, const exprt &b, const namespacet &ns)
 {
   static const auto true_expr = true_exprt();
@@ -219,7 +218,7 @@ same_address(const exprt &a, const exprt &b, const namespacet &ns)
   return {};
 }
 
-optionalt<exprt> may_alias(
+std::optional<exprt> may_alias(
   const exprt &a,
   const exprt &b,
   const std::unordered_set<symbol_exprt, irep_hash> &address_taken,

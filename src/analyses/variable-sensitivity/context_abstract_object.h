@@ -23,14 +23,6 @@ class context_abstract_objectt : public abstract_objectt
 public:
   // These constructors mirror those in the base abstract_objectt, but with
   // the addition of an extra argument which is the abstract_objectt to wrap.
-  explicit context_abstract_objectt(
-    const abstract_object_pointert child,
-    const typet &type)
-    : abstract_objectt(type)
-  {
-    child_abstract_object = child;
-  }
-
   context_abstract_objectt(
     const abstract_object_pointert child,
     const typet &type,
@@ -132,7 +124,7 @@ protected:
 
   exprt to_predicate_internal(const exprt &name) const override;
 
-  typedef std::set<locationt> locationst;
+  typedef std::set<locationt, goto_programt::target_less_than> locationst;
 
   virtual context_abstract_object_ptrt
   update_location_context_internal(const locationst &locations) const = 0;

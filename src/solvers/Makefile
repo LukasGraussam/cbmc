@@ -66,6 +66,7 @@ ifneq ($(CADICAL),)
   CADICAL_INCLUDE=-I $(CADICAL)/src
   CADICAL_LIB=$(CADICAL)/build/libcadical$(LIBEXT)
   CP_CXXFLAGS += -DHAVE_CADICAL
+  CLEANFILES += $(CADICAL_LIB) $(patsubst %$(OBJEXT), %$(DEPEXT), $(CADICAL_LIB))
 endif
 
 SRC = $(BOOLEFORCE_SRC) \
@@ -127,7 +128,8 @@ SRC = $(BOOLEFORCE_SRC) \
       flattening/boolbv_unary_minus.cpp \
       flattening/boolbv_union.cpp \
       flattening/boolbv_update.cpp \
-      flattening/boolbv_vector.cpp \
+      flattening/boolbv_update_bit.cpp \
+      flattening/boolbv_update_bits.cpp \
       flattening/boolbv_width.cpp \
       flattening/boolbv_with.cpp \
       flattening/bv_dimacs.cpp \
@@ -211,6 +213,9 @@ SRC = $(BOOLEFORCE_SRC) \
       smt2_incremental/smt_solver_process.cpp \
       smt2_incremental/smt_to_smt2_string.cpp \
       smt2_incremental/smt2_incremental_decision_procedure.cpp \
+      smt2_incremental/encoding/struct_encoding.cpp \
+      smt2_incremental/encoding/enum_encoding.cpp \
+      smt2_incremental/encoding/nondet_padding.cpp \
       smt2_incremental/theories/smt_array_theory.cpp \
       smt2_incremental/theories/smt_bit_vector_theory.cpp \
       smt2_incremental/theories/smt_core_theory.cpp \
@@ -276,6 +281,9 @@ endif
 
 solvers$(LIBEXT): $(OBJ) $(SOLVER_LIB)
 	$(LINKLIB)
+
+../../cadical/build/libcadical$(LIBEXT):
+	$(MAKE) $(MAKEARGS) -C $(CADICAL)/build libcadical.a CXX="$(CXX)" CXXFLAGS="$(CP_CXXFLAGS) -DNFLEXIBLE -DNDEBUG"
 
 -include smt2/smt2_solver$(DEPEXT)
 

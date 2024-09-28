@@ -48,7 +48,8 @@ SCENARIO("subtract interval domain", "[core][analyses][interval][subtract]")
     WHEN("One contains infinite [2,4]-[6,INF]")
     {
       constant_interval_exprt left(CEV(2), CEV(4));
-      constant_interval_exprt right(CEV(6), max_exprt(signedbv_typet(32)));
+      constant_interval_exprt right(
+        CEV(6), max_value_exprt(signedbv_typet(32)));
 
       constant_interval_exprt result =
         constant_interval_exprt::minus(left, right);
@@ -72,8 +73,9 @@ SCENARIO("subtract interval domain", "[core][analyses][interval][subtract]")
 
     WHEN("Both contain infinite [2,INF]-[6,INF]")
     {
-      constant_interval_exprt left(CEV(2), max_exprt(signedbv_typet(32)));
-      constant_interval_exprt right(CEV(6), max_exprt(signedbv_typet(32)));
+      constant_interval_exprt left(CEV(2), max_value_exprt(signedbv_typet(32)));
+      constant_interval_exprt right(
+        CEV(6), max_value_exprt(signedbv_typet(32)));
 
       constant_interval_exprt result =
         constant_interval_exprt::minus(left, right);
@@ -105,8 +107,8 @@ SCENARIO(
 
   WHEN("Subtracting two constant intervals")
   {
-    auto lhs = constant_interval_exprt(get_value(10));
-    auto rhs = constant_interval_exprt(get_value(3));
+    auto lhs = constant_interval_exprt::singleton(get_value(10));
+    auto rhs = constant_interval_exprt::singleton(get_value(3));
     THEN("it should work")
     {
       auto result = constant_interval_exprt::minus(lhs, rhs);
@@ -119,8 +121,8 @@ SCENARIO(
 
   WHEN("Subtracting zero from something")
   {
-    auto lhs = constant_interval_exprt(get_value(10));
-    auto rhs = constant_interval_exprt(get_value(0));
+    auto lhs = constant_interval_exprt::singleton(get_value(10));
+    auto rhs = constant_interval_exprt::singleton(get_value(0));
 
     THEN("it should not give a completely crazy result")
     {
@@ -134,7 +136,7 @@ SCENARIO(
 
   WHEN("Subtracting an non-constant interval containing zero")
   {
-    auto lhs = constant_interval_exprt(get_value(10));
+    auto lhs = constant_interval_exprt::singleton(get_value(10));
     auto rhs = constant_interval_exprt(get_value(0), get_value(1));
     THEN("it should not give a completely crazy result")
     {

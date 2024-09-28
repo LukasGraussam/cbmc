@@ -147,28 +147,30 @@ static bool sort_and_join(exprt &expr, bool do_sort)
 
   // check operand types
 
-  forall_operands(it, expr)
-    if(!is_associative_and_commutative_for_type(saj_entry, it->type().id()))
+  for(const auto &op : as_const(expr).operands())
+  {
+    if(!is_associative_and_commutative_for_type(saj_entry, op.type().id()))
       return true;
+  }
 
   // join expressions
 
   exprt::operandst new_ops;
   new_ops.reserve(as_const(expr).operands().size());
 
-  forall_operands(it, expr)
+  for(const auto &op : as_const(expr).operands())
   {
-    if(it->id()==expr.id())
+    if(op.id() == expr.id())
     {
-      new_ops.reserve(new_ops.capacity()+it->operands().size()-1);
+      new_ops.reserve(new_ops.capacity() + op.operands().size() - 1);
 
-      forall_operands(it2, *it)
-        new_ops.push_back(*it2);
+      for(const auto &sub_op : op.operands())
+        new_ops.push_back(sub_op);
 
       no_change = false;
     }
     else
-      new_ops.push_back(*it);
+      new_ops.push_back(op);
   }
 
   // sort it
@@ -191,7 +193,7 @@ bool join_operands(exprt &expr)
   return sort_and_join(expr, false);
 }
 
-optionalt<exprt> bits2expr(
+std::optional<exprt> bits2expr(
   const std::string &bits,
   const typet &type,
   bool little_endian,
@@ -408,13 +410,13 @@ optionalt<exprt> bits2expr(
   return {};
 }
 
-optionalt<std::string>
+std::optional<std::string>
 expr2bits(const exprt &expr, bool little_endian, const namespacet &ns)
 {
   // extract bits from lowest to highest memory address
   const typet &type = expr.type();
 
-  if(expr.id() == ID_constant)
+  if(expr.is_constant())
   {
     const auto &value = to_constant_expr(expr).get_value();
 
@@ -437,7 +439,7 @@ expr2bits(const exprt &expr, bool little_endian, const namespacet &ns)
     }
     else if(type.id() == ID_pointer)
     {
-      if(config.ansi_c.NULL_is_zero && is_null_pointer(to_constant_expr(expr)))
+      if(config.ansi_c.NULL_is_zero && to_constant_expr(expr).is_null_pointer())
         return std::string(to_bitvector_type(type).get_width(), '0');
       else
         return {};
@@ -469,9 +471,9 @@ expr2bits(const exprt &expr, bool little_endian, const namespacet &ns)
     expr.id() == ID_complex)
   {
     std::string result;
-    forall_operands(it, expr)
+    for(const auto &op : expr.operands())
     {
-      auto tmp = expr2bits(*it, little_endian, ns);
+      auto tmp = expr2bits(op, little_endian, ns);
       if(!tmp.has_value())
         return {}; // failed
       result += tmp.value();
@@ -483,7 +485,7 @@ expr2bits(const exprt &expr, bool little_endian, const namespacet &ns)
   return {};
 }
 
-optionalt<std::reference_wrapper<const array_exprt>>
+std::optional<std::reference_wrapper<const array_exprt>>
 try_get_string_data_array(const exprt &content, const namespacet &ns)
 {
   if(content.id() != ID_address_of)
@@ -520,5 +522,5 @@ try_get_string_data_array(const exprt &content, const namespacet &ns)
 
   const auto &char_seq = to_array_expr(symbol_ptr->value);
 
-  return optionalt<std::reference_wrapper<const array_exprt>>(char_seq);
+  return std::optional<std::reference_wrapper<const array_exprt>>(char_seq);
 }

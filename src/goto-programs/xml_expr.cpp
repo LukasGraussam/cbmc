@@ -16,7 +16,6 @@ Author: Daniel Kroening
 #include <util/arith_tools.h>
 #include <util/c_types.h>
 #include <util/config.h>
-#include <util/expr_util.h>
 #include <util/fixedbv.h>
 #include <util/ieee_float.h>
 #include <util/invariant.h>
@@ -131,7 +130,7 @@ xmlt xml(const exprt &expr, const namespacet &ns)
 {
   xmlt result;
 
-  if(expr.id() == ID_constant)
+  if(expr.is_constant())
   {
     const auto &constant_expr = to_constant_expr(expr);
     const auto &value = constant_expr.get_value();
@@ -221,7 +220,7 @@ xmlt xml(const exprt &expr, const namespacet &ns)
       result.name = "pointer";
       result.set_attribute(
         "binary", integer2binary(bvrep2integer(value, width, false), width));
-      if(is_null_pointer(constant_expr))
+      if(constant_expr.is_null_pointer())
         result.data = "NULL";
     }
     else if(type.id() == ID_bool)
@@ -241,11 +240,11 @@ xmlt xml(const exprt &expr, const namespacet &ns)
 
     unsigned index = 0;
 
-    forall_operands(it, expr)
+    for(const auto &op : expr.operands())
     {
       xmlt &e = result.new_element("element");
       e.set_attribute("index", index);
-      e.new_element(xml(*it, ns));
+      e.new_element(xml(op, ns));
       index++;
     }
   }
@@ -253,21 +252,18 @@ xmlt xml(const exprt &expr, const namespacet &ns)
   {
     result.name = "struct";
 
-    const typet &type = ns.follow(expr.type());
+    const struct_typet &struct_type =
+      expr.type().id() == ID_struct_tag
+        ? ns.follow_tag(to_struct_tag_type(expr.type()))
+        : to_struct_type(expr.type());
+    const struct_typet::componentst &components = struct_type.components();
+    PRECONDITION(components.size() == expr.operands().size());
 
-    // these are expected to have a struct type
-    if(type.id() == ID_struct)
+    for(unsigned m = 0; m < expr.operands().size(); m++)
     {
-      const struct_typet &struct_type = to_struct_type(type);
-      const struct_typet::componentst &components = struct_type.components();
-      PRECONDITION(components.size() == expr.operands().size());
-
-      for(unsigned m = 0; m < expr.operands().size(); m++)
-      {
-        xmlt &e = result.new_element("member");
-        e.new_element() = xml(expr.operands()[m], ns);
-        e.set_attribute("name", id2string(components[m].get_name()));
-      }
+      xmlt &e = result.new_element("member");
+      e.new_element() = xml(expr.operands()[m], ns);
+      e.set_attribute("name", id2string(components[m].get_name()));
     }
   }
   else if(expr.id() == ID_union)

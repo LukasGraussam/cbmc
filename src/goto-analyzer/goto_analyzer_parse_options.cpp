@@ -14,11 +14,11 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <util/config.h>
 #include <util/exception_utils.h>
 #include <util/exit_codes.h>
+#include <util/help_formatter.h>
 #include <util/options.h>
 #include <util/version.h>
 
 #include <goto-programs/initialize_goto_model.h>
-#include <goto-programs/link_to_library.h>
 #include <goto-programs/process_goto_program.h>
 #include <goto-programs/set_properties.h>
 #include <goto-programs/show_properties.h>
@@ -28,6 +28,7 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <analyses/local_may_alias.h>
 #include <ansi-c/cprover_library.h>
 #include <ansi-c/gcc_version.h>
+#include <ansi-c/goto-conversion/link_to_library.h>
 #include <assembler/remove_asm.h>
 #include <cpp/cprover_library.h>
 
@@ -55,8 +56,41 @@ goto_analyzer_parse_optionst::goto_analyzer_parse_optionst(
 {
 }
 
+void goto_analyzer_parse_optionst::set_default_analysis_flags(
+  optionst &options,
+  const bool enabled)
+{
+  // Checks enabled by default in v6.0+.
+  options.set_option("bounds-check", enabled);
+  options.set_option("pointer-check", enabled);
+  options.set_option("pointer-primitive-check", enabled);
+  options.set_option("div-by-zero-check", enabled);
+  options.set_option("signed-overflow-check", enabled);
+  options.set_option("undefined-shift-check", enabled);
+
+  if(enabled)
+  {
+    config.ansi_c.malloc_may_fail = true;
+    config.ansi_c.malloc_failure_mode =
+      configt::ansi_ct::malloc_failure_modet::malloc_failure_mode_return_null;
+  }
+  else
+  {
+    config.ansi_c.malloc_may_fail = false;
+    config.ansi_c.malloc_failure_mode =
+      configt::ansi_ct::malloc_failure_modet::malloc_failure_mode_none;
+  }
+
+  // This is in-line with the options we set for CBMC in cbmc_parse_optionst
+  // with the exception of unwinding-assertions, which don't make sense in
+  // the context of abstract interpretation.
+}
+
 void goto_analyzer_parse_optionst::get_command_line_options(optionst &options)
 {
+  goto_analyzer_parse_optionst::set_default_analysis_flags(
+    options, !cmdline.isset("no-standard-checks"));
+
   if(config.set(cmdline))
   {
     usage_error();
@@ -66,7 +100,7 @@ void goto_analyzer_parse_optionst::get_command_line_options(optionst &options)
   if(cmdline.isset("function"))
     options.set_option("function", cmdline.get_value("function"));
 
-  // all checks supported by goto_check
+  // all (other) checks supported by goto_check
   PARSE_OPTIONS_GOTO_CHECK(cmdline, options);
 
   // The user should either select:
@@ -374,7 +408,7 @@ int goto_analyzer_parse_optionst::doit()
   optionst options;
   get_command_line_options(options);
   messaget::eval_verbosity(
-    cmdline.get_value("verbosity"), messaget::M_STATISTICS, ui_message_handler);
+    cmdline.get_value("verbosity"), messaget::M_STATUS, ui_message_handler);
 
   log_version_and_architecture("GOTO-ANALYZER");
 
@@ -392,6 +426,7 @@ int goto_analyzer_parse_optionst::doit()
 
   // Preserve backwards compatibility in processing
   options.set_option("partial-inline", true);
+  options.set_option("rewrite-rw-ok", false);
   options.set_option("rewrite-union", false);
   options.set_option("remove-returns", true);
 
@@ -663,13 +698,21 @@ bool goto_analyzer_parse_optionst::process_goto_program(
 {
   // Remove inline assembler; this needs to happen before
   // adding the library.
-  remove_asm(goto_model);
+  remove_asm(goto_model, ui_message_handler);
 
   // add the library
   log.status() << "Adding CPROVER library (" << config.ansi_c.arch << ")"
                << messaget::eom;
   link_to_library(goto_model, ui_message_handler, cprover_cpp_library_factory);
   link_to_library(goto_model, ui_message_handler, cprover_c_library_factory);
+  // library functions may introduce inline assembler
+  while(has_asm(goto_model))
+  {
+    remove_asm(goto_model, ui_message_handler);
+    link_to_library(
+      goto_model, ui_message_handler, cprover_cpp_library_factory);
+    link_to_library(goto_model, ui_message_handler, cprover_c_library_factory);
+  }
 
   // Common removal of types and complex constructs
   if(::process_goto_program(goto_model, options, log))
@@ -681,95 +724,85 @@ bool goto_analyzer_parse_optionst::process_goto_program(
 /// display command line help
 void goto_analyzer_parse_optionst::help()
 {
-  // clang-format off
-  std::cout << '\n' << banner_string("GOTO-ANALYZER", CBMC_VERSION) << '\n'
+  std::cout << '\n'
+            << banner_string("GOTO-ANALYZER", CBMC_VERSION) << '\n'
             << align_center_with_border("Copyright (C) 2017-2018") << '\n'
             << align_center_with_border("Daniel Kroening, Diffblue") << '\n'
-            << align_center_with_border("kroening@kroening.com") << '\n'
-            <<
+            << align_center_with_border("kroening@kroening.com") << '\n';
+
+  // clang-format off
+  std::cout << help_formatter(
     "\n"
-    "Usage:                       Purpose:\n"
+    "Usage:                     \tPurpose:\n"
     "\n"
-    " goto-analyzer [-?|-h|--help] show help\n"
-    " goto-analyzer file.c ...     source file names\n"
+    " {bgoto-analyzer} [{y-?}|{y-h}|{y--help}] \t show this help\n"
+    " {bgoto-analyzer} {ufile.c...} \t source file names\n"
     "\n"
     "Task options:\n"
-    " --show                       display the abstract states on the goto program\n" // NOLINT(*)
-    " --show-on-source             display the abstract states on the source\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --verify                     use the abstract domains to check assertions\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --simplify file_name         use the abstract domains to simplify the program\n"
-    " --no-simplify-slicing        do not remove instructions from which no\n"
-    "                              property can be reached (use with --simplify)\n" // NOLINT(*)
-    " --unreachable-instructions   list dead code\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --unreachable-functions      list functions unreachable from the entry point\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --reachable-functions        list functions reachable from the entry point\n"
+    " {y--show} \t display the abstract states on the goto program\n"
+    " {y--show-on-source} \t display the abstract states on the source\n"
+    " {y--verify} \t use the abstract domains to check assertions\n"
+    " {y--simplify} {ufile_name} \t use the abstract domains to simplify the"
+    " program\n"
+    " {y--no-simplify-slicing} \t do not remove instructions from which no"
+    " property can be reached (use with {y--simplify})\n"
+    " {y--unreachable-instructions} \t list dead code\n"
+    " {y--unreachable-functions} \t list functions unreachable from the entry"
+    " point\n"
+    " {y--reachable-functions} \t list functions reachable from the entry"
+    " point\n"
     "\n"
     "Abstract interpreter options:\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --legacy-ait                 recursion for function and one domain per location\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --recursive-interprocedural  use recursion to handle interprocedural reasoning\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --three-way-merge            use VSD's three-way merge on return from function call\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --legacy-concurrent          legacy-ait with an extended fixed-point for concurrency\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --location-sensitive         use location-sensitive abstract interpreter\n"
+    " {y--legacy-ait} \t recursion for function and one domain per location\n"
+    " {y--recursive-interprocedural} \t use recursion to handle interprocedural"
+    " reasoning\n"
+    " {y--three-way-merge} \t use VSD's three-way merge on return from function"
+    " call\n"
+    " {y--legacy-concurrent} \t legacy-ait with an extended fixed-point for"
+    " concurrency\n"
+    " {y--location-sensitive} \t use location-sensitive abstract interpreter\n"
     "\n"
     "History options:\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --ahistorical                the most basic history, tracks locations only\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --call-stack n               track the calling location stack for each function\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    "                              limiting to at most n recursive loops, 0 to disable\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --loop-unwind n              track the number of loop iterations within a function\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    "                              limited to n histories per location, 0 is unlimited\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --branching n                track the forwards jumps (if, switch, etc.) within a function\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    "                              limited to n histories per location, 0 is unlimited\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --loop-unwind-and-branching n track all local control flow\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    "                              limited to n histories per location, 0 is unlimited\n"
+    " {y--ahistorical} \t the most basic history, tracks locations only\n"
+    " {y--call-stack} {un} \t track the calling location stack for each"
+    " function limiting to at most {un} recursive loops, 0 to disable\n"
+    " {y--loop-unwind} {un} \t track the number of loop iterations within a"
+    " function limited to {un} histories per location, 0 is unlimited\n"
+    " {y--branching} {un} \t track the forwards jumps (if, switch, etc.) within"
+    " a function limited to {un} histories per location, 0 is unlimited\n"
+    " {y--loop-unwind-and-branching} {un} \t track all local control flow"
+    " limited to {un} histories per location, 0 is unlimited\n"
     "\n"
     "Domain options:\n"
-    " --constants                  a constant for each variable if possible\n"
-    " --intervals                  an interval for each variable\n"
-    " --non-null                   tracks which pointers are non-null\n"
-    " --dependence-graph           data and control dependencies between instructions\n" // NOLINT(*)
-    " --vsd, --variable-sensitivity\n"
-    "                              a configurable non-relational domain\n"
-    " --dependence-graph-vs        dependencies between instructions using VSD\n" // NOLINT(*)
+    " {y--constants} \t a constant for each variable if possible\n"
+    " {y--intervals} \t an interval for each variable\n"
+    " {y--non-null} \t tracks which pointers are non-null\n"
+    " {y--dependence-graph} \t data and control dependencies between"
+    " instructions\n"
+    " {y--vsd}, {y--variable-sensitivity} \t a configurable non-relational"
+    " domain\n"
+    " {y--dependence-graph-vs} \t dependencies between instructions using VSD\n"
     "\n"
     "Variable sensitivity domain (VSD) options:\n"
     HELP_VSD
     "\n"
     "Storage options:\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --one-domain-per-location    stores a domain for each location reached (default)\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --one-domain-per-history     stores a domain for each history object created\n"
+    " {y--one-domain-per-location} \t stores a domain for each location"
+    " reached\n"
+    " {y--one-domain-per-history} \t stores a domain for each history object"
+    " created\n"
     "\n"
     "Output options:\n"
-    " --text file_name             output results in plain text to given file\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --json file_name             output results in JSON format to given file\n"
-    " --xml file_name              output results in XML format to given file\n"
-    " --dot file_name              output results in DOT format to given file\n"
+    " {y--text} {ufile_name} \t output results in plain text to given file\n"
+    " {y--json} {ufile_name} \t output results in JSON format to given file\n"
+    " {y--xml} {ufile_name} \t output results in XML format to given file\n"
+    " {y--dot} {ufile_name} \t output results in DOT format to given file\n"
     "\n"
     "Specific analyses:\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --taint file_name            perform taint analysis using rules in given file\n"
-    " --show-taint                 print taint analysis results on stdout\n"
-    " --show-local-may-alias       perform procedure-local may alias analysis\n"
+    " {y--taint} {ufile_name} \t perform taint analysis using rules in given"
+    " file\n"
+    " {y--show-taint} \t print taint analysis results on stdout\n"
+    " {y--show-local-may-alias} \t perform procedure-local may alias analysis\n"
     "\n"
     "C/C++ frontend options:\n"
     HELP_CONFIG_C_CPP
@@ -779,22 +812,22 @@ void goto_analyzer_parse_optionst::help()
     HELP_CONFIG_PLATFORM
     "\n"
     "Program representations:\n"
-    " --show-parse-tree            show parse tree\n"
-    " --show-symbol-table          show loaded symbol table\n"
+    " {y--show-parse-tree} \t show parse tree\n"
+    " {y--show-symbol-table} \t show loaded symbol table\n"
     HELP_SHOW_GOTO_FUNCTIONS
     HELP_SHOW_PROPERTIES
     "\n"
     "Program instrumentation options:\n"
-    " --property id                enable selected properties only\n"
+    " {y--property} {uid} \t enable selected properties only\n"
     HELP_GOTO_CHECK
     HELP_CONFIG_LIBRARY
     "\n"
     "Other options:\n"
     HELP_VALIDATE
-    " --version                    show version and exit\n"
+    " {y--version} \t show version and exit\n"
     HELP_FLUSH
-    " --verbosity #                verbosity level\n"
+    " {y--verbosity} {u#} \t verbosity level\n"
     HELP_TIMESTAMP
-    "\n";
+    "\n");
   // clang-format on
 }

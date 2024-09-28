@@ -13,6 +13,7 @@ Author: Peter Schrammel
 
 #include <util/config.h>
 #include <util/exit_codes.h>
+#include <util/help_formatter.h>
 #include <util/options.h>
 #include <util/version.h>
 
@@ -143,7 +144,11 @@ int jdiff_parse_optionst::doit()
         : (cmdline.isset("backward-impact") ? impact_modet::BACKWARD
                                             : impact_modet::BOTH);
     change_impact(
-      goto_model1, goto_model2, impact_mode, cmdline.isset("compact-output"));
+      goto_model1,
+      goto_model2,
+      impact_mode,
+      cmdline.isset("compact-output"),
+      ui_message_handler);
 
     return CPROVER_EXIT_SUCCESS;
   }
@@ -185,7 +190,7 @@ bool jdiff_parse_optionst::process_goto_program(
   class_hierarchyt class_hierarchy(goto_model.symbol_table);
   remove_instanceof(goto_model, class_hierarchy, ui_message_handler);
 
-  mm_io(goto_model);
+  mm_io(goto_model, ui_message_handler);
 
   // instrument library preconditions
   instrument_preconditions(goto_model);
@@ -234,34 +239,34 @@ void jdiff_parse_optionst::help()
   std::cout << '\n' << banner_string("JDIFF", CBMC_VERSION) << '\n'
             << align_center_with_border("Copyright (C) 2016-2018") << '\n'
             << align_center_with_border("Daniel Kroening, Peter Schrammel") << '\n' // NOLINT(*)
-            << align_center_with_border("kroening@kroening.com") << '\n'
-            <<
+            << align_center_with_border("kroening@kroening.com") << '\n';
+
+  std::cout << help_formatter(
     "\n"
-    "Usage:                       Purpose:\n"
+    "Usage:                     \tPurpose:\n"
     "\n"
-    " jdiff [-?] [-h] [--help]      show help\n"
-    " jdiff old new                 jars to be compared\n"
+    " {bjdiff} [{y-?}] [{y-h}] [{y--help}] \t show this help\n"
+    " {bjdiff} {uold} {unew} \t jars to be compared\n"
     "\n"
     "Diff options:\n"
     HELP_SHOW_GOTO_FUNCTIONS
     HELP_SHOW_PROPERTIES
-    " --show-loops                 show the loops in the programs\n"
-    " -u | --unified               output unified diff\n"
-    " --change-impact | \n"
-    "  --forward-impact |\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    "  --backward-impact           output unified diff with forward&backward/forward/backward dependencies\n"
-    " --compact-output             output dependencies in compact mode\n"
+    " {y--show-loops} \t show the loops in the programs\n"
+    " {y-u}, {y--unified} \t output unified diff\n"
+    " {y--change-impact}, {y--forward-impact}, {y--backward-impact} \t output"
+    " unified diff with forward&backward/forward/backward dependencies\n"
+    " {y--compact-output} \t output dependencies in compact mode\n"
     "\n"
     "Program instrumentation options:\n"
-    " --no-assertions              ignore user assertions\n"
-    " --no-assumptions             ignore user assumptions\n"
+    " {y--no-assertions} \t ignore user assertions\n"
+    " {y--no-assumptions} \t ignore user assumptions\n"
     HELP_COVER
+    "\n"
     "Other options:\n"
-    " --version                    show version and exit\n"
-    " --json-ui                    use JSON-formatted output\n"
-    " --verbosity #                verbosity level\n"
+    " {y--version} \t show version and exit\n"
+    " {y--json-ui} \t use JSON-formatted output\n"
+    " {y--verbosity} {u#} \t verbosity level\n"
     HELP_TIMESTAMP
-    "\n";
+    "\n");
   // clang-format on
 }

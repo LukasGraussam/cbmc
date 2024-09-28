@@ -1,15 +1,20 @@
 name: Build and Test CBMC
 on:
+  push:
+    branches: [ develop ]
   pull_request:
     branches: [ develop ]
 env:
-  cvc5-version: "1.0.0"
+  cvc5-version: "1.1.2"
+  linux-vcpus: 4
+  windows-vcpus: 4
 
 jobs:
+  # This job takes approximately 15 to 40 minutes
   check-ubuntu-20_04-make-gcc:
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
       - name: Fetch dependencies
@@ -24,13 +29,14 @@ jobs:
         run: z3 --version
       - name: Download cvc-5 from the releases page and make sure it can be deployed
         run: |
-          wget -O cvc5 https://github.com/cvc5/cvc5/releases/download/cvc5-${{env.cvc5-version}}/cvc5-Linux
-          chmod u+x cvc5
-          mv cvc5 /usr/local/bin
+          wget https://github.com/cvc5/cvc5/releases/download/cvc5-${{env.cvc5-version}}/cvc5-Linux-static.zip
+          unzip -j -d /usr/local/bin cvc5-Linux-static.zip cvc5-Linux-static/bin/cvc5
+          rm cvc5-Linux-static.zip
           cvc5 --version
       - name: Prepare ccache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
+          save-always: true
           path: .ccache
           key: ${{ runner.os }}-20.04-make-${{ github.ref }}-${{ github.sha }}-PR
           restore-keys: |
@@ -46,17 +52,17 @@ jobs:
         run: |
           git clone https://github.com/conp-solutions/riss riss.git
           cmake -Hriss.git -Briss.git/release -DCMAKE_BUILD_TYPE=Release
-          make -C riss.git/release riss-coprocessor-lib-static -j2
-          make -C src -j2 CXX="ccache g++" LIBS="$PWD/riss.git/release/lib/libriss-coprocessor.a -lpthread" IPASIR=$PWD/riss.git/riss
-          make -C jbmc/src -j2 CXX="ccache g++" LIBS="$PWD/riss.git/release/lib/libriss-coprocessor.a -lpthread" IPASIR=$PWD/riss.git/riss
+          make -C riss.git/release riss-coprocessor-lib-static -j${{env.linux-vcpus}}
+          make -C src -j${{env.linux-vcpus}} CXX="ccache g++" LIBS="$PWD/riss.git/release/lib/libriss-coprocessor.a -lpthread" IPASIR=$PWD/riss.git/riss
+          make -C jbmc/src -j${{env.linux-vcpus}} CXX="ccache g++" LIBS="$PWD/riss.git/release/lib/libriss-coprocessor.a -lpthread" IPASIR=$PWD/riss.git/riss
 
-          make -C unit -j2 CXX="ccache g++" LIBS="$PWD/riss.git/release/lib/libriss-coprocessor.a -lpthread" IPASIR=$PWD/riss.git/riss
+          make -C unit -j${{env.linux-vcpus}} CXX="ccache g++" LIBS="$PWD/riss.git/release/lib/libriss-coprocessor.a -lpthread" IPASIR=$PWD/riss.git/riss
 
-          make -C jbmc/unit -j2 CXX="ccache g++" LIBS="$PWD/riss.git/release/lib/libriss-coprocessor.a -lpthread" IPASIR=$PWD/riss.git/riss
+          make -C jbmc/unit -j${{env.linux-vcpus}} CXX="ccache g++" LIBS="$PWD/riss.git/release/lib/libriss-coprocessor.a -lpthread" IPASIR=$PWD/riss.git/riss
       - name: Print ccache stats
         run: ccache -s
       - name: Checking completeness of help output
-        run: scripts/check_help.sh
+        run: scripts/check_help.sh g++
       - name: Run unit tests
         run: |
           make -C unit test IPASIR=$PWD/riss.git/riss
@@ -66,18 +72,33 @@ jobs:
           make TAGS="[!shouldfail]" -C jbmc/unit test IPASIR=$PWD/riss.git/riss
       - name: Run regression tests
         run: |
-          make -C regression test-parallel JOBS=2
+          make -C regression test-parallel JOBS=${{env.linux-vcpus}} LIBS="$PWD/riss.git/release/lib/libriss-coprocessor.a -lpthread" IPASIR=$PWD/riss.git/riss
           make -C regression/cbmc test-paths-lifo
           env PATH=$PATH:`pwd`/src/solvers make -C regression/cbmc test-cprover-smt2
-          make -C jbmc/regression test-parallel JOBS=2
+          make -C jbmc/regression test-parallel JOBS=${{env.linux-vcpus}}
+      - name: Check cleanup
+        run: |
+          make -C src clean IPASIR=$PWD/riss.git/riss
+          make -C jbmc/src clean IPASIR=$PWD/riss.git/riss
+          rm -r riss.git
+          rm src/goto-cc/goto-ld
+          make -C unit clean
+          make -C regression clean
+          make -C jbmc/unit clean
+          make -C jbmc/regression clean
+          if [[ $(git status --ignored --porcelain | grep -v .ccache/) ]] ; then
+            git status --ignored
+            exit 1
+          fi
 
+  # This job takes approximately 25 to 34 minutes
   check-ubuntu-20_04-make-clang:
     runs-on: ubuntu-20.04
     env:
       CC: "ccache /usr/bin/clang"
       CXX: "ccache /usr/bin/clang++"
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
       - name: Fetch dependencies
@@ -88,19 +109,20 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --no-install-recommends -yq clang-10 clang++-10 gdb maven jq flex bison libxml2-utils cpanminus ccache z3
-          make -C src minisat2-download
+          make -C src minisat2-download cadical-download
           cpanm Thread::Pool::Simple
       - name: Confirm z3 solver is available and log the version installed
         run: z3 --version
       - name: Download cvc-5 from the releases page and make sure it can be deployed
         run: |
-          wget -O cvc5 https://github.com/cvc5/cvc5/releases/download/cvc5-${{env.cvc5-version}}/cvc5-Linux
-          chmod u+x cvc5
-          mv cvc5 /usr/local/bin
+          wget https://github.com/cvc5/cvc5/releases/download/cvc5-${{env.cvc5-version}}/cvc5-Linux-static.zip
+          unzip -j -d /usr/local/bin cvc5-Linux-static.zip cvc5-Linux-static/bin/cvc5
+          rm cvc5-Linux-static.zip
           cvc5 --version
       - name: Prepare ccache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
+          save-always: true
           path: .ccache
           key: ${{ runner.os }}-20.04-make-clang-${{ github.ref }}-${{ github.sha }}-PR
           restore-keys: |
@@ -114,10 +136,10 @@ jobs:
         run: ccache -z --max-size=500M
       - name: Build with make
         run: |
-          make -C src       -j2
-          make -C unit      -j2
-          make -C jbmc/src  -j2
-          make -C jbmc/unit -j2
+          make -C src       -j${{env.linux-vcpus}} MINISAT2=../../minisat-2.2.1 CADICAL=../../cadical
+          make -C unit      -j${{env.linux-vcpus}}
+          make -C jbmc/src  -j${{env.linux-vcpus}}
+          make -C jbmc/unit -j${{env.linux-vcpus}}
       - name: Print ccache stats
         run: ccache -s
       - name: Run unit tests
@@ -131,24 +153,25 @@ jobs:
           make TAGS="[!shouldfail]" -C jbmc/unit test
       - name: Run regression tests
         run: |
-          make -C regression test-parallel JOBS=2
+          make -C regression test-parallel JOBS=${{env.linux-vcpus}}
           make -C regression/cbmc test-paths-lifo
           env PATH=$PATH:`pwd`/src/solvers make -C regression/cbmc test-cprover-smt2
-          make -C jbmc/regression test-parallel JOBS=2
+          make -C jbmc/regression test-parallel JOBS=${{env.linux-vcpus}}
 
   # This job has been copied from the one above it, and modified to only build CBMC
   # and run the `regression/cbmc/` regression tests against Z3. The rest of the tests
-  # (unit/regression) have been stripped based on the rationale that they are going
+  # (unit/regression) have been stripped based on the rationale that they are going
   # to be run by the job above, which is basically the same, but more comprehensive.
   # The reason we opted for a new job is that adding a `test-z3` step to the current
-  # jobs increases the job runtime to unacceptable levels (over 2hrs).
+  # jobs increases the job runtime to unacceptable levels (over 2hrs).
+  # This job takes approximately 3 to 18 minutes
   check-ubuntu-20_04-make-clang-smt-z3:
     runs-on: ubuntu-20.04
     env:
       CC: "ccache /usr/bin/clang"
       CXX: "ccache /usr/bin/clang++"
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
       - name: Fetch dependencies
@@ -161,20 +184,15 @@ jobs:
           cpanm Thread::Pool::Simple
       - name: Confirm z3 solver is available and log the version installed
         run: z3 --version
-      - name: Download cvc-5 from the releases page and make sure it can be deployed
-        run: |
-          wget -O cvc5 https://github.com/cvc5/cvc5/releases/download/cvc5-${{env.cvc5-version}}/cvc5-Linux
-          chmod u+x cvc5
-          mv cvc5 /usr/local/bin
-          cvc5 --version
       - name: Prepare ccache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
+          save-always: true
           path: .ccache
-          key: ${{ runner.os }}-20.04-make-clang-smt-z3-${{ github.ref }}-${{ github.sha }}-PR
+          key: ${{ runner.os }}-20.04-make-clang-${{ github.ref }}-${{ github.sha }}-PR
           restore-keys: |
-            ${{ runner.os }}-20.04-make-clang-smt-z3-${{ github.ref }}
-            ${{ runner.os }}-20.04-make-clang-smt-z3
+            ${{ runner.os }}-20.04-make-clang-${{ github.ref }}
+            ${{ runner.os }}-20.04-make-clang
       - name: ccache environment
         run: |
           echo "CCACHE_BASEDIR=$PWD" >> $GITHUB_ENV
@@ -182,14 +200,17 @@ jobs:
       - name: Zero ccache stats and limit in size
         run: ccache -z --max-size=500M
       - name: Build with make
-        run: make -C src -j2
+        run: make -C src -j${{env.linux-vcpus}}
+      - name: Print ccache stats
+        run: ccache -s
       - name: Run regression/cbmc tests with z3 as the backend
         run: make -C regression/cbmc test-z3
 
+  # This job takes approximately 17 to 42 minutes
   check-ubuntu-20_04-cmake-gcc:
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
       - name: Fetch dependencies
@@ -199,18 +220,19 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -yq cmake ninja-build gcc gdb g++ maven flex bison libxml2-utils dpkg-dev ccache doxygen z3
+          sudo apt-get install --no-install-recommends -yq cmake ninja-build gcc gdb g++ maven flex bison libxml2-utils dpkg-dev ccache doxygen graphviz z3
       - name: Confirm z3 solver is available and log the version installed
         run: z3 --version
       - name: Download cvc-5 from the releases page and make sure it can be deployed
         run: |
-          wget -O cvc5 https://github.com/cvc5/cvc5/releases/download/cvc5-${{env.cvc5-version}}/cvc5-Linux
-          chmod u+x cvc5
-          mv cvc5 /usr/local/bin
+          wget https://github.com/cvc5/cvc5/releases/download/cvc5-${{env.cvc5-version}}/cvc5-Linux-static.zip
+          unzip -j -d /usr/local/bin cvc5-Linux-static.zip cvc5-Linux-static/bin/cvc5
+          rm cvc5-Linux-static.zip
           cvc5 --version
       - name: Prepare ccache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
+          save-always: true
           path: .ccache
           key: ${{ runner.os }}-20.04-Release-${{ github.ref }}-${{ github.sha }}-PR
           restore-keys: |
@@ -221,34 +243,44 @@ jobs:
           echo "CCACHE_BASEDIR=$PWD" >> $GITHUB_ENV
           echo "CCACHE_DIR=$PWD/.ccache" >> $GITHUB_ENV
       - name: Configure using CMake
-        run: |
-          mkdir build
-          cd build
-          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++
+        run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++ -Dsat_impl="minisat2;cadical"
       - name: Check that doc task works
-        run: |
-          cd build
-          ninja doc
+        run: ninja -C build doc
       - name: Zero ccache stats and limit in size
         run: ccache -z --max-size=500M
       - name: Build with Ninja
-        run: cd build; ninja -j2
+        run: ninja -C build -j${{env.linux-vcpus}}
       - name: Print ccache stats
         run: ccache -s
       - name: Checking completeness of help output
-        run: scripts/check_help.sh build/bin
+        run: scripts/check_help.sh /usr/bin/g++ build/bin
       - name: Check if package building works
         run: |
           cd build
           ninja package
           ls *.deb
       - name: Run tests
-        run: cd build; ctest . -V -L CORE -j2
+        run: cd build; ctest . -V -L CORE -j${{env.linux-vcpus}}
+      - name: Check cleanup
+        run: |
+          rm -r build
+          rm scripts/bash-autocomplete/cbmc.sh
+          make -C unit clean
+          make -C regression clean
+          make -C jbmc/regression clean
+          if [[ $(git status --ignored --porcelain | grep -v .ccache/) ]] ; then
+            git status --ignored
+            exit 1
+          fi
 
-  check-ubuntu-22_04-cmake-gcc:
+  # This job takes approximately 20 to 38 minutes
+  check-ubuntu-22_04-make-clang:
     runs-on: ubuntu-22.04
+    env:
+      CC: "ccache /usr/bin/clang"
+      CXX: "ccache /usr/bin/clang++"
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
       - name: Fetch dependencies
@@ -258,18 +290,87 @@ jobs:
           DEBIAN_FRONTEND: noninteractive
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -yq cmake ninja-build gcc gdb g++ maven flex bison libxml2-utils dpkg-dev ccache doxygen z3
+          sudo apt-get install --no-install-recommends -yq clang clang-14 gdb maven jq flex bison libxml2-utils cpanminus ccache z3
+          make -C src minisat2-download cadical-download
+          cpanm Thread::Pool::Simple
       - name: Confirm z3 solver is available and log the version installed
         run: z3 --version
       - name: Download cvc-5 from the releases page and make sure it can be deployed
         run: |
-          wget -O cvc5 https://github.com/cvc5/cvc5/releases/download/cvc5-${{env.cvc5-version}}/cvc5-Linux
-          chmod u+x cvc5
-          mv cvc5 /usr/local/bin
+          wget https://github.com/cvc5/cvc5/releases/download/cvc5-${{env.cvc5-version}}/cvc5-Linux-static.zip
+          unzip -j -d /usr/local/bin cvc5-Linux-static.zip cvc5-Linux-static/bin/cvc5
+          rm cvc5-Linux-static.zip
           cvc5 --version
       - name: Prepare ccache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
+          save-always: true
+          path: .ccache
+          key: ${{ runner.os }}-22.04-make-clang-${{ github.ref }}-${{ github.sha }}-PR
+          restore-keys: |
+            ${{ runner.os }}-22.04-make-clang-${{ github.ref }}
+            ${{ runner.os }}-22.04-make-clang
+      - name: ccache environment
+        run: |
+          echo "CCACHE_BASEDIR=$PWD" >> $GITHUB_ENV
+          echo "CCACHE_DIR=$PWD/.ccache" >> $GITHUB_ENV
+      - name: Zero ccache stats and limit in size
+        run: ccache -z --max-size=500M
+      - name: Perform C/C++ library syntax check
+        run: |
+          make -C src/ansi-c library_check
+          make -C src/cpp library_check
+      - name: Build with make
+        run: |
+          make -C src       -j${{env.linux-vcpus}} MINISAT2=../../minisat-2.2.1 CADICAL=../../cadical
+          make -C unit      -j${{env.linux-vcpus}}
+          make -C jbmc/src  -j${{env.linux-vcpus}}
+          make -C jbmc/unit -j${{env.linux-vcpus}}
+      - name: Print ccache stats
+        run: ccache -s
+      - name: Run unit tests
+        run: |
+          make -C unit      test
+          make -C jbmc/unit test
+          make TAGS="[z3]" -C unit test
+      - name: Run expected failure unit tests
+        run: |
+          make TAGS="[!shouldfail]" -C unit test
+          make TAGS="[!shouldfail]" -C jbmc/unit test
+      - name: Run regression tests
+        run: |
+          make -C regression test-parallel JOBS=${{env.linux-vcpus}}
+          make -C regression/cbmc test-paths-lifo
+          env PATH=$PATH:`pwd`/src/solvers make -C regression/cbmc test-cprover-smt2
+          make -C jbmc/regression test-parallel JOBS=${{env.linux-vcpus}}
+
+  # This job takes approximately 17 to 41 minutes
+  check-ubuntu-22_04-cmake-gcc:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Fetch dependencies
+        env:
+          # This is needed in addition to -yq to prevent apt-get from asking for
+          # user input
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -yq cmake ninja-build gcc gdb g++ maven flex bison libxml2-utils dpkg-dev ccache doxygen graphviz z3
+      - name: Confirm z3 solver is available and log the version installed
+        run: z3 --version
+      - name: Download cvc-5 from the releases page and make sure it can be deployed
+        run: |
+          wget https://github.com/cvc5/cvc5/releases/download/cvc5-${{env.cvc5-version}}/cvc5-Linux-static.zip
+          unzip -j -d /usr/local/bin cvc5-Linux-static.zip cvc5-Linux-static/bin/cvc5
+          rm cvc5-Linux-static.zip
+          cvc5 --version
+      - name: Prepare ccache
+        uses: actions/cache@v4
+        with:
+          save-always: true
           path: .ccache
           key: ${{ runner.os }}-22.04-Release-${{ github.ref }}-${{ github.sha }}-PR
           restore-keys: |
@@ -280,18 +381,13 @@ jobs:
           echo "CCACHE_BASEDIR=$PWD" >> $GITHUB_ENV
           echo "CCACHE_DIR=$PWD/.ccache" >> $GITHUB_ENV
       - name: Configure using CMake
-        run: |
-          mkdir build
-          cd build
-          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++
+        run: cmake -S . -Bbuild -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++ -Dsat_impl="minisat2;cadical"
       - name: Check that doc task works
-        run: |
-          cd build
-          ninja doc
+        run: ninja -C build doc
       - name: Zero ccache stats and limit in size
         run: ccache -z --max-size=500M
       - name: Build with Ninja
-        run: cd build; ninja -j2
+        run: ninja -C build -j${{env.linux-vcpus}}
       - name: Print ccache stats
         run: ccache -s
       - name: Check if package building works
@@ -300,12 +396,113 @@ jobs:
           ninja package
           ls *.deb
       - name: Run tests
-        run: cd build; ctest . -V -L CORE -j2
+        run: cd build; ctest . -V -L CORE -j${{env.linux-vcpus}}
 
+  # This job takes approximately 14 to 46 minutes
+  check-ubuntu-24_04-cmake-gcc-14:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Fetch dependencies
+        env:
+          # This is needed in addition to -yq to prevent apt-get from asking for
+          # user input
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -yq cmake ninja-build gcc-14 gdb g++-14 maven flex bison libxml2-utils dpkg-dev ccache doxygen z3
+          # Update symlinks so that any use of gcc (including our regression
+          # tests) will use GCC 14.
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-14 110 \
+            --slave /usr/bin/g++ g++ /usr/bin/g++-14 \
+            --slave /usr/bin/gcov gcov /usr/bin/gcov-14
+          sudo ln -sf cpp-14 /usr/bin/cpp
+      - name: Confirm z3 solver is available and log the version installed
+        run: z3 --version
+      - name: Download cvc-5 from the releases page and make sure it can be deployed
+        run: |
+          wget https://github.com/cvc5/cvc5/releases/download/cvc5-${{env.cvc5-version}}/cvc5-Linux-static.zip
+          unzip -j -d /usr/local/bin cvc5-Linux-static.zip cvc5-Linux-static/bin/cvc5
+          rm cvc5-Linux-static.zip
+          cvc5 --version
+      - name: Prepare ccache
+        uses: actions/cache@v4
+        with:
+          save-always: true
+          path: .ccache
+          key: ${{ runner.os }}-24.04-Release-gcc-14-${{ github.ref }}-${{ github.sha }}-PR
+          restore-keys: |
+            ${{ runner.os }}-24.04-Release-gcc-14-${{ github.ref }}
+            ${{ runner.os }}-24.04-Release-gcc-14
+      - name: ccache environment
+        run: |
+          echo "CCACHE_BASEDIR=$PWD" >> $GITHUB_ENV
+          echo "CCACHE_DIR=$PWD/.ccache" >> $GITHUB_ENV
+      - name: Configure using CMake
+        run: cmake -S . -Bbuild -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS=-Wp,-D_GLIBCXX_ASSERTIONS
+      - name: Zero ccache stats and limit in size
+        run: ccache -z --max-size=500M
+      - name: Build with Ninja
+        run: ninja -C build -j${{env.linux-vcpus}}
+      - name: Print ccache stats
+        run: ccache -s
+      - name: Run tests
+        run: cd build; ctest . -V -L CORE -j${{env.linux-vcpus}}
+
+  # This job takes approximately 14 to 60 minutes
+  check-ubuntu-22_04-cmake-gcc-32bit:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Fetch dependencies
+        env:
+          # This is needed in addition to -yq to prevent apt-get from asking for
+          # user input
+          DEBIAN_FRONTEND: noninteractive
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -yq cmake ninja-build gcc gdb g++ maven flex bison libxml2-utils ccache doxygen z3 g++-multilib
+      - name: Confirm z3 solver is available and log the version installed
+        run: z3 --version
+      - name: Download cvc-5 from the releases page and make sure it can be deployed
+        run: |
+          wget https://github.com/cvc5/cvc5/releases/download/cvc5-${{env.cvc5-version}}/cvc5-Linux-static.zip
+          unzip -j -d /usr/local/bin cvc5-Linux-static.zip cvc5-Linux-static/bin/cvc5
+          rm cvc5-Linux-static.zip
+          cvc5 --version
+      - name: Prepare ccache
+        uses: actions/cache@v4
+        with:
+          save-always: true
+          path: .ccache
+          key: ${{ runner.os }}-22.04-Release-32-${{ github.ref }}-${{ github.sha }}-PR
+          restore-keys: |
+            ${{ runner.os }}-22.04-Release-32-${{ github.ref }}
+            ${{ runner.os }}-22.04-Release-32
+      - name: ccache environment
+        run: |
+          echo "CCACHE_BASEDIR=$PWD" >> $GITHUB_ENV
+          echo "CCACHE_DIR=$PWD/.ccache" >> $GITHUB_ENV
+      - name: Configure using CMake
+        run: cmake -S . -Bbuild -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++ -Dsat_impl="minisat2;cadical" -DCMAKE_CXX_FLAGS=-m32
+      - name: Zero ccache stats and limit in size
+        run: ccache -z --max-size=500M
+      - name: Build with Ninja
+        run: ninja -C build -j${{env.linux-vcpus}}
+      - name: Print ccache stats
+        run: ccache -s
+      - name: Run tests
+        run: cd build; ctest . -V -L CORE -j${{env.linux-vcpus}}
+
+  # This job takes approximately 2 to 24 minutes
   check-ubuntu-20_04-cmake-gcc-KNOWNBUG:
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
       - name: Fetch dependencies
@@ -317,8 +514,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends -yq cmake ninja-build gcc g++ maven flex bison libxml2-utils ccache z3
       - name: Prepare ccache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
+          save-always: true
           path: .ccache
           key: ${{ runner.os }}-20.04-Release-${{ github.ref }}-${{ github.sha }}-PR
           restore-keys: |
@@ -329,28 +527,29 @@ jobs:
           echo "CCACHE_BASEDIR=$PWD" >> $GITHUB_ENV
           echo "CCACHE_DIR=$PWD/.ccache" >> $GITHUB_ENV
       - name: Configure using CMake
-        run: cmake -H. -Bbuild -G Ninja
+        run: cmake -H. -Bbuild -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++
       - name: Zero ccache stats and limit in size
         run: ccache -z --max-size=500M
       - name: Build with Ninja
-        run: ninja -C build -j2
+        run: ninja -C build -j${{env.linux-vcpus}}
       - name: Print ccache stats
         run: ccache -s
       - name: Run tests
         run: |
           cd build
-          ctest . -V -L KNOWNBUG -j2
+          ctest . -V -L KNOWNBUG -j${{env.linux-vcpus}}
           export PATH=$PWD/bin:$PATH
           cd ../regression/cbmc
           sed -i '1s/^CORE\(.*\)broken-smt-backend/KNOWNBUG\1broken-smt-backend/' */*.desc
           # the following tests fail on Windows only
-          git checkout -- memory_allocation1 printf1 union12 va_list3
+          git checkout -- memory_allocation1 printf1 printf3 union12 va_list3
           ../test.pl -c "cbmc --cprover-smt2" -I broken-smt-backend -K
 
+  # This job takes approximately 7 to 30 minutes
   check-ubuntu-20_04-cmake-gcc-THOROUGH:
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
       - name: Fetch dependencies
@@ -362,8 +561,9 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends -yq cmake ninja-build gcc g++ maven flex bison libxml2-utils ccache z3
       - name: Prepare ccache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
+          save-always: true
           path: .ccache
           key: ${{ runner.os }}-20.04-Release-${{ github.ref }}-${{ github.sha }}-PR
           restore-keys: |
@@ -374,35 +574,40 @@ jobs:
           echo "CCACHE_BASEDIR=$PWD" >> $GITHUB_ENV
           echo "CCACHE_DIR=$PWD/.ccache" >> $GITHUB_ENV
       - name: Configure using CMake
-        run: cmake -H. -Bbuild -G Ninja
+        run: cmake -H. -Bbuild -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++ -Dsat_impl="minisat2;cadical"
       - name: Zero ccache stats and limit in size
         run: ccache -z --max-size=500M
       - name: Build with Ninja
-        run: ninja -C build -j2
+        run: ninja -C build -j${{env.linux-vcpus}}
       - name: Print ccache stats
         run: ccache -s
       - name: Run tests
-        run: cd build; ctest . -V -L THOROUGH -j2
+        run: cd build; ctest . -V -L THOROUGH -j${{env.linux-vcpus}}
 
-  check-macos-11-make-clang:
-    runs-on: macos-11
+  # This job takes approximately 39 to 69 minutes
+  check-macos-13-make-clang:
+    runs-on: macos-13
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
       - name: Fetch dependencies
-        run: brew install maven flex bison parallel ccache z3
+        run: |
+          # maven is already installed and upgrading to a newer version yields
+          # symlink conflicts as previously reported in https://github.com/actions/runner-images/issues/4020
+          brew install flex bison parallel ccache z3
       - name: Confirm z3 solver is available and log the version installed
         run: z3 --version
       - name: Download cvc5 binary and make sure it can be deployed
         run: |
-          curl -L https://github.com/cvc5/cvc5/releases/download/cvc5-${{env.cvc5-version}}/cvc5-macOS --output cvc5
-          chmod u+x cvc5
-          mv cvc5 /usr/local/bin
+          wget https://github.com/cvc5/cvc5/releases/download/cvc5-${{env.cvc5-version}}/cvc5-macOS-static.zip
+          unzip -j -d /usr/local/bin cvc5-macOS-static.zip cvc5-macOS-static/bin/cvc5
+          rm cvc5-macOS-static.zip
           cvc5 --version
       - name: Prepare ccache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
+          save-always: true
           path: .ccache
           key: ${{ runner.os }}-make-${{ github.ref }}-${{ github.sha }}-PR
           restore-keys: |
@@ -416,9 +621,9 @@ jobs:
         run: ccache -z --max-size=500M
       - name: Build using Make
         run: |
-          make -C src minisat2-download
-          make -C src -j3 CXX="ccache clang++"
-          make -C jbmc/src -j3 CXX="ccache clang++"
+          make -C src minisat2-download cadical-download
+          make -C src -j4 CXX="ccache clang++" MINISAT2=../../minisat-2.2.1 CADICAL=../../cadical
+          make -C jbmc/src -j4 CXX="ccache clang++"
           make -C unit "CXX=ccache clang++"
           make -C jbmc/unit "CXX=ccache clang++"
       - name: Print ccache stats
@@ -430,14 +635,15 @@ jobs:
       - name: Run JBMC unit tests
         run: cd jbmc/unit; ./unit_tests
       - name: Run regression tests
-        run: make -C regression test-parallel JOBS=3
+        run: make -C regression test-parallel JOBS=4
       - name: Run JBMC regression tests
-        run: make -C jbmc/regression test-parallel JOBS=3
+        run: make -C jbmc/regression test-parallel JOBS=4
 
+  # This job takes approximately 36 to 85 minutes
   check-macos-12-cmake-clang:
     runs-on: macos-12
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
       - name: Fetch dependencies
@@ -446,18 +652,19 @@ jobs:
         run: z3 --version
       - name: Download cvc5 binary and make sure it can be deployed
         run: |
-          curl -L https://github.com/cvc5/cvc5/releases/download/cvc5-${{env.cvc5-version}}/cvc5-macOS --output cvc5
-          chmod u+x cvc5
-          mv cvc5 /usr/local/bin
+          wget https://github.com/cvc5/cvc5/releases/download/cvc5-${{env.cvc5-version}}/cvc5-macOS-static.zip
+          unzip -j -d /usr/local/bin cvc5-macOS-static.zip cvc5-macOS-static/bin/cvc5
+          rm cvc5-macOS-static.zip
           cvc5 --version
       - name: Prepare ccache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
+          save-always: true
           path: .ccache
-          key: ${{ runner.os }}-Release-${{ github.ref }}-${{ github.sha }}-PR
+          key: ${{ runner.os }}-Release-Glucose-${{ github.ref }}-${{ github.sha }}-PR
           restore-keys: |
-            ${{ runner.os }}-Release-${{ github.ref }}
-            ${{ runner.os }}-Release
+            ${{ runner.os }}-Release-Glucose-${{ github.ref }}
+            ${{ runner.os }}-Release-Glucose
       - name: ccache environment
         run: |
           echo "CCACHE_BASEDIR=$PWD" >> $GITHUB_ENV
@@ -468,7 +675,7 @@ jobs:
         run: |
           mkdir build
           cd build
-          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=/usr/bin/clang -DCMAKE_CXX_COMPILER=/usr/bin/clang++ -Dsat_impl=glucose
+          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=$(brew --prefix llvm@15)/bin/clang -DCMAKE_CXX_COMPILER=$(brew --prefix llvm@15)/bin/clang++ -Dsat_impl=glucose
       - name: Build with Ninja
         run: cd build; ninja -j3
       - name: Print ccache stats
@@ -476,37 +683,43 @@ jobs:
       - name: Run CTest
         run: cd build; ctest -V -L CORE . -j3
 
+  # This job takes approximately 49 to 70 minutes
   check-vs-2019-cmake-build-and-test:
     runs-on: windows-2019
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - uses: nuget/setup-nuget@v1
-        with:
-          nuget-version: '5.8.x'
+      - name: Setup Visual Studio environment
+        uses: microsoft/setup-msbuild@v2
       - name: Fetch dependencies
         run: |
           choco install winflexbison3
+          if($LastExitCode -ne 0)
+          {
+            Write-Output "::error ::Dependency installation via Chocolatey failed."
+            exit $LastExitCode
+          }
           nuget install clcache -OutputDirectory "c:\tools" -ExcludeVersion -Version 4.1.0
           echo "c:\tools\clcache\clcache-4.1.0" >> $env:GITHUB_PATH
           Invoke-WebRequest -Uri https://github.com/Z3Prover/z3/releases/download/z3-4.8.10/z3-4.8.10-x64-win.zip -OutFile .\z3.zip
           Expand-Archive -LiteralPath '.\z3.Zip' -DestinationPath C:\tools
           echo "c:\tools\z3-4.8.10-x64-win\bin;" >> $env:GITHUB_PATH
           New-Item -ItemType directory "C:\tools\cvc5"
-          Invoke-WebRequest -Uri https://github.com/cvc5/cvc5/releases/download/cvc5-${{env.cvc5-version}}/cvc5-Win64.exe -OutFile c:\tools\cvc5\cvc5.exe
+          Invoke-WebRequest -Uri https://github.com/cvc5/cvc5/releases/download/cvc5-${{env.cvc5-version}}/cvc5-Win64-static.zip -OutFile .\cvc5-Win64-static.zip
+          Expand-Archive -LiteralPath '.\cvc5-Win64-static.Zip'
+          Move-Item -Path .\cvc5-Win64-static\cvc5-Win64-static\bin\cvc5.exe c:\tools\cvc5\cvc5.exe
           echo "c:\tools\cvc5;" >> $env:GITHUB_PATH
       - name: Confirm z3 solver is available and log the version installed
         run: z3 --version
       - name: Confirm cvc5 solver is available and log the version installed
         run: cvc5 --version
-      - name: Setup Visual Studio environment
-        uses: microsoft/setup-msbuild@v1
       - name: Prepare ccache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
+          save-always: true
           path: .ccache
           key: ${{ runner.os }}-msbuild-${{ github.ref }}-${{ github.sha }}-PR
           restore-keys: |
@@ -518,6 +731,10 @@ jobs:
           echo "CLCACHE_DIR=$pwd\.ccache" >> $env:GITHUB_ENV
       - name: Configure with cmake
         run: cmake -S . -B build
+      - name: Zero ccache stats and limit in size (2 GB)
+        run: |
+          clcache -z
+          clcache -M 2147483648
       - name: Build Release
         run: cmake --build build --config Release -- /p:UseMultiToolTask=true /p:CLToolExe=clcache
       - name: Print ccache stats
@@ -526,43 +743,51 @@ jobs:
       - name: Test cbmc
         run: |
           Set-Location build
-          ctest -V -L CORE -C Release . -j2
+          ctest -V -L CORE -C Release . -j${{env.windows-vcpus}}
 
+  # This job takes approximately 18 to 84 minutes
   check-vs-2022-make-build-and-test:
     runs-on: windows-2022
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - uses: nuget/setup-nuget@v1
-        with:
-          nuget-version: '5.8.x'
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
       - name: Fetch dependencies
         run: |
-          choco install winflexbison3 strawberryperl
+          choco install -y winflexbison3 strawberryperl wget
+          if($LastExitCode -ne 0)
+          {
+            Write-Output "::error ::Dependency installation via Chocolatey failed."
+            exit $LastExitCode
+          }
           nuget install clcache -OutputDirectory "c:\tools" -ExcludeVersion -Version 4.1.0
           echo "c:\tools\clcache\clcache-4.1.0" >> $env:GITHUB_PATH
-          echo "c:\ProgramData\chocolatey\bin" >> $env:GITHUB_PATH
           echo "c:\Strawberry\" >> $env:GITHUB_PATH
           Invoke-WebRequest -Uri https://github.com/Z3Prover/z3/releases/download/z3-4.8.10/z3-4.8.10-x64-win.zip -OutFile .\z3.zip
           Expand-Archive -LiteralPath '.\z3.Zip' -DestinationPath C:\tools
           echo "c:\tools\z3-4.8.10-x64-win\bin;" >> $env:GITHUB_PATH
           New-Item -ItemType directory "C:\tools\cvc5"
-          Invoke-WebRequest -Uri https://github.com/cvc5/cvc5/releases/download/cvc5-${{env.cvc5-version}}/cvc5-Win64.exe -OutFile c:\tools\cvc5\cvc5.exe
+          Invoke-WebRequest -Uri https://github.com/cvc5/cvc5/releases/download/cvc5-${{env.cvc5-version}}/cvc5-Win64-static.zip -OutFile .\cvc5-Win64-static.zip
+          Expand-Archive -LiteralPath '.\cvc5-Win64-static.Zip'
+          Move-Item -Path .\cvc5-Win64-static\cvc5-Win64-static\bin\cvc5.exe c:\tools\cvc5\cvc5.exe
           echo "c:\tools\cvc5;" >> $env:GITHUB_PATH
+          New-Item -ItemType directory "C:\tools\parallel"
+          wget.exe -O c:\tools\parallel\parallel https://git.savannah.gnu.org/cgit/parallel.git/plain/src/parallel
+          echo "c:\tools\parallel" >> $env:GITHUB_PATH
       - name: Confirm z3 solver is available and log the version installed
         run: z3 --version
       - name: Confirm cvc5 solver is available and log the version installed
         run: cvc5 --version
-      - name: Setup MSBuild
-        uses: microsoft/setup-msbuild@v1
       - name: Initialise Developer Command Line
         uses: ilammy/msvc-dev-cmd@v1
       - name: Prepare ccache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
+          save-always: true
           path: .ccache
           key: ${{ runner.os }}-msbuild-make-${{ github.ref }}-${{ github.sha }}-PR
           restore-keys: |
@@ -572,18 +797,22 @@ jobs:
         run: |
           echo "CLCACHE_BASEDIR=$((Get-Item -Path '.\').FullName)" >> $env:GITHUB_ENV
           echo "CLCACHE_DIR=$pwd\.ccache" >> $env:GITHUB_ENV
+      - name: Zero ccache stats and limit in size (2 GB)
+        run: |
+          clcache -z
+          clcache -M 2147483648
       - name: Download minisat with make
         run: make -C src minisat2-download
       - name: Build CBMC with make
-        run: make CXX=clcache BUILD_ENV=MSVC -j2 -C src
+        run: make CXX=clcache BUILD_ENV=MSVC -j${{env.windows-vcpus}} -C src
       - name: Build unit tests with make
-        run: make CXX=clcache BUILD_ENV=MSVC -j2 -C unit all
+        run: make CXX=clcache BUILD_ENV=MSVC -j${{env.windows-vcpus}} -C unit all
       - name: Build jbmc with make
         run: |
-          make CXX=clcache -j2 -C jbmc/src setup-submodules
-          make CXX=clcache BUILD_ENV=MSVC -j2 -C jbmc/src
+          make CXX=clcache -j${{env.windows-vcpus}} -C jbmc/src setup-submodules
+          make CXX=clcache BUILD_ENV=MSVC -j${{env.windows-vcpus}} -C jbmc/src
       - name: Build JBMC unit tests
-        run: make CXX=clcache BUILD_ENV=MSVC -j2 -C jbmc/unit all
+        run: make CXX=clcache BUILD_ENV=MSVC -j${{env.windows-vcpus}} -C jbmc/unit all
       - name: Print ccache stats
         run: clcache -s
       - name: Run CBMC and JBMC unit tests
@@ -592,72 +821,33 @@ jobs:
           make CXX=clcache BUILD_ENV=MSVC -C unit test TAGS="[z3]"
           make CXX=clcache BUILD_ENV=MSVC -C jbmc/unit test
       - name: Run CBMC regression tests
-        run: make CXX=clcache BUILD_ENV=MSVC -C regression test
-        
+        run: make CXX=clcache BUILD_ENV=MSVC -C regression test-parallel JOBS=${{env.windows-vcpus}}
 
-  check-clang-format:
-    runs-on: ubuntu-20.04
-    steps:
-      - uses: actions/checkout@v3
-        with:
-          submodules: recursive
-          fetch-depth: 0
-      - name: Fetch dependencies
-        env:
-          # This is needed in addition to -yq to prevent apt-get from asking for
-          # user input
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -yq clang-format-11
-      - name: Check updated lines of code match clang-format-11 style
-        env:
-          BASE_BRANCH: ${{ github.base_ref }}
-          MERGE_BRANCH: ${{ github.ref }}
-        run: ./.github/workflows/pull-request-check-clang-format.sh
-
-  check-cpplint:
-    runs-on: ubuntu-20.04
-    steps:
-      - uses: actions/checkout@v3
-        with:
-          submodules: recursive
-          fetch-depth: 0
-      - name: Fetch dependencies
-        env:
-          # This is needed in addition to -yq to prevent apt-get from asking for
-          # user input
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -yq python3-unidiff
-      - name: Check updated lines of code meet linting standards
-        env:
-          BASE_BRANCH: ${{ github.base_ref }}
-          MERGE_BRANCH: ${{ github.ref }}
-        run: ./.github/workflows/pull-request-check-cpplint.sh
-
+  # This job takes approximately 7 to 32 minutes
   windows-msi-package:
     runs-on: windows-2019
     env:
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
-      - uses: nuget/setup-nuget@v1
-        with:
-          nuget-version: '5.8.x'
+      - name: Setup Visual Studio environment
+        uses: microsoft/setup-msbuild@v2
       - name: Fetch dependencies
         run: |
           choco install winflexbison3
+          if($LastExitCode -ne 0)
+          {
+            Write-Output "::error ::Dependency installation via Chocolatey failed."
+            exit $LastExitCode
+          }
           nuget install clcache -OutputDirectory "c:\tools" -ExcludeVersion -Version 4.1.0
           echo "c:\tools\clcache\clcache-4.1.0" >> $env:GITHUB_PATH
-      - name: Setup Visual Studio environment
-        uses: microsoft/setup-msbuild@v1
       - name: Prepare ccache
-        uses: actions/cache@v3
+        uses: actions/cache@v4
         with:
+          save-always: true
           path: .ccache
           key: ${{ runner.os }}-msbuild-${{ github.ref }}-${{ github.sha }}-PKG
           restore-keys: |
@@ -685,87 +875,19 @@ jobs:
           echo "msi_installer=build/$msi_name" >> $env:GITHUB_OUTPUT
           echo "msi_name=$msi_name" >> $env:GITHUB_OUTPUT
 
-  ubuntu-18_04-package:
-    runs-on: ubuntu-18.04
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    steps:
-      - uses: actions/checkout@v3
-        with:
-          submodules: recursive
-      - name: Fetch dependencies
-        run: | 
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y g++ gdb flex bison cmake ninja-build maven jq libxml2-utils dpkg-dev ccache
-          # remove libgcc-s1, which isn't normally available in Ubuntu 18.04
-          target=$(dpkg-query -W --showformat='${Version}\n' gcc-8-base | head -n 1)
-          # libgcc1 uses an epoch, thus the extra 1:
-          sudo apt-get install -y --allow-downgrades --reinstall gcc g++ libgcc-s1- libstdc++6=$target liblsan0=$target libtsan0=$target libcc1-0=$target libgcc1=1:$target gdb=8.1.1-0ubuntu1
-      - name: Download z3 4.11.0 from the python wheel package, extract it and make sure it can be deployed
-        run: |
-          sudo apt-get install --no-install-recommends -y unzip
-          # download the z3 python wheel package
-          wget -O z3.4.11.0.whl https://github.com/Z3Prover/z3/releases/download/z3-4.11.0/z3_solver-4.11.0.0-py2.py3-none-manylinux1_x86_64.whl
-          # unpack the bundle using python
-          unzip z3.4.11.0.whl
-          # make z3 executable and move it in /usr/local/bin
-          chmod u+x ./z3_solver-4.11.0.0.data/data/bin/z3
-          mv ./z3_solver-4.11.0.0.data/data/bin/z3 /usr/local/bin/
-          z3 --version
-      - name: Download cvc-5 from the releases page and make sure it can be deployed
-        run: |
-          wget -O cvc5 https://github.com/cvc5/cvc5/releases/download/cvc5-${{env.cvc5-version}}/cvc5-Linux
-          chmod u+x cvc5
-          mv cvc5 /usr/local/bin
-          cvc5 --version
-      - name: Prepare ccache
-        uses: actions/cache@v3
-        with:
-          path: .ccache
-          key: ${{ runner.os }}-18.04-Release-${{ github.ref }}-${{ github.sha }}-PR
-          restore-keys: |
-            ${{ runner.os }}-18.04-Release-${{ github.ref }}
-            ${{ runner.os }}-18.04-Release
-      - name: ccache environment
-        run: |
-          echo "CCACHE_BASEDIR=$PWD" >> $GITHUB_ENV
-          echo "CCACHE_DIR=$PWD/.ccache" >> $GITHUB_ENV
-      - name: Zero ccache stats and limit in size
-        run: ccache -z --max-size=500M
-      - name: Configure CMake
-        run: |
-          mkdir build
-          cd build
-          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -Dsat_impl=cadical
-      - name: Build using Ninja
-        run: |
-          cd build
-          ninja -j2
-      - name: Print ccache stats
-        run: ccache -s
-      - name: Run CTest
-        run: cd build; ctest . -V -L CORE -C Release -j2
-      - name: Create packages
-        id: create_packages
-        run: |
-          cd build
-          ninja package
-          deb_package_name="$(ls *.deb)"
-          echo "deb_package=./build/$deb_package_name" >> $GITHUB_OUTPUT
-          echo "deb_package_name=ubuntu-18.04-$deb_package_name" >> $GITHUB_OUTPUT
-
-
+  # This job takes approximately 2 to 3 minutes
   check-string-table:
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Check for unused irep ids
         run: ./scripts/string_table_check.sh
 
+  # This job takes approximately 23 to 29 minutes
   check-docker-image:
     runs-on: ubuntu-20.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
       - name: Download test dependencies
@@ -785,10 +907,11 @@ jobs:
       - name: Smoke test goto-analyzer
         run: docker run -v ${PWD}/.github/workflows/smoke_test_assets:/mnt/smoke -t cbmc goto-analyzer /mnt/smoke/test.goto --unreachable-functions
 
+  # This job takes approximately 22 to 41 minutes
   include-what-you-use:
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
         with:
           submodules: recursive
       - name: Fetch dependencies
@@ -800,68 +923,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install --no-install-recommends -yq cmake ninja-build gcc gdb g++ maven flex bison iwyu
       - name: Configure using CMake
-        run: |
-          mkdir build
-          cd build
-          cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++
+        run: cmake -S . -Bbuild -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++
       - name: Run include-what-you-use
         run: |
-          iwyu_tool -p build/compile_commands.json -j2 | tee includes.txt
+          iwyu_tool -p build/compile_commands.json -j${{env.linux-vcpus}} | tee includes.txt
           if sed '/minisat2-src/,/^--$/d' includes.txt | grep '^- ' -B1 ; then
             echo "Unnecessary includes found. Use '// IWYU pragma: keep' to override this."
             exit 1
           fi
-
-  codecov-coverage-report:
-    runs-on: ubuntu-20.04
-    steps:
-      - name: Clone repository
-        uses: actions/checkout@v3
-        with:
-          submodules: recursive
-      - name: Download testing and coverage dependencies
-        env:
-          # This is needed in addition to -yq to prevent apt-get from asking for
-          # user input
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          sudo apt-get update
-          sudo apt-get install --no-install-recommends -y g++ gcc gdb binutils flex bison cmake maven jq libxml2-utils openjdk-11-jdk-headless lcov ccache z3
-      - name: Confirm z3 solver is available and log the version installed
-        run: z3 --version
-      - name: Download cvc-5 from the releases page and make sure it can be deployed
-        run: |
-          wget -O cvc5 https://github.com/cvc5/cvc5/releases/download/cvc5-${{env.cvc5-version}}/cvc5-Linux
-          chmod u+x cvc5
-          mv cvc5 /usr/local/bin
-          cvc5 --version
-      - name: Prepare ccache
-        uses: actions/cache@v3
-        with:
-          path: .ccache
-          key: ${{ runner.os }}-20.04-Coverage-${{ github.ref }}-${{ github.sha }}-PR
-          restore-keys: |
-            ${{ runner.os }}-20.04-Coverage-${{ github.ref }}
-            ${{ runner.os }}-20.04-Coverage
-      - name: ccache environment
-        run: |
-          echo "CCACHE_BASEDIR=$PWD" >> $GITHUB_ENV
-          echo "CCACHE_DIR=$PWD/.ccache" >> $GITHUB_ENV
-      - name: Configure CMake CBMC build with coverage instrumentation parameters
-        run: cmake -S . -Bbuild -Denable_coverage=1 -Dparallel_tests=2 -DCMAKE_CXX_COMPILER=/usr/bin/g++
-      - name: Zero ccache stats and limit in size
-        run: ccache -z --max-size=4G
-      - name: Execute CMake CBMC build
-        run: cmake --build build -- -j2
-      - name: Print ccache stats
-        run: ccache -s
-      - name: Run CTest and collect coverage statistics
-        run: |
-          echo "lcov_excl_line = UNREACHABLE" > ~/.lcovrc
-          cmake --build build --target coverage -- -j2
-      - name: Upload coverage statistics to Codecov
-        uses: codecov/codecov-action@v3
-        with:
-          files: build/html/coverage.info
-          fail_ci_if_error: true
-          verbose: true

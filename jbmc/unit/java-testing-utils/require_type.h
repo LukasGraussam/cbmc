@@ -22,8 +22,11 @@ Author: Diffblue Ltd.
 namespace require_type
 {
 pointer_typet
-require_pointer(const typet &type, const optionalt<typet> &subtype);
+require_pointer(const typet &type, const std::optional<typet> &subtype);
 
+#if defined(__GNUC__) && __GNUC__ >= 14
+[[gnu::no_dangling]]
+#endif
 const struct_tag_typet &
 require_struct_tag(const typet &type, const irep_idt &identifier = "");
 
@@ -78,7 +81,7 @@ java_generic_parametert require_java_generic_parameter(
 
 const typet &require_java_non_generic_type(
   const typet &type,
-  const optionalt<struct_tag_typet> &expect_subtype);
+  const std::optional<struct_tag_typet> &expect_subtype);
 
 class_typet require_complete_class(const typet &class_type);
 

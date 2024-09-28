@@ -4,7 +4,7 @@
 
 \author Martin Brain, Peter Schrammel
 
-## `src/` ##
+## `src/`
 
 The source code is divided into a number of sub-directories, each
 containing the code for a different part of the system.
@@ -32,7 +32,6 @@ containing the code for a different part of the system.
   * C: \ref ansi-c
   * C++: \ref cpp
   * Java: \ref java_bytecode
-  * JavaScript: \ref jsil
 
 - Tools
 
@@ -51,11 +50,10 @@ containing the code for a different part of the system.
   * \ref xmllang
   * \ref util
   * \ref miniz
-  * \ref nonstd
 
 In the top level of `src` there are only a few files:
 
-* `config.inc`:   The user-editable configuration parameters for the
+* `config.inc`: The user-editable configuration parameters for the
   build process. The main use of this file is setting the paths for the
   various external SAT solvers that are used. As such, anyone building
   from source will likely need to edit this.
@@ -69,24 +67,24 @@ In the top level of `src` there are only a few files:
 
 * `doxygen.cfg`:   The config file for doxygen.cfg
 
-## `doc/` ##
+## `doc/`
 
 Contains the CBMC man page. Doxygen HTML pages are generated
 into the `doc/html` directory when running `doxygen` from `src`.
 
-## `regression/` ##
+## `regression/`
 
 The `regression/` directory contains the regression test suites. See
 \ref compilation-and-development for information on how to run and
 develop regression tests.
 
-## `unit/` ##
+## `unit/`
 
 The `unit/` directory contains the unit test suites. See
 \ref compilation-and-development for information on how to run and
 develop unit tests.
 
-## Directory dependencies ##
+## Directory dependencies
 
 This diagram shows *intended* directory dependencies.  Arrows should
 be read transitively - dependencies of dependencies are often used
@@ -156,7 +154,6 @@ digraph directory_dependencies {
     ansi_c [label = "ansi-c", URL = "\ref ansi-c"];
     langapi [URL = "\ref langapi"];
     cpp [URL = "\ref cpp"];
-    jsil [URL = "\ref jsil"];
     java_bytecode [URL = "\ref java_bytecode"];  
   }
 
@@ -167,7 +164,6 @@ digraph directory_dependencies {
     big_int [label = "big-int", URL = "\ref big-int"];
     miniz [URL = "\ref miniz"];
     util [URL = "\ref util"];
-    nonstd [URL = "\ref nonstd"];
     json [URL = "\ref json"];
     xmllang [URL = "\ref xmllang"];
     assembler [URL = "\ref assembler"];
@@ -176,15 +172,14 @@ digraph directory_dependencies {
   JBMC -> { CBMC, java_bytecode };
   jdiff -> { goto_diff, java_bytecode };
   janalyzer -> { goto_analyzer, java_bytecode };
-  CBMC -> { goto_instrument, jsil };
+  CBMC -> { goto_instrument };
   goto_diff -> { goto_instrument };
-  goto_analyzer -> { analyses, jsil, cpp };
+  goto_analyzer -> { analyses, cpp };
   goto_instrument -> { goto_symex, cpp };
-  goto_cc -> { cpp, jsil };
+  goto_cc -> { cpp };
   smt2_solver -> solvers;
 
   java_bytecode -> { analyses, miniz };
-  jsil -> linking;
   cpp -> ansi_c;
   ansi_c -> langapi;
   langapi -> goto_programs;
@@ -203,6 +198,5 @@ digraph directory_dependencies {
   xmllang -> util;
   assembler -> util;
   util -> big_int;
-  util -> nonstd;
 }
 \enddot

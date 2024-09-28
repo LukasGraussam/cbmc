@@ -39,13 +39,19 @@ static void build_object_descriptor_rec(
     build_object_descriptor_rec(ns, index.array(), dest);
 
     auto sub_size = size_of_expr(expr.type(), ns);
-    CHECK_RETURN(sub_size.has_value());
 
-    dest.offset() = plus_exprt(
-      dest.offset(),
-      mult_exprt(
-        typecast_exprt::conditional_cast(index.index(), c_index_type()),
-        typecast_exprt::conditional_cast(sub_size.value(), c_index_type())));
+    if(sub_size.has_value())
+    {
+      dest.offset() = plus_exprt(
+        dest.offset(),
+        mult_exprt(
+          typecast_exprt::conditional_cast(index.index(), c_index_type()),
+          typecast_exprt::conditional_cast(sub_size.value(), c_index_type())));
+    }
+    else
+    {
+      dest.offset() = exprt(ID_unknown);
+    }
   }
   else if(expr.id() == ID_member)
   {
@@ -237,4 +243,31 @@ exprt pointer_in_range_exprt::lower() const
      binary_relation_exprt(pointer_offset(op0()), ID_le, pointer_offset(op1())),
      binary_relation_exprt(
        pointer_offset(op1()), ID_le, pointer_offset(op2()))});
+}
+
+exprt prophecy_r_or_w_ok_exprt::lower(const namespacet &ns) const
+{
+  return and_exprt{
+    {not_exprt{null_object(pointer())},
+     not_exprt{is_invalid_pointer_exprt{pointer()}},
+     not_exprt{same_object(pointer(), deallocated_ptr())},
+     not_exprt{same_object(pointer(), dead_ptr())},
+     not_exprt{object_lower_bound(pointer(), nil_exprt())},
+     not_exprt{object_upper_bound(pointer(), size())}}};
+}
+
+exprt prophecy_pointer_in_range_exprt::lower(const namespacet &ns) const
+{
+  return and_exprt{
+    {same_object(op0(), op1()),
+     same_object(op1(), op2()),
+     prophecy_r_ok_exprt(
+       op0(),
+       minus_exprt(pointer_offset(op2()), pointer_offset(op0())),
+       deallocated_ptr(),
+       dead_ptr())
+       .lower(ns),
+     binary_relation_exprt(pointer_offset(op0()), ID_le, pointer_offset(op1())),
+     binary_relation_exprt(
+       pointer_offset(op1()), ID_le, pointer_offset(op2()))}};
 }

@@ -40,7 +40,7 @@ public:
   virtual void finish_eager_conversion();
 
   // overloading from decision_proceduret
-  decision_proceduret::resultt dec_solve() override;
+  decision_proceduret::resultt dec_solve(const exprt &) override;
   void print_assignment(std::ostream &out) const override;
   std::string decision_procedure_text() const override;
   exprt get(const exprt &expr) const override;
@@ -110,7 +110,7 @@ protected:
   /// Get a _boolean_ value from the model if the formula is satisfiable.
   /// If the argument is not a boolean expression from the formula,
   /// {} is returned.
-  virtual optionalt<bool> get_bool(const exprt &expr) const;
+  virtual std::optional<bool> get_bool(const exprt &expr) const;
 
   virtual literalt convert_rest(const exprt &expr);
   virtual literalt convert_bool(const exprt &expr);

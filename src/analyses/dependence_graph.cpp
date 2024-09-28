@@ -164,7 +164,7 @@ void dep_graph_domaint::data_dependencies(
   // TODO use (future) reaching-definitions-dereferencing rw_set
   value_setst &value_sets=
     dep_graph.reaching_definitions().get_value_sets();
-  rw_range_set_value_sett rw_set(ns, value_sets);
+  rw_range_set_value_sett rw_set(ns, value_sets, message_handler);
   goto_rw(function_to, to, rw_set);
 
   for(const auto &read_object_entry : rw_set.get_r_set())
@@ -226,7 +226,7 @@ void dep_graph_domaint::transform(
   locationt to{trace_to->current_location()};
 
   dependence_grapht *dep_graph=dynamic_cast<dependence_grapht*>(&ai);
-  assert(dep_graph!=nullptr);
+  CHECK_RETURN(dep_graph != nullptr);
 
   // We do not propagate control dependencies on function calls, i.e., only the
   // entry point of a function should have a control dependency on the call
@@ -341,7 +341,10 @@ jsont dep_graph_domaint::output_json(
 class dep_graph_domain_factoryt : public ai_domain_factoryt<dep_graph_domaint>
 {
 public:
-  explicit dep_graph_domain_factoryt(dependence_grapht &_dg) : dg(_dg)
+  dep_graph_domain_factoryt(
+    dependence_grapht &_dg,
+    message_handlert &message_handler)
+    : dg(_dg), message_handler(message_handler)
   {
   }
 
@@ -349,7 +352,7 @@ public:
   {
     auto node_id = dg.add_node();
     dg.nodes[node_id].PC = l;
-    auto p = util_make_unique<dep_graph_domaint>(node_id);
+    auto p = std::make_unique<dep_graph_domaint>(node_id, message_handler);
     CHECK_RETURN(p->is_bottom());
 
     return std::unique_ptr<statet>(p.release());
@@ -357,12 +360,16 @@ public:
 
 private:
   dependence_grapht &dg;
+  message_handlert &message_handler;
 };
 
-dependence_grapht::dependence_grapht(const namespacet &_ns)
-  : ait<dep_graph_domaint>(util_make_unique<dep_graph_domain_factoryt>(*this)),
+dependence_grapht::dependence_grapht(
+  const namespacet &_ns,
+  message_handlert &message_handler)
+  : ait<dep_graph_domaint>(
+      std::make_unique<dep_graph_domain_factoryt>(*this, message_handler)),
     ns(_ns),
-    rd(ns)
+    rd(ns, message_handler)
 {
 }
 
@@ -372,9 +379,9 @@ void dependence_grapht::add_dep(
   goto_programt::const_targett to)
 {
   const node_indext n_from = (*this)[from].get_node_id();
-  assert(n_from<size());
+  CHECK_RETURN(n_from < size());
   const node_indext n_to = (*this)[to].get_node_id();
-  assert(n_to<size());
+  CHECK_RETURN(n_to < size());
 
   // add_edge is redundant as the subsequent operations also insert
   // entries into the edge maps (implicitly)

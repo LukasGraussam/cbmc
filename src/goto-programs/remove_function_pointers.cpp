@@ -109,14 +109,14 @@ static bool arg_is_type_compatible(
 
   // any integer-vs-enum-vs-pointer is ok
   if(
-    call_type.id() == ID_signedbv || call_type.id() == ID_unsigned ||
+    call_type.id() == ID_signedbv || call_type.id() == ID_unsignedbv ||
     call_type.id() == ID_bool || call_type.id() == ID_c_bool ||
     call_type.id() == ID_c_enum_tag || call_type.id() == ID_c_enum ||
     call_type.id() == ID_pointer)
   {
     return function_type.id() == ID_signedbv ||
-           function_type.id() == ID_unsigned || function_type.id() == ID_bool ||
-           function_type.id() == ID_c_bool ||
+           function_type.id() == ID_unsignedbv ||
+           function_type.id() == ID_bool || function_type.id() == ID_c_bool ||
            function_type.id() == ID_pointer ||
            function_type.id() == ID_c_enum ||
            function_type.id() == ID_c_enum_tag;
@@ -205,6 +205,7 @@ static void fix_argument_types(code_function_callt &function_call)
 static void fix_return_type(
   const irep_idt &in_function_id,
   code_function_callt &function_call,
+  const source_locationt &source_location,
   symbol_tablet &symbol_table,
   goto_programt &dest)
 {
@@ -226,7 +227,7 @@ static void fix_return_type(
     code_type.return_type(),
     id2string(in_function_id),
     "tmp_return_val_" + id2string(function_symbol.base_name),
-    function_call.source_location(),
+    source_location,
     function_symbol.mode,
     symbol_table);
 
@@ -235,11 +236,11 @@ static void fix_return_type(
   exprt old_lhs=function_call.lhs();
   function_call.lhs()=tmp_symbol_expr;
 
-  dest.add(goto_programt::make_assignment(code_assignt(
+  dest.add(goto_programt::make_assignment(
     old_lhs,
     make_byte_extract(
       tmp_symbol_expr, from_integer(0, c_index_type()), old_lhs.type()),
-    function_call.source_location())));
+    source_location));
 }
 
 void remove_function_pointerst::remove_function_pointer(
@@ -407,7 +408,8 @@ void remove_function_pointer(
     fix_argument_types(new_call);
 
     goto_programt tmp;
-    fix_return_type(function_id, new_call, symbol_table, tmp);
+    fix_return_type(
+      function_id, new_call, target->source_location(), symbol_table, tmp);
 
     auto call = new_code_calls.add(
       goto_programt::make_function_call(new_call, target->source_location()));
@@ -533,4 +535,31 @@ void remove_function_pointers(
     goto_model.goto_functions);
 
   rfp(goto_model.goto_functions);
+}
+
+bool has_function_pointers(const goto_programt &goto_program)
+{
+  for(auto &instruction : goto_program.instructions)
+    if(
+      instruction.is_function_call() &&
+      instruction.call_function().id() == ID_dereference)
+    {
+      return true;
+    }
+
+  return false;
+}
+
+bool has_function_pointers(const goto_functionst &goto_functions)
+{
+  for(auto &function_it : goto_functions.function_map)
+    if(has_function_pointers(function_it.second.body))
+      return true;
+
+  return false;
+}
+
+bool has_function_pointers(const goto_modelt &goto_model)
+{
+  return has_function_pointers(goto_model.goto_functions);
 }

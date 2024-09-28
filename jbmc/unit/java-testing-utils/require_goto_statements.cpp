@@ -71,7 +71,7 @@ require_goto_statements::pointer_assignment_locationt
 require_goto_statements::find_struct_component_assignments(
   const std::vector<codet> &statements,
   const irep_idt &structure_name,
-  const optionalt<irep_idt> &superclass_name,
+  const std::optional<irep_idt> &superclass_name,
   const irep_idt &component_name,
   const symbol_table_baset &symbol_table)
 {
@@ -381,12 +381,12 @@ get_ultimate_source_symbol(
 /// \return The identifier of the ultimate source symbol assigned to the field,
 ///   which will be used for future calls to
 ///   `require_struct_component_assignment`.
-const irep_idt &require_goto_statements::require_struct_component_assignment(
+irep_idt require_goto_statements::require_struct_component_assignment(
   const irep_idt &structure_name,
-  const optionalt<irep_idt> &superclass_name,
+  const std::optional<irep_idt> &superclass_name,
   const irep_idt &component_name,
   const irep_idt &component_type_name,
-  const optionalt<irep_idt> &typecast_name,
+  const std::optional<irep_idt> &typecast_name,
   const std::vector<codet> &entry_point_instructions,
   const symbol_table_baset &symbol_table)
 {
@@ -445,7 +445,7 @@ const irep_idt &require_goto_statements::require_struct_component_assignment(
 const irep_idt &
 require_goto_statements::require_struct_array_component_assignment(
   const irep_idt &structure_name,
-  const optionalt<irep_idt> &superclass_name,
+  const std::optional<irep_idt> &superclass_name,
   const irep_idt &array_component_name,
   const irep_idt &array_type_name,
   const std::vector<codet> &entry_point_instructions,
@@ -514,8 +514,7 @@ require_goto_statements::require_struct_array_component_assignment(
 /// \param argument_name: Name of the input argument of method under test
 /// \param entry_point_statements: The statements to look through
 /// \return The identifier of the variable assigned to the input argument
-const irep_idt &
-require_goto_statements::require_entry_point_argument_assignment(
+irep_idt require_goto_statements::require_entry_point_argument_assignment(
   const irep_idt &argument_name,
   const std::vector<codet> &entry_point_statements)
 {

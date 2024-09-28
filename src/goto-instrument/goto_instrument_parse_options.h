@@ -26,7 +26,7 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <goto-programs/show_properties.h>
 
 #include <ansi-c/ansi_c_language.h>
-#include <ansi-c/goto_check_c.h>
+#include <ansi-c/goto-conversion/goto_check_c.h>
 #include <pointer-analysis/goto_program_dereference.h>
 
 #include "aggressive_slicer.h"
@@ -36,13 +36,14 @@ Author: Daniel Kroening, kroening@kroening.com
 #include "generate_function_bodies.h"
 #include "insert_final_assert_false.h"
 #include "nondet_volatile.h"
+#include "reachability_slicer.h"
 #include "replace_calls.h"
 #include "uninitialized.h"
 #include "unwindset.h"
 
 #include "contracts/contracts.h"
+#include "contracts/contracts_wrangler.h"
 #include "contracts/dynamic-frames/dfcc.h"
-#include "synthesizer/loop_invariant_synthesizer_base.h"
 #include "wmm/weak_memory.h"
 
 // clang-format off
@@ -59,6 +60,7 @@ Author: Daniel Kroening, kroening@kroening.com
   OPT_UNWINDSET \
   "(unwindset-file):" \
   "(unwinding-assertions)(partial-loops)(continue-as-loops)" \
+  "(no-unwinding-assertions)" \
   "(log):" \
   "(call-graph)(reachable-call-graph)" \
   OPT_INSERT_FINAL_ASSERT_FALSE \
@@ -66,6 +68,7 @@ Author: Daniel Kroening, kroening@kroening.com
   "(isr):" \
   "(stack-depth):(nondet-static)" \
   "(nondet-static-exclude):" \
+  "(nondet-static-matching):" \
   "(function-enter):(function-exit):(branch):" \
   OPT_SHOW_GOTO_FUNCTIONS \
   OPT_SHOW_PROPERTIES \
@@ -77,8 +80,9 @@ Author: Daniel Kroening, kroening@kroening.com
   "(custom-bitvector-analysis)" \
   "(show-struct-alignment)(interval-analysis)(show-intervals)" \
   "(show-uninitialized)(show-locations)" \
-  "(full-slice)(reachability-slice)(slice-global-inits)" \
-  "(fp-reachability-slice):" \
+  "(full-slice)(slice-global-inits)" \
+  OPT_REACHABILITY_SLICER \
+  OPT_FP_REACHABILITY_SLICER \
   "(inline)(partial-inline)(function-inline):(log):(no-caching)" \
   "(value-set-fi-fp-removal)" \
   OPT_REMOVE_CONST_FUNCTION_POINTERS \
@@ -98,6 +102,9 @@ Author: Daniel Kroening, kroening@kroening.com
   "(horn)(skip-loops):(model-argc-argv):" \
   OPT_DFCC \
   "(" FLAG_LOOP_CONTRACTS ")" \
+  "(" FLAG_DISABLE_SIDE_EFFECT_CHECK ")" \
+  "(" FLAG_LOOP_CONTRACTS_NO_UNWIND ")" \
+  "(" FLAG_LOOP_CONTRACTS_FILE "):" \
   "(" FLAG_REPLACE_CALL "):" \
   "(" FLAG_ENFORCE_CONTRACT "):" \
   OPT_ENFORCE_CONTRACT_REC \
@@ -120,7 +127,6 @@ Author: Daniel Kroening, kroening@kroening.com
   OPT_NONDET_VOLATILE \
   "(ensure-one-backedge-per-target)" \
   OPT_CONFIG_LIBRARY \
-  OPT_SYNTHESIZE_LOOP_INVARIANTS \
   // empty last line
 
 // clang-format on

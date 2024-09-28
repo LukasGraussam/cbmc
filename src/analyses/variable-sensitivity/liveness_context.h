@@ -33,13 +33,6 @@
 class liveness_contextt : public write_location_contextt
 {
 public:
-  explicit liveness_contextt(
-    const abstract_object_pointert child,
-    const typet &type)
-    : write_location_contextt(child, type)
-  {
-  }
-
   liveness_contextt(
     const abstract_object_pointert child,
     const typet &type,
@@ -90,7 +83,7 @@ private:
   abstract_object_pointert
   reset_location_on_merge(const liveness_context_ptrt &merged) const;
 
-  optionalt<locationt> assign_location;
+  std::optional<locationt> assign_location;
 
   context_abstract_object_ptrt
   update_location_context_internal(const locationst &locations) const override;

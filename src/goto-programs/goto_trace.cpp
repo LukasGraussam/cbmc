@@ -24,13 +24,12 @@ Author: Daniel Kroening
 #include <util/string_utils.h>
 #include <util/symbol.h>
 
+#include <ansi-c/printf_formatter.h>
 #include <langapi/language_util.h>
-
-#include "printf_formatter.h"
 
 #include <ostream>
 
-static optionalt<symbol_exprt> get_object_rec(const exprt &src)
+static std::optional<symbol_exprt> get_object_rec(const exprt &src)
 {
   if(src.id()==ID_symbol)
     return to_symbol_expr(src);
@@ -50,7 +49,7 @@ static optionalt<symbol_exprt> get_object_rec(const exprt &src)
     return {}; // give up
 }
 
-optionalt<symbol_exprt> goto_trace_stept::get_lhs_object() const
+std::optional<symbol_exprt> goto_trace_stept::get_lhs_object() const
 {
   return get_object_rec(full_lhs);
 }
@@ -219,7 +218,7 @@ std::string trace_numeric_value(
 {
   const typet &type = expr.type();
 
-  if(expr.id()==ID_constant)
+  if(expr.is_constant())
   {
     if(type.id()==ID_unsignedbv ||
        type.id()==ID_signedbv ||
@@ -263,13 +262,13 @@ std::string trace_numeric_value(
   {
     std::string result;
 
-    forall_operands(it, expr)
+    for(const auto &op : expr.operands())
     {
       if(result.empty())
         result="{ ";
       else
         result+=", ";
-      result+=trace_numeric_value(*it, ns, options);
+      result += trace_numeric_value(op, ns, options);
     }
 
     return result+" }";
@@ -298,7 +297,7 @@ std::string trace_numeric_value(
 static void trace_value(
   messaget::mstreamt &out,
   const namespacet &ns,
-  const optionalt<symbol_exprt> &lhs_object,
+  const std::optional<symbol_exprt> &lhs_object,
   const exprt &full_lhs,
   const exprt &value,
   const trace_optionst &options)
@@ -403,15 +402,8 @@ void show_compact_goto_trace(
   const goto_tracet &goto_trace,
   const trace_optionst &options)
 {
-  std::size_t function_depth = 0;
-
   for(const auto &step : goto_trace.steps)
   {
-    if(step.is_function_call())
-      function_depth++;
-    else if(step.is_function_return())
-      function_depth--;
-
     // hide the hidden ones
     if(step.hidden)
       continue;

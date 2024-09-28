@@ -11,22 +11,19 @@ Author:
 
 #include "read_goto_binary.h"
 
-#include <fstream>
-
 #include <util/config.h>
 #include <util/message.h>
 #include <util/replace_symbol.h>
 #include <util/tempfile.h>
+#include <util/unicode.h>
 
-#ifdef _MSC_VER
-#  include <util/unicode.h>
-#endif
-
+#include "elf_reader.h"
 #include "goto_model.h"
 #include "link_goto_model.h"
-#include "read_bin_goto_object.h"
-#include "elf_reader.h"
 #include "osx_fat_reader.h"
+#include "read_bin_goto_object.h"
+
+#include <fstream>
 
 static bool read_goto_binary(
   const std::string &filename,
@@ -38,7 +35,7 @@ static bool read_goto_binary(
 /// \param filename: the file name of the goto binary
 /// \param message_handler: for diagnostics
 /// \return goto model on success, {} on failure
-optionalt<goto_modelt>
+std::optional<goto_modelt>
 read_goto_binary(const std::string &filename, message_handlert &message_handler)
 {
   goto_modelt dest;
@@ -64,11 +61,7 @@ static bool read_goto_binary(
   goto_functionst &goto_functions,
   message_handlert &message_handler)
 {
-  #ifdef _MSC_VER
-  std::ifstream in(widen(filename), std::ios::binary);
-  #else
-  std::ifstream in(filename, std::ios::binary);
-  #endif
+  std::ifstream in(widen_if_needed(filename), std::ios::binary);
 
   messaget message(message_handler);
 
@@ -193,11 +186,7 @@ bool is_goto_binary(
   const std::string &filename,
   message_handlert &message_handler)
 {
-  #ifdef _MSC_VER
-  std::ifstream in(widen(filename), std::ios::binary);
-  #else
-  std::ifstream in(filename, std::ios::binary);
-  #endif
+  std::ifstream in(widen_if_needed(filename), std::ios::binary);
 
   if(!in)
     return false;
@@ -272,7 +261,7 @@ bool is_goto_binary(
 /// \param dest: the goto model returned
 /// \param message_handler: for diagnostics
 /// \return nullopt on error, type replacements to be applied otherwise
-static optionalt<replace_symbolt::expr_mapt> read_object_and_link(
+static std::optional<replace_symbolt::expr_mapt> read_object_and_link(
   const std::string &file_name,
   goto_modelt &dest,
   message_handlert &message_handler)

@@ -26,6 +26,7 @@ Author: Daniel Kroening, dkr@amazon.com
 #include "state_encoding_targets.h"
 #include "variable_encoding.h"
 
+#include <algorithm>
 #include <iostream>
 
 class state_encodingt
@@ -92,7 +93,8 @@ protected:
   loct first_loc;
   symbol_exprt entry_state = symbol_exprt(irep_idt(), typet());
   exprt return_lhs = nil_exprt();
-  using incomingt = std::map<loct, std::vector<loct>>;
+  using incomingt =
+    std::map<loct, std::vector<loct>, goto_programt::target_less_than>;
   incomingt incoming;
 
   static symbol_exprt va_args(irep_idt function);
@@ -1114,7 +1116,7 @@ void state_encodingt::encode(
 void state_encoding(
   const goto_modelt &goto_model,
   bool program_is_inlined,
-  optionalt<irep_idt> contract,
+  std::optional<irep_idt> contract,
   encoding_targett &dest)
 {
   if(program_is_inlined)
@@ -1177,7 +1179,7 @@ void state_encoding(
   const goto_modelt &goto_model,
   state_encoding_formatt state_encoding_format,
   bool program_is_inlined,
-  optionalt<irep_idt> contract,
+  std::optional<irep_idt> contract,
   std::ostream &out)
 {
   switch(state_encoding_format)
@@ -1234,7 +1236,7 @@ void variable_encoding(
 solver_resultt state_encoding_solver(
   const goto_modelt &goto_model,
   bool program_is_inlined,
-  optionalt<irep_idt> contract,
+  std::optional<irep_idt> contract,
   const solver_optionst &solver_options)
 {
   const namespacet ns(goto_model.symbol_table);

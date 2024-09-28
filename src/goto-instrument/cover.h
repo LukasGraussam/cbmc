@@ -16,7 +16,6 @@ Date: May 2016
 
 #include "cover_filter.h"
 #include "cover_instrument.h"
-#include "util/make_unique.h"
 
 class cmdlinet;
 class goto_modelt;
@@ -31,19 +30,16 @@ class symbol_tablet;
   "(show-test-suite)"
 
 #define HELP_COVER                                                             \
-  " --cover CC                   create test-suite with coverage criterion "   \
-  "CC,\n"                                                                      \
-  "                              where CC is one of assertion[s], "            \
-  "assume[s],\n"                                                               \
-  "                              branch[es], condition[s], cover, "            \
-  "decision[s],\n"                                                             \
-  "                              location[s], or mcdc\n"                       \
-  " --cover-failed-assertions    do not stop coverage checking at failed "     \
-  "assertions\n"                                                               \
-  "                              (this is the default for --cover "            \
-  "assertions)\n"                                                              \
-  " --show-test-suite            print test suite for coverage criterion "     \
-  "(requires --cover)\n"
+  " {y--cover} {uCC} \t "                                                      \
+  "create test-suite with coverage criterion {uCC}, where {uCC} is one of "    \
+  "{yassertion}[{ys}], {yassume}[{ys}], {ybranch}[{yes}], "                    \
+  "{ycondition}[{ys}], {ycover}, {decision}[{ys}], {ylocation}[{ys}], "        \
+  "or {ymcdc}\n"                                                               \
+  " {y--cover-failed-assertions} \t "                                          \
+  "do not stop coverage checking at failed assertions (this is the default "   \
+  "for {y--cover} {yassertions})\n"                                            \
+  " {y--show-test-suite} \t "                                                  \
+  "print test suite for coverage criterion (requires {y--cover})\n"
 
 enum class coverage_criteriont
 {
@@ -67,7 +63,7 @@ struct cover_configt
   function_filterst function_filters;
   // cover instruments point to goal_filters, so they must be stored on the heap
   std::unique_ptr<goal_filterst> goal_filters =
-    util_make_unique<goal_filterst>();
+    std::make_unique<goal_filterst>();
   cover_instrumenterst cover_instrumenters;
   cover_instrumenter_baset::assertion_factoryt make_assertion =
     goto_programt::make_assertion;

@@ -105,7 +105,9 @@ std::string expr2javat::convert_struct(
   const exprt &src,
   unsigned &precedence)
 {
-  const typet &full_type=ns.follow(src.type());
+  const typet &full_type = src.type().id() == ID_struct_tag
+                             ? ns.follow_tag(to_struct_tag_type(src.type()))
+                             : src.type();
 
   if(full_type.id()!=ID_struct)
     return convert_norep(src, precedence);
@@ -117,7 +119,9 @@ std::string expr2javat::convert_struct(
   const struct_typet::componentst &components=
     struct_type.components();
 
-  assert(components.size()==src.operands().size());
+  DATA_INVARIANT(
+    components.size() == src.operands().size(),
+    "inconsistent number of components");
 
   exprt::operandst::const_iterator o_it=src.operands().begin();
 
@@ -173,7 +177,7 @@ std::string expr2javat::convert_constant(
     else
       return "false";
   }
-  else if(src.type().id()==ID_bool)
+  else if(src.is_boolean())
   {
     if(src.is_true())
       return "true";
@@ -238,11 +242,11 @@ std::string expr2javat::convert_constant(
 
 std::string expr2javat::convert_rec(
   const typet &src,
-  const qualifierst &qualifiers,
+  const c_qualifierst &qualifiers,
   const std::string &declarator)
 {
-  std::unique_ptr<qualifierst> clone = qualifiers.clone();
-  qualifierst &new_qualifiers = *clone;
+  std::unique_ptr<c_qualifierst> clone = qualifiers.clone();
+  c_qualifierst &new_qualifiers = *clone;
   new_qualifiers.read(src);
 
   const std::string d = declarator.empty() ? declarator : (" " + declarator);
@@ -425,7 +429,7 @@ std::string expr2javat::convert_with_precedence(
   {
     return '"' + MetaString(id2string(literal->value())) + '"';
   }
-  else if(src.id()==ID_constant)
+  else if(src.is_constant())
     return convert_constant(to_constant_expr(src), precedence=16);
   else
     return expr2ct::convert_with_precedence(src, precedence);

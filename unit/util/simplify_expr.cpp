@@ -38,31 +38,10 @@ TEST_CASE("Simplify pointer_offset(address of array index)", "[core][util]")
 
   exprt simp=simplify_expr(p_o, ns);
 
-  REQUIRE(simp.id()==ID_constant);
+  REQUIRE(simp.is_constant());
   const mp_integer offset_value =
     numeric_cast_v<mp_integer>(to_constant_expr(simp));
   REQUIRE(offset_value==1);
-}
-
-TEST_CASE("Simplify const pointer offset", "[core][util]")
-{
-  config.set_arch("none");
-
-  symbol_tablet symbol_table;
-  namespacet ns(symbol_table);
-
-  // build a numeric constant of some pointer type
-  constant_exprt number=from_integer(1234, size_type());
-  number.type()=pointer_type(char_type());
-
-  exprt p_o=pointer_offset(number);
-
-  exprt simp=simplify_expr(p_o, ns);
-
-  REQUIRE(simp.id()==ID_constant);
-  const mp_integer offset_value =
-    numeric_cast_v<mp_integer>(to_constant_expr(simp));
-  REQUIRE(offset_value==1234);
 }
 
 TEST_CASE("Simplify byte extract", "[core][util]")
@@ -176,7 +155,7 @@ TEST_CASE("Simplify extractbits", "[core][util]")
 
   const exprt deadbeef = from_integer(0xdeadbeef, unsignedbv_typet(32));
 
-  exprt eb = extractbits_exprt(deadbeef, 15, 8, unsignedbv_typet(8));
+  exprt eb = extractbits_exprt(deadbeef, 8, unsignedbv_typet(8));
   bool unmodified = simplify(eb, ns);
 
   REQUIRE(!unmodified);
@@ -455,17 +434,13 @@ TEST_CASE("Simplifying cast expressions", "[core][util]")
   const auto long_type = signedbv_typet(64);
   array_typet array_type(int_type, from_integer(5, int_type));
 
-  symbolt a_symbol;
+  symbolt a_symbol{"a", array_type, irep_idt{}};
   a_symbol.base_name = "a";
-  a_symbol.name = "a";
-  a_symbol.type = array_type;
   a_symbol.is_lvalue = true;
   symbol_table.add(a_symbol);
 
-  symbolt i_symbol;
+  symbolt i_symbol{"i", int_type, irep_idt{}};
   i_symbol.base_name = "i";
-  i_symbol.name = "i";
-  i_symbol.type = int_type;
   i_symbol.is_lvalue = true;
   symbol_table.add(i_symbol);
 
@@ -577,5 +552,22 @@ TEST_CASE("Simplify inequality", "[core][util]")
     simp = simplify_expr(comparison_lt, ns);
 
     REQUIRE(simp == true_exprt{});
+  }
+}
+
+TEST_CASE("Simplify bitxor", "[core][util]")
+{
+  config.set_arch("none");
+
+  const symbol_tablet symbol_table;
+  const namespacet ns(symbol_table);
+
+  SECTION("Simplification for c_bool")
+  {
+    constant_exprt false_c_bool = from_integer(0, c_bool_type());
+
+    REQUIRE(
+      simplify_expr(bitxor_exprt{false_c_bool, false_c_bool}, ns) ==
+      false_c_bool);
   }
 }

@@ -7,7 +7,7 @@ Author: Remi Delmas, delmarsd@amazon.com
 \*******************************************************************/
 
 #include "dfcc_spec_functions.h"
-#include <goto-programs/goto_convert_class.h>
+#include <ansi-c/goto-conversion/goto_convert_class.h>
 
 #include <util/format_expr.h>
 #include <util/namespace.h>
@@ -17,89 +17,17 @@ Author: Remi Delmas, delmarsd@amazon.com
 #include <langapi/language_util.h>
 
 #include "dfcc_library.h"
-#include "dfcc_utils.h"
 
 dfcc_spec_functionst::dfcc_spec_functionst(
   goto_modelt &goto_model,
   message_handlert &message_handler,
-  dfcc_utilst &utils,
-  dfcc_libraryt &library,
-  dfcc_instrumentt &instrument)
+  dfcc_libraryt &library)
   : goto_model(goto_model),
     message_handler(message_handler),
     log(message_handler),
-    utils(utils),
     library(library),
-    instrument(instrument),
     ns(goto_model.symbol_table)
 {
-}
-
-std::set<irep_idt> dfcc_spec_functionst::collect_spec_assigns_functions(
-  const std::vector<irep_idt> &candidates)
-{
-  const std::set<irep_idt> functions = {
-    CPROVER_PREFIX "assignable",
-    CPROVER_PREFIX "object_whole",
-    CPROVER_PREFIX "object_from",
-    CPROVER_PREFIX "object_upto"};
-  std::set<irep_idt> dest;
-  collect_functions_that_call(candidates, functions, dest);
-  return dest;
-}
-
-std::set<irep_idt> dfcc_spec_functionst::collect_spec_frees_functions(
-  const std::vector<irep_idt> &candidates)
-{
-  std::set<irep_idt> dest;
-  const std::set<irep_idt> functions = {CPROVER_PREFIX "freeable"};
-  collect_functions_that_call(candidates, functions, dest);
-  return dest;
-}
-
-void dfcc_spec_functionst::collect_functions_that_call(
-  const std::vector<irep_idt> &candidates,
-  const std::set<irep_idt> &functions,
-  std::set<irep_idt> &dest)
-{
-  bool changed = true;
-  while(changed)
-  {
-    changed = false;
-    for(const auto &function_id : candidates)
-    {
-      const auto &it = goto_model.goto_functions.function_map.find(function_id);
-      if(dest.find(function_id) == dest.end() && it->second.body_available())
-      {
-        changed |=
-          insert_if_calls(function_id, it->second.body, functions, dest);
-      }
-    }
-  }
-}
-
-bool dfcc_spec_functionst::insert_if_calls(
-  const irep_idt &function_id,
-  const goto_programt &goto_program,
-  const std::set<irep_idt> &functions,
-  std::set<irep_idt> &dest)
-{
-  PRECONDITION(dest.find(function_id) == dest.end());
-  bool insert = false;
-  for(const auto &it : goto_program.instructions)
-  {
-    if(it.is_function_call() && it.call_function().id() == ID_symbol)
-    {
-      const irep_idt &called_function =
-        to_symbol_expr(it.call_function()).get_identifier();
-
-      insert = functions.find(called_function) != functions.end() ||
-               dest.find(called_function) != dest.end();
-    }
-  }
-  if(insert)
-    dest.insert(function_id);
-  return insert;
 }
 
 const typet &dfcc_spec_functionst::get_target_type(const exprt &expr)
@@ -122,23 +50,14 @@ void dfcc_spec_functionst::generate_havoc_function(
     "DFCC: havoc function id '" + id2string(havoc_function_id) +
       "' already exists");
 
-  const auto &function_symbol = utils.get_function_symbol(function_id);
-
-  // create the write_set symbol used as input by the havoc function
-  const auto &write_set_symbol = utils.create_symbol(
-    library.dfcc_type[dfcc_typet::CAR_SET_PTR],
-    id2string(havoc_function_id),
-    "__write_set_to_havoc",
-    function_symbol.location,
-    function_symbol.mode,
-    function_symbol.module,
-    true);
+  const auto &function_symbol =
+    dfcc_utilst::get_function_symbol(goto_model.symbol_table, function_id);
 
   // create the code type that goes on the function symbol
-  code_typet::parametert write_set_param(write_set_symbol.type);
-  write_set_param.set_base_name(write_set_symbol.base_name);
-  write_set_param.set_identifier(write_set_symbol.name);
-  code_typet havoc_code_type({write_set_param}, empty_typet());
+  const typet &write_set_param_type =
+    library.dfcc_type[dfcc_typet::CAR_SET_PTR];
+  code_typet::parametert write_set_param{write_set_param_type};
+  code_typet havoc_code_type({std::move(write_set_param)}, empty_typet());
 
   // create the havoc function symbol
   symbolt havoc_function_symbol;
@@ -156,113 +75,38 @@ void dfcc_spec_functionst::generate_havoc_function(
     "DFCC: could not insert havoc function '" + id2string(havoc_function_id) +
       "' in the symbol table");
 
+  // create the write_set symbol used as input by the havoc function
+  const auto &write_set_symbol = dfcc_utilst::create_new_parameter_symbol(
+    goto_model.symbol_table,
+    havoc_function_id,
+    "__write_set_to_havoc",
+    write_set_param_type);
+  to_code_type(
+    goto_model.symbol_table.get_writeable_ref(havoc_function_id).type)
+    .parameters()[0]
+    .set_identifier(write_set_symbol.name);
+
   // create new goto_function
   goto_functiont dummy_havoc_function;
-  dummy_havoc_function.set_parameter_identifiers(havoc_code_type);
+  dummy_havoc_function.parameter_identifiers = {write_set_symbol.name};
   goto_model.goto_functions.function_map[havoc_function_id].copy_from(
     dummy_havoc_function);
 
   // body will be filled with instructions
-  auto &body =
+  auto &havoc_program =
     goto_model.goto_functions.function_map.at(havoc_function_id).body;
 
-  // index of the CAR to havoc in the write set
-  std::size_t next_idx = 0;
+  const goto_programt &original_program =
+    goto_model.goto_functions.function_map.at(function_id).body;
 
-  // iterate on the body of the original function and emit one havoc instruction
-  // per target
-  Forall_goto_program_instructions(
-    ins_it, goto_model.goto_functions.function_map.at(function_id).body)
-  {
-    if(ins_it->is_function_call())
-    {
-      if(ins_it->call_function().id() != ID_symbol)
-      {
-        throw invalid_source_file_exceptiont(
-          "Function pointer call '" +
-            from_expr(ns, function_id, ins_it->call_function()) +
-            "' in function '" + id2string(function_id) + "' is not supported",
-          ins_it->source_location());
-      }
+  generate_havoc_instructions(
+    havoc_function_id,
+    original_program,
+    write_set_symbol.symbol_expr(),
+    havoc_program,
+    nof_targets);
 
-      const irep_idt &callee_id =
-        to_symbol_expr(ins_it->call_function()).get_identifier();
-
-      // only process built-in functions that return assignable_t,
-      // error out on any other function call
-      // find the corresponding instrumentation hook
-      auto hook_opt = library.get_havoc_hook(callee_id);
-      INVARIANT(
-        hook_opt.has_value(),
-        "dfcc_spec_functionst::generate_havoc_function: function calls must "
-        "be inlined before calling this function");
-
-      // Use same source location as original call
-      source_locationt location(ins_it->source_location());
-      auto hook = hook_opt.value();
-      code_function_callt call(
-        library.dfcc_fun_symbol.at(hook).symbol_expr(),
-        {write_set_symbol.symbol_expr(), from_integer(next_idx, size_type())});
-
-      if(hook == dfcc_funt::WRITE_SET_HAVOC_GET_ASSIGNABLE_TARGET)
-      {
-        // ```
-        // DECL __havoc_target;
-        // CALL __havoc_target = havoc_hook(set, next_idx);
-        // IF !__havoc_target GOTO label;
-        // ASSIGN *__havoc_target = nondet(target_type);
-        // label: DEAD __havoc_target;
-        // ```
-        // declare a local var to store targets havoced via nondet assignment
-        auto &target_type = get_target_type(ins_it->call_arguments().at(0));
-
-        const auto &target_symbol = utils.create_symbol(
-          pointer_type(target_type),
-          id2string(havoc_function_id),
-          "__havoc_target",
-          location,
-          function_symbol.mode,
-          function_symbol.module,
-          false);
-
-        auto target_expr = target_symbol.symbol_expr();
-        body.add(goto_programt::make_decl(target_expr));
-
-        call.lhs() = target_expr;
-        body.add(goto_programt::make_function_call(call, location));
-
-        auto goto_instruction = body.add(goto_programt::make_incomplete_goto(
-          utils.make_null_check_expr(target_expr), location));
-
-        // create nondet assignment to the target
-        side_effect_expr_nondett nondet(target_type, location);
-        body.add(goto_programt::make_assignment(
-          dereference_exprt{typecast_exprt::conditional_cast(
-            target_expr, pointer_type(target_type))},
-          nondet,
-          location));
-        auto label = body.add(goto_programt::make_dead(target_expr));
-        goto_instruction->complete_goto(label);
-      }
-      else if(
-        hook == dfcc_funt::WRITE_SET_HAVOC_OBJECT_WHOLE ||
-        hook == dfcc_funt::WRITE_SET_HAVOC_SLICE)
-      {
-        // ```
-        // CALL havoc_hook(set, next_idx);
-        // ```
-        body.add(goto_programt::make_function_call(call, location));
-      }
-      else
-      {
-        UNREACHABLE;
-      }
-      ++next_idx;
-    }
-    nof_targets = next_idx;
-  }
-
-  body.add(goto_programt::make_end_function());
+  havoc_program.add(goto_programt::make_end_function());
 
   goto_model.goto_functions.update();
 
@@ -270,12 +114,14 @@ void dfcc_spec_functionst::generate_havoc_function(
   std::set<irep_idt> missing_function;
   std::set<irep_idt> recursive_call;
   std::set<irep_idt> not_enough_arguments;
-  utils.inline_function(
+  dfcc_utilst::inline_function(
+    goto_model,
     havoc_function_id,
     no_body,
     recursive_call,
     missing_function,
-    not_enough_arguments);
+    not_enough_arguments,
+    message_handler);
   INVARIANT(
     no_body.empty(),
     "no body warnings when inlining " + id2string(havoc_function_id));
@@ -289,47 +135,171 @@ void dfcc_spec_functionst::generate_havoc_function(
     not_enough_arguments.empty(),
     "not enough arguments when inlining " + id2string(havoc_function_id));
 
-  utils.set_hide(havoc_function_id, true);
+  goto_model.goto_functions.function_map.at(havoc_function_id).make_hidden();
 
   goto_model.goto_functions.update();
 }
 
-void dfcc_spec_functionst::to_spec_assigns_function(
+void dfcc_spec_functionst::generate_havoc_instructions(
   const irep_idt &function_id,
+  const goto_programt &original_program,
+  const exprt &write_set_to_havoc,
+  goto_programt &havoc_program,
   std::size_t &nof_targets)
 {
-  // counts the number of calls to built-ins to get an over approximation
-  // of the size of the set
+  // index of the CAR to havoc in the write set
   std::size_t next_idx = 0;
 
-  auto &goto_function = goto_model.goto_functions.function_map.at(function_id);
-
-  // add write_set parameter
-  auto &set_symbol = utils.add_parameter(
-    function_id,
-    "__write_set_to_fill",
-    library.dfcc_type[dfcc_typet::WRITE_SET_PTR]);
-
-  // rewrite calls
-  Forall_goto_program_instructions(ins_it, goto_function.body)
+  // iterate on the body of the original function and emit one havoc instruction
+  // per target
+  forall_goto_program_instructions(ins_it, original_program)
   {
     if(ins_it->is_function_call())
     {
       if(ins_it->call_function().id() != ID_symbol)
       {
         throw invalid_source_file_exceptiont(
-          "Function pointer call '" +
+          "Function pointer calls are not supported in assigns clauses: '" +
             from_expr(ns, function_id, ins_it->call_function()) +
-            "' in function '" + id2string(function_id) + "' is not supported",
+            "' called in function '" + id2string(function_id) + "'",
           ins_it->source_location());
       }
 
       const irep_idt &callee_id =
         to_symbol_expr(ins_it->call_function()).get_identifier();
 
-      // only process built-in functions that return assignable_t,
-      // error out on any other function call
-      // find the corresponding instrumentation hook
+      // Only process built-in functions that represent assigns clause targets,
+      // and error-out on any other function call
+
+      // Find the corresponding instrumentation hook
+      auto hook_opt = library.get_havoc_hook(callee_id);
+      INVARIANT(
+        hook_opt.has_value(),
+        "dfcc_spec_functionst::generate_havoc_instructions: function calls "
+        "must be inlined before calling this function");
+
+      // Use same source location as original call
+      source_locationt location(ins_it->source_location());
+      auto hook = hook_opt.value();
+      code_function_callt call(
+        library.dfcc_fun_symbol.at(hook).symbol_expr(),
+        {write_set_to_havoc, from_integer(next_idx, size_type())});
+
+      if(hook == dfcc_funt::WRITE_SET_HAVOC_GET_ASSIGNABLE_TARGET)
+      {
+        // ```
+        // DECL __havoc_target;
+        // CALL __havoc_target = havoc_hook(set, next_idx);
+        // IF !__havoc_target GOTO label;
+        // ASSIGN *__havoc_target = nondet(target_type);
+        // label: DEAD __havoc_target;
+        // ```
+        // declare a local var to store targets havoced via nondet assignment
+        auto &target_type = get_target_type(ins_it->call_arguments().at(0));
+
+        const auto target_expr = dfcc_utilst::create_symbol(
+          goto_model.symbol_table,
+          pointer_type(target_type),
+          function_id,
+          "__havoc_target",
+          location);
+
+        havoc_program.add(goto_programt::make_decl(target_expr, location));
+
+        call.lhs() = target_expr;
+        havoc_program.add(goto_programt::make_function_call(call, location));
+
+        auto goto_instruction =
+          havoc_program.add(goto_programt::make_incomplete_goto(
+            dfcc_utilst::make_null_check_expr(target_expr), location));
+
+        // create nondet assignment to the target
+        side_effect_expr_nondett nondet(target_type, location);
+        havoc_program.add(goto_programt::make_assignment(
+          dereference_exprt{typecast_exprt::conditional_cast(
+            target_expr, pointer_type(target_type))},
+          nondet,
+          location));
+        auto label =
+          havoc_program.add(goto_programt::make_dead(target_expr, location));
+        goto_instruction->complete_goto(label);
+      }
+      else if(
+        hook == dfcc_funt::WRITE_SET_HAVOC_OBJECT_WHOLE ||
+        hook == dfcc_funt::WRITE_SET_HAVOC_SLICE)
+      {
+        // ```
+        // CALL havoc_hook(set, next_idx);
+        // ```
+        havoc_program.add(goto_programt::make_function_call(call, location));
+      }
+      else
+      {
+        UNREACHABLE;
+      }
+      ++next_idx;
+    }
+  }
+  nof_targets = next_idx;
+}
+
+void dfcc_spec_functionst::to_spec_assigns_function(
+  const irep_idt &function_id,
+  std::size_t &nof_targets)
+{
+  auto &goto_function = goto_model.goto_functions.function_map.at(function_id);
+
+  // add write_set parameter
+  const exprt write_set_to_fill =
+    dfcc_utilst::add_parameter(
+      goto_model,
+      function_id,
+      "__write_set_to_fill",
+      library.dfcc_type[dfcc_typet::WRITE_SET_PTR])
+      .symbol_expr();
+
+  to_spec_assigns_instructions(
+    write_set_to_fill,
+    dfcc_utilst::get_function_symbol(goto_model.symbol_table, function_id).mode,
+    goto_function.body,
+    nof_targets);
+
+  goto_model.goto_functions.update();
+
+  goto_model.goto_functions.function_map.at(function_id).make_hidden();
+}
+
+void dfcc_spec_functionst::to_spec_assigns_instructions(
+  const exprt &write_set_to_fill,
+  const irep_idt &language_mode,
+  goto_programt &program,
+  std::size_t &nof_targets)
+{
+  // counts the number of calls to built-ins to get an over approximation
+  // of the size of the set
+  std::size_t next_idx = 0;
+
+  // rewrite calls
+  Forall_goto_program_instructions(ins_it, program)
+  {
+    if(ins_it->is_function_call())
+    {
+      if(ins_it->call_function().id() != ID_symbol)
+      {
+        throw invalid_source_file_exceptiont(
+          "Function pointer calls are not supported in assigns clauses '" +
+            from_expr_using_mode(ns, language_mode, ins_it->call_function()) +
+            "'",
+          ins_it->source_location());
+      }
+
+      const irep_idt &callee_id =
+        to_symbol_expr(ins_it->call_function()).get_identifier();
+
+      // Only process built-in functions that specify assignable targets
+      // and error-out on any other function call
+
+      // Find the corresponding instrumentation hook
       INVARIANT(
         library.is_front_end_builtin(callee_id),
         "dfcc_spec_functionst::to_spec_assigns_function: function calls must "
@@ -343,7 +313,7 @@ void dfcc_spec_functionst::to_spec_assigns_function(
         ins_it->call_arguments().begin(), from_integer(next_idx, size_type()));
       // insert write set argument
       ins_it->call_arguments().insert(
-        ins_it->call_arguments().begin(), set_symbol.symbol_expr());
+        ins_it->call_arguments().begin(), write_set_to_fill);
 
       // remove the is_pointer_to_pointer argument which is not used in the
       // hook for insert assignable
@@ -353,43 +323,53 @@ void dfcc_spec_functionst::to_spec_assigns_function(
       ++next_idx;
     }
   }
-
   nof_targets = next_idx;
-  goto_model.goto_functions.update();
-
-  // instrument for side-effects checking
-  std::set<irep_idt> function_pointer_contracts;
-  instrument.instrument_function(function_id, function_pointer_contracts);
-  INVARIANT(
-    function_pointer_contracts.size() == 0,
-    "discovered function pointer contracts unexpectedly");
-  utils.set_hide(function_id, true);
 }
 
 void dfcc_spec_functionst::to_spec_frees_function(
   const irep_idt &function_id,
   std::size_t &nof_targets)
 {
-  // counts the number of calls to the `freeable` builtin
-  std::size_t next_idx = 0;
   auto &goto_function = goto_model.goto_functions.function_map.at(function_id);
 
   // add __dfcc_set parameter
-  auto &set_symbol = utils.add_parameter(
-    function_id,
-    "__write_set_to_fill",
-    library.dfcc_type[dfcc_typet::WRITE_SET_PTR]);
+  const exprt &write_set_to_fill =
+    dfcc_utilst::add_parameter(
+      goto_model,
+      function_id,
+      "__write_set_to_fill",
+      library.dfcc_type[dfcc_typet::WRITE_SET_PTR])
+      .symbol_expr();
 
-  Forall_goto_program_instructions(ins_it, goto_function.body)
+  to_spec_frees_instructions(
+    write_set_to_fill,
+    dfcc_utilst::get_function_symbol(goto_model.symbol_table, function_id).mode,
+    goto_function.body,
+    nof_targets);
+
+  goto_model.goto_functions.update();
+
+  goto_model.goto_functions.function_map.at(function_id).make_hidden();
+}
+
+void dfcc_spec_functionst::to_spec_frees_instructions(
+  const exprt &write_set_to_fill,
+  const irep_idt &language_mode,
+  goto_programt &program,
+  std::size_t &nof_targets)
+{
+  // counts the number of calls to the `freeable` builtin
+  std::size_t next_idx = 0;
+  Forall_goto_program_instructions(ins_it, program)
   {
     if(ins_it->is_function_call())
     {
       if(ins_it->call_function().id() != ID_symbol)
       {
         throw invalid_source_file_exceptiont(
-          "Function pointer call '" +
-            from_expr(ns, function_id, ins_it->call_function()) +
-            "' in function '" + id2string(function_id) + "' is not supported",
+          "Function pointer calls are not supported in frees clauses: '" +
+            from_expr_using_mode(ns, language_mode, ins_it->call_function()) +
+            "'",
           ins_it->source_location());
       }
 
@@ -407,20 +387,10 @@ void dfcc_spec_functionst::to_spec_frees_function(
         library.dfcc_fun_symbol[dfcc_funt::WRITE_SET_ADD_FREEABLE]
           .symbol_expr();
       ins_it->call_arguments().insert(
-        ins_it->call_arguments().begin(), set_symbol.symbol_expr());
+        ins_it->call_arguments().begin(), write_set_to_fill);
       ++next_idx;
     }
   }
 
   nof_targets = next_idx;
-  goto_model.goto_functions.update();
-
-  // instrument for side-effects checking
-  std::set<irep_idt> function_pointer_contracts;
-  instrument.instrument_function(function_id, function_pointer_contracts);
-  INVARIANT(
-    function_pointer_contracts.size() == 0,
-    "discovered function pointer contracts unexpectedly");
-
-  utils.set_hide(function_id, true);
 }

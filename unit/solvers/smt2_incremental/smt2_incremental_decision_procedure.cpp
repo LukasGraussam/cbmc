@@ -1,17 +1,19 @@
 // Author: Diffblue Ltd.
 
 #include <util/arith_tools.h>
+#include <util/bitvector_expr.h>
 #include <util/bitvector_types.h>
 #include <util/config.h>
 #include <util/exception_utils.h>
-#include <util/make_unique.h>
 #include <util/namespace.h>
+#include <util/string_constant.h>
 #include <util/symbol_table.h>
 
 #include <solvers/smt2_incremental/ast/smt_commands.h>
 #include <solvers/smt2_incremental/ast/smt_responses.h>
 #include <solvers/smt2_incremental/ast/smt_sorts.h>
 #include <solvers/smt2_incremental/ast/smt_terms.h>
+#include <solvers/smt2_incremental/encoding/nondet_padding.h>
 #include <solvers/smt2_incremental/smt2_incremental_decision_procedure.h>
 #include <solvers/smt2_incremental/smt_solver_process.h>
 #include <solvers/smt2_incremental/theories/smt_array_theory.h>
@@ -25,6 +27,7 @@
 // strings instead of `{?}` being printed. It works because catch uses the
 // appropriate overload of `operator<<` where it exists.
 #include <util/byte_operators.h>
+#include <util/c_types.h>
 
 #include <goto-symex/path_storage.h>
 #include <solvers/smt2_incremental/smt_to_smt2_string.h>
@@ -116,7 +119,7 @@ struct decision_procedure_test_environmentt final
   smt_is_dynamic_objectt is_dynamic_object_function;
   smt2_incremental_decision_proceduret procedure{
     ns,
-    util_make_unique<smt_mock_solver_processt>(
+    std::make_unique<smt_mock_solver_processt>(
       [&](const smt_commandt &smt_command) { this->send(smt_command); },
       [&]() { return this->receive_response(); }),
     message_handler};
@@ -151,17 +154,12 @@ smt_responset decision_procedure_test_environmentt::receive_response()
 
 static symbolt make_test_symbol(irep_idt id, typet type)
 {
-  symbolt new_symbol;
-  new_symbol.name = std::move(id);
-  new_symbol.type = std::move(type);
-  return new_symbol;
+  return symbolt{std::move(id), std::move(type), irep_idt{}};
 }
 
 static symbolt make_test_symbol(irep_idt id, exprt value)
 {
-  symbolt new_symbol;
-  new_symbol.name = std::move(id);
-  new_symbol.type = value.type();
+  symbolt new_symbol{std::move(id), value.type(), irep_idt{}};
   new_symbol.value = std::move(value);
   return new_symbol;
 }
@@ -244,32 +242,30 @@ TEST_CASE(
       REQUIRE(
         test.sent_commands ==
         std::vector<smt_commandt>{
-          smt_declare_function_commandt{nondet_int_a_term, {}},
-          smt_define_function_commandt{
-            "forty_two", {}, smt_bit_vector_constant_termt{42, 16}},
-          smt_define_function_commandt{
-            "first_comparison",
-            {},
-            smt_core_theoryt::equal(nondet_int_a_term, forty_two_term)},
-          smt_declare_function_commandt{nondet_int_b_term, {}},
-          smt_define_function_commandt{
-            "second_comparison",
-            {},
-            smt_core_theoryt::make_not(
-              smt_core_theoryt::equal(nondet_int_b_term, forty_two_term))},
-          smt_define_function_commandt{
-            "third_comparison",
-            {},
-            smt_core_theoryt::equal(nondet_int_a_term, nondet_int_b_term)},
-          smt_define_function_commandt{
-            "comparison_conjunction",
-            {},
-            smt_core_theoryt::make_and(
-              smt_core_theoryt::make_and(
-                smt_identifier_termt{"first_comparison", smt_bool_sortt{}},
-                smt_identifier_termt{"second_comparison", smt_bool_sortt{}}),
-              smt_identifier_termt{"third_comparison", smt_bool_sortt{}})},
+          smt_declare_function_commandt{comparison_conjunction_term, {}},
           smt_assert_commandt{comparison_conjunction_term}});
+    }
+    SECTION("Set with nondet_padding")
+    {
+      const exprt to_set = equal_exprt{
+        concatenation_exprt{
+          {nondet_padding_exprt{bv_typet{8}}, from_integer(42, bv_typet{8})},
+          bv_typet{16}},
+        from_integer(42, bv_typet{16})};
+      test.sent_commands.clear();
+      test.procedure.set_to(to_set, true);
+      // (declare-fun padding_0 () (_ BitVec 8))
+      // (assert (= (concat padding_0 (_ bv42 8)) (_ bv42 16)))
+      const auto expected_padding_term =
+        smt_identifier_termt{"padding_0", smt_bit_vector_sortt{8}};
+      REQUIRE(
+        test.sent_commands ==
+        std::vector<smt_commandt>{
+          smt_declare_function_commandt{expected_padding_term, {}},
+          smt_assert_commandt{smt_core_theoryt::equal(
+            smt_bit_vector_theoryt::concat(
+              expected_padding_term, smt_bit_vector_constant_termt{42, 8}),
+            smt_bit_vector_constant_termt{42, 16})}});
     }
     SECTION("Handle of value-less symbol.")
     {
@@ -306,8 +302,8 @@ TEST_CASE(
       REQUIRE(
         test.sent_commands ==
         std::vector<smt_commandt>{
-          smt_define_function_commandt{
-            "bar", {}, smt_bit_vector_constant_termt{42, 8}},
+          smt_declare_function_commandt{
+            smt_identifier_termt{"bar", smt_bit_vector_sortt{8}}, {}},
           smt_define_function_commandt{
             "B0", {}, smt_identifier_termt{"bar", smt_bit_vector_sortt{8}}}});
     }
@@ -510,25 +506,18 @@ TEST_CASE(
         test.sent_commands ==
         std::vector<smt_commandt>{smt_get_value_commandt{foo_term}});
     }
-    SECTION("Get value of non-set symbol")
+    SECTION("Invariant violation due to non-set symbol")
     {
-      // smt2_incremental_decision_proceduret is used this way when cbmc is
-      // invoked with the combination of `--trace` and `--slice-formula`.
       test.sent_commands.clear();
       const exprt bar =
         make_test_symbol("bar", signedbv_typet{16}).symbol_expr();
-      REQUIRE(test.procedure.get(bar) == bar);
       REQUIRE(test.sent_commands.empty());
-    }
-    SECTION("Get value of type less symbol back")
-    {
-      // smt2_incremental_decision_proceduret is used this way as part of
-      // building the goto trace, to get the partial order concurrency clock
-      // values.
-      test.sent_commands.clear();
-      const symbol_exprt baz = symbol_exprt::typeless("baz");
-      REQUIRE(test.procedure.get(baz) == baz);
-      REQUIRE(test.sent_commands.empty());
+      cbmc_invariants_should_throwt invariants_throw;
+      REQUIRE_THROWS_MATCHES(
+        test.procedure.get(bar),
+        invariant_failedt,
+        invariant_failure_containing(
+          "symbol expressions must have a known value"));
     }
     SECTION("Get value of trivially solved expression")
     {
@@ -544,13 +533,26 @@ TEST_CASE(
     }
     SECTION("Invariant violated due to expression in unexpected form.")
     {
-      const mult_exprt unexpected{foo.symbol_expr(), from_integer(2, foo.type)};
-      const cbmc_invariants_should_throwt invariants_throw;
-      REQUIRE_THROWS_MATCHES(
-        test.procedure.get(unexpected),
-        invariant_failedt,
-        invariant_failure_containing(
-          "Unhandled expressions are expected to be symbols"));
+      const auto offset = from_integer(2, signedbv_typet{64});
+      const byte_extract_exprt byte_extract_expr{
+        ID_byte_extract_little_endian,
+        foo.symbol_expr(),
+        offset,
+        8,
+        unsignedbv_typet{8}};
+      test.mock_responses.push_back(
+        smt_get_value_responset{{{foo_term, term_42}}});
+      test.mock_responses.push_back(smt_get_value_responset{
+        {{smt_bit_vector_constant_termt{2, 64},
+          smt_bit_vector_constant_termt{2, 64}}}});
+      REQUIRE(
+        test.procedure.get(byte_extract_expr) ==
+        byte_extract_exprt{
+          ID_byte_extract_little_endian,
+          expr_42,
+          offset,
+          8,
+          unsignedbv_typet{8}});
     }
     SECTION("Error handling of mismatched response.")
     {
@@ -682,6 +684,77 @@ TEST_CASE(
 }
 
 TEST_CASE(
+  "smt2_incremental_decision_proceduret string literal commands.",
+  "[core][smt2_incremental]")
+{
+  auto test = decision_procedure_test_environmentt::make();
+  const string_constantt constant{"Chips"};
+  const typet array_type = constant.to_array_expr().type();
+  const symbolt fish{"fish", array_type, ID_C};
+  test.symbol_table.insert(fish);
+  test.sent_commands.clear();
+  test.procedure.set_to(equal_exprt{fish.symbol_expr(), constant}, true);
+  const smt_array_sortt expected_sort{
+    smt_bit_vector_sortt{32}, smt_bit_vector_sortt{8}};
+  const smt_identifier_termt expected_fish{"fish", expected_sort};
+  const smt_identifier_termt expected_chips{"array_0", expected_sort};
+  const std::vector<smt_commandt> expected_commands{
+    smt_declare_function_commandt{expected_fish, {}},
+    smt_declare_function_commandt{expected_chips, {}},
+    smt_assert_commandt{smt_core_theoryt::equal(
+      smt_array_theoryt::select(
+        expected_chips, smt_bit_vector_constant_termt{0, 32}),
+      smt_bit_vector_constant_termt{'C', 8})},
+    smt_assert_commandt{smt_core_theoryt::equal(
+      smt_array_theoryt::select(
+        expected_chips, smt_bit_vector_constant_termt{1, 32}),
+      smt_bit_vector_constant_termt{'h', 8})},
+    smt_assert_commandt{smt_core_theoryt::equal(
+      smt_array_theoryt::select(
+        expected_chips, smt_bit_vector_constant_termt{2, 32}),
+      smt_bit_vector_constant_termt{'i', 8})},
+    smt_assert_commandt{smt_core_theoryt::equal(
+      smt_array_theoryt::select(
+        expected_chips, smt_bit_vector_constant_termt{3, 32}),
+      smt_bit_vector_constant_termt{'p', 8})},
+    smt_assert_commandt{smt_core_theoryt::equal(
+      smt_array_theoryt::select(
+        expected_chips, smt_bit_vector_constant_termt{4, 32}),
+      smt_bit_vector_constant_termt{'s', 8})},
+    smt_assert_commandt{smt_core_theoryt::equal(
+      smt_array_theoryt::select(
+        expected_chips, smt_bit_vector_constant_termt{5, 32}),
+      smt_bit_vector_constant_termt{'\0', 8})},
+    smt_assert_commandt{
+      smt_core_theoryt::equal(expected_fish, expected_chips)}};
+  REQUIRE(test.sent_commands == expected_commands);
+}
+
+TEST_CASE(
+  "smt2_incremental_decision_proceduret function pointer support.",
+  "[core][smt2_incremental]")
+{
+  auto test = decision_procedure_test_environmentt::make();
+  const code_typet function_type{{}, void_type()};
+  const symbolt function{"opaque", function_type, ID_C};
+  test.symbol_table.insert(function);
+  const address_of_exprt function_pointer{function.symbol_expr()};
+  const equal_exprt equals_null{
+    function_pointer, null_pointer_exprt{pointer_typet{function_type, 32}}};
+
+  test.sent_commands.clear();
+  test.procedure.set_to(equals_null, false);
+
+  const std::vector<smt_commandt> expected_commands{
+    smt_assert_commandt{smt_core_theoryt::make_not(smt_core_theoryt::equal(
+      smt_bit_vector_theoryt::concat(
+        smt_bit_vector_constant_termt{2, 8},
+        smt_bit_vector_constant_termt{0, 24}),
+      smt_bit_vector_constant_termt{0, 32}))}};
+  REQUIRE(test.sent_commands == expected_commands);
+}
+
+TEST_CASE(
   "smt2_incremental_decision_proceduret multi-ary with_exprt introduces "
   "correct number of indexes.",
   "[core][smt2_incremental]")
@@ -744,6 +817,57 @@ TEST_CASE(
       smt_bit_vector_constant_termt{2, smt_index_sort}},
     smt_assertion};
   REQUIRE(test.sent_commands == expected_commands);
+}
+
+TEST_CASE(
+  "smt2_incremental_decision_proceduret union support.",
+  "[core][smt2_incremental]")
+{
+  auto test = decision_procedure_test_environmentt::make();
+  // union foot{ int8_t eggs, uint32_t ham } foo;
+  const struct_union_typet::componentst components{
+    {"eggs", unsignedbv_typet{8}}, {"ham", signedbv_typet{32}}};
+  const type_symbolt type_symbol{"foot", union_typet{components}, ID_C};
+  test.symbol_table.insert(type_symbol);
+  const union_tag_typet union_tag{type_symbol.name};
+  const symbolt union_value_symbol{"foo", union_tag, ID_C};
+  test.symbol_table.insert(union_value_symbol);
+  // assume(foo == foot{ .eggs = 12 });
+  const auto symbol_expr = union_value_symbol.symbol_expr();
+  const auto dozen = from_integer(12, unsignedbv_typet{8});
+  const auto union_needing_padding = union_exprt{"eggs", dozen, union_tag};
+  const auto equals = equal_exprt{symbol_expr, union_needing_padding};
+  test.sent_commands.clear();
+  test.procedure.set_to(equals, true);
+
+  // (declare-fun foo () (_ BitVec 32))
+  // (declare-fun padding_0 () (_ BitVec 24))
+  // (assert (= foo (concat padding_0 (_ bv12 8)))) }
+  const auto foo_term = smt_identifier_termt{"foo", smt_bit_vector_sortt{32}};
+  const auto padding_term =
+    smt_identifier_termt{"padding_0", smt_bit_vector_sortt{24}};
+  const std::vector<smt_commandt> expected_set_commands{
+    smt_declare_function_commandt{foo_term, {}},
+    smt_declare_function_commandt{padding_term, {}},
+    smt_assert_commandt{smt_core_theoryt::equal(
+      foo_term,
+      smt_bit_vector_theoryt::concat(
+        padding_term, smt_bit_vector_constant_termt{12, 8}))}};
+  REQUIRE(test.sent_commands == expected_set_commands);
+
+  INFO("Ensuring decision procedure in suitable state for getting values.");
+  test.mock_responses.push_back(smt_check_sat_responset{smt_sat_responset{}});
+  test.procedure();
+
+  INFO("Getting union typed value.");
+  test.sent_commands.clear();
+  test.mock_responses.push_back(smt_get_value_responset{
+    {{foo_term, smt_bit_vector_constant_termt{~uint32_t{255} | 12, 32}}}});
+  const auto expected_value = union_exprt{"eggs", dozen, union_tag};
+  REQUIRE(test.procedure.get(symbol_expr) == expected_value);
+  const std::vector<smt_commandt> expected_get_commands{
+    smt_get_value_commandt{foo_term}};
+  REQUIRE(test.sent_commands == expected_get_commands);
 }
 
 TEST_CASE(
@@ -906,4 +1030,168 @@ TEST_CASE(
       smt_assertion};
     REQUIRE(test.sent_commands == expected_commands);
   }
+}
+
+static c_enum_typet make_c_enum_type(
+  const unsignedbv_typet &underlying_type,
+  unsigned int value_count)
+{
+  c_enum_typet enum_type{underlying_type};
+
+  auto &members = enum_type.members();
+  members.reserve(value_count);
+
+  for(unsigned int i = 0; i < value_count; ++i)
+  {
+    c_enum_typet::c_enum_membert member;
+    member.set_identifier("V" + std::to_string(i));
+    member.set_base_name("V" + std::to_string(i));
+    member.set_value(integer2bvrep(i, underlying_type.get_width()));
+    members.push_back(member);
+  }
+  return enum_type;
+}
+
+TEST_CASE(
+  "smt2_incremental_decision_proceduret getting enum values back from solver.",
+  "[core][smt2_incremental]")
+{
+  auto test = decision_procedure_test_environmentt::make();
+  const unsignedbv_typet enum_underlying_type{32};
+  const c_enum_typet enum_type = make_c_enum_type(enum_underlying_type, 5);
+  const type_symbolt enum_symbol{"my_enum", enum_type, ID_C};
+  test.symbol_table.insert(enum_symbol);
+  const c_enum_tag_typet enum_tag{enum_symbol.name};
+  const symbolt enum_value_symbol{"my_enum_value", enum_tag, ID_C};
+  test.symbol_table.insert(enum_value_symbol);
+  const auto symbol_expr = enum_value_symbol.symbol_expr();
+  const auto eq_expr = equal_exprt{symbol_expr, symbol_expr};
+
+  test.procedure.handle(eq_expr);
+  test.mock_responses.push_back(
+    smt_get_value_responset{{{"B0", smt_bool_literal_termt{true}}}});
+  auto returned = test.procedure.get(eq_expr);
+
+  REQUIRE(returned == constant_exprt{"true", bool_typet{}});
+}
+
+TEST_CASE(
+  "smt2_incremental_decision_proceduret getting value of empty struct",
+  "[core][smt2_incremental]")
+{
+  auto test = decision_procedure_test_environmentt::make();
+  const struct_union_typet::componentst component_types{};
+  const type_symbolt type_symbol{"emptyt", struct_typet{component_types}, ID_C};
+  test.symbol_table.insert(type_symbol);
+  const struct_tag_typet type_reference{type_symbol.name};
+  const symbolt foo{"foo", type_reference, ID_C};
+  test.symbol_table.insert(foo);
+  const symbolt bar{"bar", type_reference, ID_C};
+  test.symbol_table.insert(bar);
+
+  INFO("Sanity checking decision procedure and flushing size definitions");
+  test.mock_responses.push_front(smt_check_sat_responset{smt_sat_responset{}});
+  CHECK(test.procedure() == decision_proceduret::resultt::D_SATISFIABLE);
+  test.sent_commands.clear();
+
+  INFO("Defining an equality over empty structs");
+  const auto equality_expression =
+    test.procedure.handle(equal_exprt{foo.symbol_expr(), bar.symbol_expr()});
+  test.procedure.set_to(equality_expression, true);
+  const smt_identifier_termt expected_foo{"foo", smt_bit_vector_sortt{8}};
+  const smt_identifier_termt expected_bar{"bar", smt_bit_vector_sortt{8}};
+  const smt_identifier_termt expected_handle{"B0", smt_bool_sortt{}};
+  const smt_termt expected_equality =
+    smt_core_theoryt::equal(expected_foo, expected_bar);
+  const std::vector<smt_commandt> expected_problem_commands{
+    smt_declare_function_commandt{expected_foo, {}},
+    smt_declare_function_commandt{expected_bar, {}},
+    smt_define_function_commandt{"B0", {}, expected_equality},
+    smt_assert_commandt{expected_equality}};
+  REQUIRE(test.sent_commands == expected_problem_commands);
+  test.sent_commands.clear();
+
+  INFO("Ensuring decision procedure is in suitable state for getting output.");
+  const std::vector<smt_commandt> expected_check_commands{
+    smt_check_sat_commandt{}};
+  test.mock_responses.push_front(smt_check_sat_responset{smt_sat_responset{}});
+  REQUIRE(test.procedure() == decision_proceduret::resultt::D_SATISFIABLE);
+  CHECK(test.sent_commands == expected_check_commands);
+  test.sent_commands.clear();
+
+  INFO("Getting values involving empty structs.");
+  test.mock_responses.push_front(
+    smt_get_value_responset{{{expected_handle, smt_bool_literal_termt{true}}}});
+  CHECK(test.procedure.get(equality_expression) == true_exprt{});
+  test.mock_responses.push_front(smt_get_value_responset{
+    {{smt_identifier_termt{"foo", smt_bit_vector_sortt{8}},
+      smt_bit_vector_constant_termt{0, 8}}}});
+  const struct_exprt expected_empty{{}, type_reference};
+  CHECK(test.procedure.get(foo.symbol_expr()) == expected_empty);
+  const std::vector<smt_commandt> expected_get_commands{
+    smt_get_value_commandt{expected_handle},
+    smt_get_value_commandt{expected_foo}};
+  CHECK(test.sent_commands == expected_get_commands);
+}
+
+TEST_CASE(
+  "smt2_incremental_decision_proceduret getting value of struct-symbols with "
+  "value in the symbol table",
+  "[core][util][expr_initializer]")
+{
+  auto test = decision_procedure_test_environmentt::make();
+
+  const struct_union_typet::componentst inner_struct_type_components{
+    {"foo", signedbv_typet{32}}, {"bar", unsignedbv_typet{16}}};
+  const struct_typet inner_struct_type{inner_struct_type_components};
+  const type_symbolt inner_struct_type_symbol{
+    "inner_struct_type_symbol", inner_struct_type, ID_C};
+  test.symbol_table.insert(inner_struct_type_symbol);
+  const struct_tag_typet inner_struct_type_tag{inner_struct_type_symbol.name};
+
+  const struct_union_typet::componentst struct_components{
+    {"fizz", c_bool_type()}, {"bar", inner_struct_type_tag}};
+  const struct_typet struct_type{struct_components};
+  const type_symbolt struct_type_symbol{
+    "struct_type_symbol", struct_type, ID_C};
+  test.symbol_table.insert(struct_type_symbol);
+  const struct_tag_typet struct_tag{struct_type_symbol.name};
+
+  const exprt::operandst inner_struct_operands{
+    from_integer(10, signedbv_typet{32}),
+    from_integer(23, unsignedbv_typet{16})};
+  const struct_exprt inner_struct_expr{
+    inner_struct_operands, inner_struct_type_tag};
+  symbolt inner_symbol_with_value{
+    "inner_symbol_with_value", inner_struct_type_tag, ID_C};
+  inner_symbol_with_value.value = inner_struct_expr;
+  test.symbol_table.insert(inner_symbol_with_value);
+  const symbol_exprt inner_symbol_expr{
+    inner_symbol_with_value.name, inner_symbol_with_value.type};
+
+  const exprt::operandst struct_operands{
+    from_integer(1, c_bool_type()), inner_symbol_expr};
+  const struct_exprt struct_expr{struct_operands, struct_tag};
+
+  symbolt symbol_with_value{"symbol_with_value", struct_tag, ID_C};
+  symbol_with_value.value = struct_expr;
+  test.symbol_table.insert(symbol_with_value);
+
+  const symbol_exprt symbol_expr{
+    symbol_with_value.name, symbol_with_value.type};
+
+  const equal_exprt equal_expr{symbol_expr, symbol_expr};
+
+  test.sent_commands.clear();
+  test.procedure.set_to(equal_expr, true);
+
+  std::vector<smt_commandt> expected_commands{
+    smt_declare_function_commandt{
+      smt_identifier_termt{symbol_with_value.name, smt_bit_vector_sortt{56}},
+      {}},
+    smt_assert_commandt{smt_core_theoryt::equal(
+      smt_identifier_termt{symbol_with_value.name, smt_bit_vector_sortt{56}},
+      smt_identifier_termt{symbol_with_value.name, smt_bit_vector_sortt{56}})}};
+
+  CHECK(test.sent_commands == expected_commands);
 }

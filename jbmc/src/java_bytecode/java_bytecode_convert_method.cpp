@@ -102,15 +102,11 @@ void create_method_stub_symbol(
 {
   messaget log(message_handler);
 
-  symbolt symbol;
-  symbol.name = identifier;
+  symbolt symbol{identifier, type, ID_java};
   symbol.base_name = base_name;
   symbol.pretty_name = pretty_name;
-  symbol.type = type;
   symbol.type.set(ID_access, ID_private);
   to_java_method_type(symbol.type).set_is_final(true);
-  symbol.value.make_nil();
-  symbol.mode = ID_java;
   assign_parameter_names(
     to_java_method_type(symbol.type), symbol.name, symbol_table);
   set_declaring_class(symbol, declaring_class);
@@ -232,7 +228,7 @@ exprt java_bytecode_convert_methodt::variable(
 /// \return the constructed member type
 java_method_typet member_type_lazy(
   const std::string &descriptor,
-  const optionalt<std::string> &signature,
+  const std::optional<std::string> &signature,
   const std::string &class_name,
   const std::string &method_name,
   message_handlert &message_handler)
@@ -307,8 +303,6 @@ void java_bytecode_convert_method_lazy(
   symbol_table_baset &symbol_table,
   message_handlert &message_handler)
 {
-  symbolt method_symbol;
-
   java_method_typet member_type = member_type_lazy(
     m.descriptor,
     m.signature,
@@ -316,9 +310,8 @@ void java_bytecode_convert_method_lazy(
     id2string(m.base_name),
     message_handler);
 
-  method_symbol.name=method_identifier;
+  symbolt method_symbol{method_identifier, typet{}, ID_java};
   method_symbol.base_name=m.base_name;
-  method_symbol.mode=ID_java;
   method_symbol.location=m.source_location;
   method_symbol.location.set_function(method_identifier);
 
@@ -541,7 +534,7 @@ void create_parameter_symbols(
 void java_bytecode_convert_methodt::convert(
   const symbolt &class_symbol,
   const methodt &m,
-  const optionalt<prefix_filtert> &method_context)
+  const std::optional<prefix_filtert> &method_context)
 {
   // Construct the fully qualified method name
   // (e.g. "my.package.ClassName.myMethodName:(II)I") and query the symbol table
@@ -674,7 +667,7 @@ static member_exprt to_member(
 
   exprt accessed_object = checked_dereference(typed_pointer);
   const auto type_of = [&ns](const exprt &object) {
-    return to_struct_type(ns.follow(object.type()));
+    return ns.follow_tag(to_struct_tag_type(object.type()));
   };
 
   // The field access is described as being against a particular type, but it
@@ -780,12 +773,12 @@ code_blockt &java_bytecode_convert_methodt::get_or_create_block_for_pcrange(
   bool allow_merge)
 {
   // Check the tree shape invariant:
-  assert(tree.branch.size()==tree.branch_addresses.size());
+  PRECONDITION(tree.branch.size() == tree.branch_addresses.size());
 
   // If there are no child blocks, return this.
   if(tree.leaf)
     return this_block;
-  assert(!tree.branch.empty());
+  PRECONDITION(!tree.branch.empty());
 
   // Find child block starting > address_start:
   const auto afterstart=
@@ -793,7 +786,7 @@ code_blockt &java_bytecode_convert_methodt::get_or_create_block_for_pcrange(
       tree.branch_addresses.begin(),
       tree.branch_addresses.end(),
       address_start);
-  assert(afterstart!=tree.branch_addresses.begin());
+  CHECK_RETURN(afterstart != tree.branch_addresses.begin());
   auto findstart=afterstart;
   --findstart;
   auto child_offset=
@@ -821,9 +814,9 @@ code_blockt &java_bytecode_convert_methodt::get_or_create_block_for_pcrange(
   while(child_iter != this_block.statements().end() &&
         child_iter->get_statement() == ID_decl)
     ++child_iter;
-  assert(child_iter != this_block.statements().end());
+  CHECK_RETURN(child_iter != this_block.statements().end());
   std::advance(child_iter, child_offset);
-  assert(child_iter != this_block.statements().end());
+  CHECK_RETURN(child_iter != this_block.statements().end());
   auto &child_label=to_code_label(*child_iter);
   auto &child_block=to_code_block(child_label.code());
 
@@ -855,7 +848,7 @@ code_blockt &java_bytecode_convert_methodt::get_or_create_block_for_pcrange(
   // Check for incoming control-flow edges targeting non-header
   // blocks of the new proposed block range:
   auto checkit=amap.find(*findstart);
-  assert(checkit!=amap.end());
+  CHECK_RETURN(checkit != amap.end());
   ++checkit; // Skip the header, which can have incoming edges from outside.
   for(;
       checkit!=amap.end() && (checkit->first)<(findlim_block_start_address);
@@ -887,7 +880,7 @@ code_blockt &java_bytecode_convert_methodt::get_or_create_block_for_pcrange(
   code_labelt newlabel(child_label_name, code_blockt());
   code_blockt &newblock=to_code_block(newlabel.code());
   auto nblocks=std::distance(findstart, findlim);
-  assert(nblocks>=2);
+  CHECK_RETURN(nblocks >= 2);
   log.debug() << "Generating codet:  combining "
               << std::distance(findstart, findlim) << " blocks for addresses "
               << (*findstart) << "-" << findlim_block_start_address
@@ -895,7 +888,7 @@ code_blockt &java_bytecode_convert_methodt::get_or_create_block_for_pcrange(
 
   // Make a new block containing every child of interest:
   auto &this_block_children = this_block.statements();
-  assert(tree.branch.size()==this_block_children.size());
+  CHECK_RETURN(tree.branch.size() == this_block_children.size());
   for(auto blockidx=child_offset, blocklim=child_offset+nblocks;
       blockidx!=blocklim;
       ++blockidx)
@@ -925,7 +918,7 @@ code_blockt &java_bytecode_convert_methodt::get_or_create_block_for_pcrange(
   ++branchstart;
   tree.branch.erase(branchstart, branchlim);
 
-  assert(tree.branch.size()==this_block_children.size());
+  CHECK_RETURN(tree.branch.size() == this_block_children.size());
 
   auto branchaddriter=tree.branch_addresses.begin();
   std::advance(branchaddriter, child_offset);
@@ -941,7 +934,7 @@ code_blockt &java_bytecode_convert_methodt::get_or_create_block_for_pcrange(
 
   tree.branch[child_offset]=std::move(newnode);
 
-  assert(tree.branch.size()==tree.branch_addresses.size());
+  CHECK_RETURN(tree.branch.size() == tree.branch_addresses.size());
 
   return
     to_code_block(
@@ -978,8 +971,8 @@ static void gather_symbol_live_ranges(
   }
   else
   {
-    forall_operands(it, e)
-      gather_symbol_live_ranges(pc, *it, result);
+    for(const auto &op : e.operands())
+      gather_symbol_live_ranges(pc, op, result);
   }
 }
 
@@ -1081,10 +1074,10 @@ java_bytecode_convert_methodt::convert_instructions(const methodt &method)
     converted_instructiont ins=converted_instructiont(i_it, code_skipt());
     std::pair<address_mapt::iterator, bool> a_entry=
       address_map.insert(std::make_pair(i_it->address, ins));
-    assert(a_entry.second);
+    CHECK_RETURN(a_entry.second);
     // addresses are strictly increasing, hence we must have inserted
     // a new maximal key
-    assert(a_entry.first==--address_map.end());
+    CHECK_RETURN(a_entry.first == --address_map.end());
 
     const auto bytecode = i_it->bytecode;
     const std::string statement = bytecode_info[i_it->bytecode].mnemonic;
@@ -1224,9 +1217,10 @@ java_bytecode_convert_methodt::convert_instructions(const methodt &method)
     instruction.stack.clear();
     codet &c = instruction.code;
 
-    assert(
+    INVARIANT(
       stack.empty() || instruction.predecessors.size() <= 1 ||
-      has_prefix(stack.front().get_string(ID_C_base_name), "$stack"));
+        has_prefix(stack.front().get_string(ID_C_base_name), "$stack"),
+      "inconsistent stack");
 
     exprt arg0=i_it->args.size()>=1?i_it->args[0]:nil_exprt();
     exprt arg1=i_it->args.size()>=2?i_it->args[1]:nil_exprt();
@@ -1269,7 +1263,7 @@ java_bytecode_convert_methodt::convert_instructions(const methodt &method)
       }
     }
 
-    optionalt<codet> catch_instruction;
+    std::optional<codet> catch_instruction;
 
     if(catch_type!=typet())
     {
@@ -1295,7 +1289,7 @@ java_bytecode_convert_methodt::convert_instructions(const methodt &method)
 
     if(bytecode == BC_aconst_null)
     {
-      assert(results.size()==1);
+      PRECONDITION(results.size() == 1);
       results[0] = null_pointer_exprt(java_reference_type(java_void_type()));
     }
     else if(bytecode == BC_athrow)
@@ -1435,26 +1429,25 @@ java_bytecode_convert_methodt::convert_instructions(const methodt &method)
       // and write something like:
       // if(retaddr==5) goto 5; else if(retaddr==10) goto 10; ...
       PRECONDITION(op.empty() && results.empty());
-      assert(!jsr_ret_targets.empty());
+      PRECONDITION(!jsr_ret_targets.empty());
       c = convert_ret(
         jsr_ret_targets, arg0, i_it->source_location, i_it->address);
     }
     else if(bytecode == BC_iconst_m1)
     {
-      assert(results.size()==1);
+      CHECK_RETURN(results.size() == 1);
       results[0]=from_integer(-1, java_int_type());
     }
     else if(bytecode == patternt("?const_?"))
     {
-      assert(results.size()==1);
+      CHECK_RETURN(results.size() == 1);
       results = convert_const(statement, to_constant_expr(arg0), results);
     }
     else if(bytecode == patternt("?ipush"))
     {
-      PRECONDITION(results.size()==1);
+      CHECK_RETURN(results.size() == 1);
       DATA_INVARIANT(
-        arg0.id()==ID_constant,
-        "ipush argument expected to be constant");
+        arg0.is_constant(), "ipush argument expected to be constant");
       results[0] = typecast_exprt::conditional_cast(arg0, java_int_type());
     }
     else if(bytecode == patternt("if_?cmp??"))
@@ -1744,7 +1737,7 @@ java_bytecode_convert_methodt::convert_instructions(const methodt &method)
         numeric_cast_v<std::size_t>(to_constant_expr(arg1));
 
       op=pop(dimension);
-      assert(results.size()==1);
+      CHECK_RETURN(results.size() == 1);
       c = convert_multianewarray(i_it->source_location, arg0, op, results);
     }
     else if(bytecode == BC_arraylength)
@@ -1855,7 +1848,9 @@ java_bytecode_convert_methodt::convert_instructions(const methodt &method)
           stackt::const_iterator os_it=a_it2->second.stack.begin();
           for(auto &expr : stack)
           {
-            assert(has_prefix(os_it->get_string(ID_C_base_name), "$stack"));
+            INVARIANT(
+              has_prefix(os_it->get_string(ID_C_base_name), "$stack"),
+              "invalid base name");
             symbol_exprt lhs=to_symbol_expr(*os_it);
             code_assignt a(lhs, expr);
             more_code.add(a);
@@ -1900,13 +1895,9 @@ java_bytecode_convert_methodt::convert_instructions(const methodt &method)
   // Add anonymous locals to the symtab:
   for(const auto &var : used_local_names)
   {
-    symbolt new_symbol;
-    new_symbol.name=var.get_identifier();
-    new_symbol.type=var.type();
+    symbolt new_symbol{var.get_identifier(), var.type(), ID_java};
     new_symbol.base_name=var.get(ID_C_base_name);
     new_symbol.pretty_name=strip_java_namespace_prefix(var.get_identifier());
-    new_symbol.mode=ID_java;
-    new_symbol.is_type=false;
     new_symbol.is_file_local=true;
     new_symbol.is_thread_local=true;
     new_symbol.is_lvalue=true;
@@ -1928,7 +1919,7 @@ java_bytecode_convert_methodt::convert_instructions(const methodt &method)
   for(const auto &address_pair : address_map)
   {
     const method_offsett address = address_pair.first;
-    assert(address_pair.first==address_pair.second.source->address);
+    CHECK_RETURN(address_pair.first == address_pair.second.source->address);
     const codet &c=address_pair.second.code;
 
     // Start a new lexical block if this is a branch target:
@@ -1957,9 +1948,10 @@ java_bytecode_convert_methodt::convert_instructions(const methodt &method)
       root_block.add(
         code_labelt{label(std::to_string(address)), code_blockt{}});
       root.branch.push_back(block_tree_nodet::get_leaf());
-      assert((root.branch_addresses.empty() ||
-              root.branch_addresses.back()<address) &&
-             "Block addresses should be unique and increasing");
+      INVARIANT(
+        (root.branch_addresses.empty() ||
+         root.branch_addresses.back() < address),
+        "Block addresses should be unique and increasing");
       root.branch_addresses.push_back(address);
     }
 
@@ -3091,7 +3083,7 @@ code_blockt java_bytecode_convert_methodt::convert_astore(
   return block;
 }
 
-optionalt<exprt> java_bytecode_convert_methodt::convert_invoke_dynamic(
+std::optional<exprt> java_bytecode_convert_methodt::convert_invoke_dynamic(
   const source_locationt &location,
   std::size_t instruction_address,
   const exprt &arg0,
@@ -3290,11 +3282,11 @@ void java_bytecode_convert_method(
   message_handlert &message_handler,
   size_t max_array_length,
   bool throw_assertion_error,
-  optionalt<ci_lazy_methods_neededt> needed_lazy_methods,
+  std::optional<ci_lazy_methods_neededt> needed_lazy_methods,
   java_string_library_preprocesst &string_preprocess,
   const class_hierarchyt &class_hierarchy,
   bool threading_support,
-  const optionalt<prefix_filtert> &method_context,
+  const std::optional<prefix_filtert> &method_context,
   bool assert_no_exceptions_thrown)
 
 {

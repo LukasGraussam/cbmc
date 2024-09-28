@@ -13,19 +13,13 @@ Author: Daniel Kroening, Peter Schrammel
 
 #include <util/cmdline.h>
 #include <util/exception_utils.h>
-#include <util/make_unique.h>
+#include <util/exit_codes.h>
 #include <util/message.h>
 #include <util/options.h>
+#include <util/unicode.h>
 #include <util/version.h>
 
-#include <iostream>
-
-#ifdef _MSC_VER
-#include <util/unicode.h>
-#endif
-
-#include <solvers/stack_decision_procedure.h>
-
+#include <goto-symex/solver_hardness.h>
 #include <solvers/flattening/bv_dimacs.h>
 #include <solvers/flattening/bv_wcnf.h>
 #include <solvers/prop/prop.h>
@@ -39,7 +33,7 @@ Author: Daniel Kroening, Peter Schrammel
 #include <solvers/smt2_incremental/smt_solver_process.h>
 #include <solvers/strings/string_refinement.h>
 
-#include <goto-symex/solver_hardness.h>
+#include <iostream>
 
 solver_factoryt::solver_factoryt(
   const optionst &_options,
@@ -53,84 +47,57 @@ solver_factoryt::solver_factoryt(
 {
 }
 
-solver_factoryt::solvert::solvert(std::unique_ptr<decision_proceduret> p)
+solver_factoryt::solvert::solvert(std::unique_ptr<stack_decision_proceduret> p)
   : decision_procedure_ptr(std::move(p))
 {
 }
 
 solver_factoryt::solvert::solvert(
-  std::unique_ptr<decision_proceduret> p1,
+  std::unique_ptr<stack_decision_proceduret> p1,
   std::unique_ptr<propt> p2)
   : prop_ptr(std::move(p2)), decision_procedure_ptr(std::move(p1))
 {
 }
 
 solver_factoryt::solvert::solvert(
-  std::unique_ptr<decision_proceduret> p1,
+  std::unique_ptr<stack_decision_proceduret> p1,
   std::unique_ptr<std::ofstream> p2)
   : ofstream_ptr(std::move(p2)), decision_procedure_ptr(std::move(p1))
 {
 }
 
-decision_proceduret &solver_factoryt::solvert::decision_procedure() const
+solver_factoryt::solvert::solvert(
+  std::unique_ptr<boolbvt> p1,
+  std::unique_ptr<propt> p2)
+  : prop_ptr(std::move(p2)), decision_procedure_is_boolbvt_ptr(std::move(p1))
 {
-  PRECONDITION(decision_procedure_ptr != nullptr);
-  return *decision_procedure_ptr;
 }
 
-stack_decision_proceduret &
-solver_factoryt::solvert::stack_decision_procedure() const
+stack_decision_proceduret &solver_factoryt::solvert::decision_procedure() const
 {
-  PRECONDITION(decision_procedure_ptr != nullptr);
-  stack_decision_proceduret *solver =
-    dynamic_cast<stack_decision_proceduret *>(&*decision_procedure_ptr);
-  INVARIANT(solver != nullptr, "stack decision procedure required");
-  return *solver;
+  PRECONDITION(
+    (decision_procedure_ptr != nullptr) !=
+    (decision_procedure_is_boolbvt_ptr != nullptr));
+  if(decision_procedure_ptr)
+    return *decision_procedure_ptr;
+  else
+    return *decision_procedure_is_boolbvt_ptr;
 }
 
-propt &solver_factoryt::solvert::prop() const
+boolbvt &solver_factoryt::solvert::boolbv_decision_procedure() const
 {
-  PRECONDITION(prop_ptr != nullptr);
-  return *prop_ptr;
+  PRECONDITION(decision_procedure_is_boolbvt_ptr != nullptr);
+  return *decision_procedure_is_boolbvt_ptr;
 }
 
 void solver_factoryt::set_decision_procedure_time_limit(
-  decision_proceduret &decision_procedure)
+  solver_resource_limitst &decision_procedure)
 {
   const int timeout_seconds =
     options.get_signed_int_option("solver-time-limit");
 
   if(timeout_seconds > 0)
-  {
-    solver_resource_limitst *solver =
-      dynamic_cast<solver_resource_limitst *>(&decision_procedure);
-    if(solver == nullptr)
-    {
-      messaget log(message_handler);
-      log.warning() << "cannot set solver time limit on "
-                    << decision_procedure.decision_procedure_text()
-                    << messaget::eom;
-      return;
-    }
-
-    solver->set_time_limit_seconds(timeout_seconds);
-  }
-}
-
-void solver_factoryt::solvert::set_decision_procedure(
-  std::unique_ptr<decision_proceduret> p)
-{
-  decision_procedure_ptr = std::move(p);
-}
-
-void solver_factoryt::solvert::set_prop(std::unique_ptr<propt> p)
-{
-  prop_ptr = std::move(p);
-}
-
-void solver_factoryt::solvert::set_ofstream(std::unique_ptr<std::ofstream> p)
-{
-  ofstream_ptr = std::move(p);
+    decision_procedure.set_time_limit_seconds(timeout_seconds);
 }
 
 std::unique_ptr<solver_factoryt::solvert> solver_factoryt::get_solver()
@@ -167,7 +134,9 @@ smt2_dect::solvert solver_factoryt::get_smt2_solver_type() const
 
   smt2_dect::solvert s = smt2_dect::solvert::GENERIC;
 
-  if(options.get_bool_option("boolector"))
+  if(options.get_bool_option("bitwuzla"))
+    s = smt2_dect::solvert::BITWUZLA;
+  else if(options.get_bool_option("boolector"))
     s = smt2_dect::solvert::BOOLECTOR;
   else if(options.get_bool_option("cprover-smt2"))
     s = smt2_dect::solvert::CPROVER_SMT2;
@@ -177,6 +146,8 @@ smt2_dect::solvert solver_factoryt::get_smt2_solver_type() const
     s = smt2_dect::solvert::CVC3;
   else if(options.get_bool_option("cvc4"))
     s = smt2_dect::solvert::CVC4;
+  else if(options.get_bool_option("cvc5"))
+    s = smt2_dect::solvert::CVC5;
   else if(options.get_bool_option("yices"))
     s = smt2_dect::solvert::YICES;
   else if(options.get_bool_option("z3"))
@@ -187,52 +158,184 @@ smt2_dect::solvert solver_factoryt::get_smt2_solver_type() const
   return s;
 }
 
+/// Emit a warning for non-existent solver \p solver via \p message_handler.
+static void emit_solver_warning(
+  message_handlert &message_handler,
+  const std::string &solver)
+{
+  messaget log(message_handler);
+  log.warning() << "The specified solver, '" << solver
+                << "', is not available. "
+                << "The default solver will be used instead." << messaget::eom;
+}
+
 template <typename SatcheckT>
-static std::unique_ptr<SatcheckT>
+static typename std::enable_if<
+  !std::is_base_of<hardness_collectort, SatcheckT>::value,
+  std::unique_ptr<SatcheckT>>::type
 make_satcheck_prop(message_handlert &message_handler, const optionst &options)
 {
-  auto satcheck = util_make_unique<SatcheckT>(message_handler);
+  auto satcheck = std::make_unique<SatcheckT>(message_handler);
   if(options.is_set("write-solver-stats-to"))
   {
-    if(
-      auto hardness_collector = dynamic_cast<hardness_collectort *>(&*satcheck))
-    {
-      std::unique_ptr<solver_hardnesst> solver_hardness =
-        util_make_unique<solver_hardnesst>();
-      solver_hardness->set_outfile(options.get_option("write-solver-stats-to"));
-      hardness_collector->solver_hardness = std::move(solver_hardness);
-    }
-    else
-    {
-      messaget log(message_handler);
-      log.warning()
-        << "Configured solver does not support --write-solver-stats-to. "
-        << "Solver stats will not be written." << messaget::eom;
-    }
+    messaget log(message_handler);
+    log.warning()
+      << "Configured solver does not support --write-solver-stats-to. "
+      << "Solver stats will not be written." << messaget::eom;
   }
   return satcheck;
 }
 
-std::unique_ptr<solver_factoryt::solvert> solver_factoryt::get_default()
+template <typename SatcheckT>
+static typename std::enable_if<
+  std::is_base_of<hardness_collectort, SatcheckT>::value,
+  std::unique_ptr<SatcheckT>>::type
+make_satcheck_prop(message_handlert &message_handler, const optionst &options)
 {
-  auto solver = util_make_unique<solvert>();
-  if(
-    options.get_bool_option("beautify") ||
-    !options.get_bool_option("sat-preprocessor")) // no simplifier
+  auto satcheck = std::make_unique<SatcheckT>(message_handler);
+  if(options.is_set("write-solver-stats-to"))
+  {
+    std::unique_ptr<solver_hardnesst> solver_hardness =
+      std::make_unique<solver_hardnesst>();
+    solver_hardness->set_outfile(options.get_option("write-solver-stats-to"));
+    satcheck->solver_hardness = std::move(solver_hardness);
+  }
+  return satcheck;
+}
+
+static std::unique_ptr<propt>
+get_sat_solver(message_handlert &message_handler, const optionst &options)
+{
+  const bool no_simplifier = options.get_bool_option("beautify") ||
+                             !options.get_bool_option("sat-preprocessor") ||
+                             options.get_bool_option("refine-arithmetic") ||
+                             options.get_bool_option("refine-strings");
+
+  if(options.is_set("sat-solver"))
+  {
+    const std::string &solver_option = options.get_option("sat-solver");
+    if(solver_option == "zchaff")
+    {
+#if defined SATCHECK_ZCHAFF
+      return make_satcheck_prop<satcheck_zchafft>(message_handler, options);
+#else
+      emit_solver_warning(message_handler, "zchaff");
+#endif
+    }
+    else if(solver_option == "booleforce")
+    {
+#if defined SATCHECK_BOOLERFORCE
+      return make_satcheck_prop<satcheck_booleforcet>(message_handler, options);
+#else
+      emit_solver_warning(message_handler, "booleforce");
+#endif
+    }
+    else if(solver_option == "minisat1")
+    {
+#if defined SATCHECK_MINISAT1
+      return make_satcheck_prop<satcheck_minisat1t>(message_handler, options);
+#else
+      emit_solver_warning(message_handler, "minisat1");
+#endif
+    }
+    else if(solver_option == "minisat2")
+    {
+#if defined SATCHECK_MINISAT2
+      if(no_simplifier)
+      {
+        // simplifier won't work with beautification
+        return make_satcheck_prop<satcheck_minisat_no_simplifiert>(
+          message_handler, options);
+      }
+      else // with simplifier
+      {
+        return make_satcheck_prop<satcheck_minisat_simplifiert>(
+          message_handler, options);
+      }
+#else
+      emit_solver_warning(message_handler, "minisat2");
+#endif
+    }
+    else if(solver_option == "ipasir")
+    {
+#if defined SATCHECK_IPASIR
+      return make_satcheck_prop<satcheck_ipasirt>(message_handler, options);
+#else
+      emit_solver_warning(message_handler, "ipasir");
+#endif
+    }
+    else if(solver_option == "picosat")
+    {
+#if defined SATCHECK_PICOSAT
+      return make_satcheck_prop<satcheck_picosatt>(message_handler, options);
+#else
+      emit_solver_warning(message_handler, "picosat");
+#endif
+    }
+    else if(solver_option == "lingeling")
+    {
+#if defined SATCHECK_LINGELING
+      return make_satcheck_prop<satcheck_lingelingt>(message_handler, options);
+#else
+      emit_solver_warning(message_handler, "lingeling");
+#endif
+    }
+    else if(solver_option == "glucose")
+    {
+#if defined SATCHECK_GLUCOSE
+      if(no_simplifier)
+      {
+        // simplifier won't work with beautification
+        return make_satcheck_prop<satcheck_glucose_no_simplifiert>(
+          message_handler, options);
+      }
+      else // with simplifier
+      {
+        return make_satcheck_prop<satcheck_glucose_simplifiert>(
+          message_handler, options);
+      }
+#else
+      emit_solver_warning(message_handler, "glucose");
+#endif
+    }
+    else if(solver_option == "cadical")
+    {
+#if defined SATCHECK_CADICAL
+      return make_satcheck_prop<satcheck_cadicalt>(message_handler, options);
+#else
+      emit_solver_warning(message_handler, "cadical");
+#endif
+    }
+    else
+    {
+      messaget log(message_handler);
+      log.error() << "unknown solver '" << solver_option << "'"
+                  << messaget::eom;
+      exit(CPROVER_EXIT_USAGE_ERROR);
+    }
+  }
+
+  // default solver
+  if(no_simplifier)
   {
     // simplifier won't work with beautification
-    solver->set_prop(
-      make_satcheck_prop<satcheck_no_simplifiert>(message_handler, options));
+    return make_satcheck_prop<satcheck_no_simplifiert>(
+      message_handler, options);
   }
   else // with simplifier
   {
-    solver->set_prop(make_satcheck_prop<satcheckt>(message_handler, options));
+    return make_satcheck_prop<satcheckt>(message_handler, options);
   }
+}
+
+std::unique_ptr<solver_factoryt::solvert> solver_factoryt::get_default()
+{
+  auto sat_solver = get_sat_solver(message_handler, options);
 
   bool get_array_constraints =
     options.get_bool_option("show-array-constraints");
-  auto bv_pointers = util_make_unique<bv_pointerst>(
-    ns, solver->prop(), message_handler, get_array_constraints);
+  auto bv_pointers = std::make_unique<bv_pointerst>(
+    ns, *sat_solver, message_handler, get_array_constraints);
 
   if(options.get_option("arrays-uf") == "never")
     bv_pointers->unbounded_array = bv_pointerst::unbounded_arrayt::U_NONE;
@@ -240,9 +343,9 @@ std::unique_ptr<solver_factoryt::solvert> solver_factoryt::get_default()
     bv_pointers->unbounded_array = bv_pointerst::unbounded_arrayt::U_ALL;
 
   set_decision_procedure_time_limit(*bv_pointers);
-  solver->set_decision_procedure(std::move(bv_pointers));
 
-  return solver;
+  std::unique_ptr<boolbvt> boolbv = std::move(bv_pointers);
+  return std::make_unique<solvert>(std::move(boolbv), std::move(sat_solver));
 }
 
 std::unique_ptr<solver_factoryt::solvert> solver_factoryt::get_dimacs()
@@ -250,14 +353,14 @@ std::unique_ptr<solver_factoryt::solvert> solver_factoryt::get_dimacs()
   no_beautification();
   no_incremental_check();
 
-  auto prop = util_make_unique<dimacs_cnft>(message_handler);
+  auto prop = std::make_unique<dimacs_cnft>(message_handler);
 
   std::string filename = options.get_option("outfile");
 
-  auto bv_dimacs =
-    util_make_unique<bv_dimacst>(ns, *prop, message_handler, filename);
+  std::unique_ptr<boolbvt> bv_dimacs =
+    std::make_unique<bv_dimacst>(ns, *prop, message_handler, filename);
 
-  return util_make_unique<solvert>(std::move(bv_dimacs), std::move(prop));
+  return std::make_unique<solvert>(std::move(bv_dimacs), std::move(prop));
 }
 
 std::unique_ptr<solver_factoryt::solvert> solver_factoryt::get_wcnf()
@@ -282,25 +385,17 @@ std::unique_ptr<solver_factoryt::solvert> solver_factoryt::get_external_sat()
 
   std::string external_sat_solver = options.get_option("external-sat-solver");
   auto prop =
-    util_make_unique<external_satt>(message_handler, external_sat_solver);
+    std::make_unique<external_satt>(message_handler, external_sat_solver);
 
-  auto bv_pointers = util_make_unique<bv_pointerst>(ns, *prop, message_handler);
+  std::unique_ptr<boolbvt> bv_pointers =
+    std::make_unique<bv_pointerst>(ns, *prop, message_handler);
 
-  return util_make_unique<solvert>(std::move(bv_pointers), std::move(prop));
+  return std::make_unique<solvert>(std::move(bv_pointers), std::move(prop));
 }
 
 std::unique_ptr<solver_factoryt::solvert> solver_factoryt::get_bv_refinement()
 {
-  std::unique_ptr<propt> prop = [this]() -> std::unique_ptr<propt> {
-    // We offer the option to disable the SAT preprocessor
-    if(options.get_bool_option("sat-preprocessor"))
-    {
-      no_beautification();
-      return make_satcheck_prop<satcheckt>(message_handler, options);
-    }
-    return make_satcheck_prop<satcheck_no_simplifiert>(
-      message_handler, options);
-  }();
+  std::unique_ptr<propt> prop = get_sat_solver(message_handler, options);
 
   bv_refinementt::infot info;
   info.ns = &ns;
@@ -316,9 +411,10 @@ std::unique_ptr<solver_factoryt::solvert> solver_factoryt::get_bv_refinement()
   info.refine_arithmetic = options.get_bool_option("refine-arithmetic");
   info.message_handler = &message_handler;
 
-  auto decision_procedure = util_make_unique<bv_refinementt>(info);
+  std::unique_ptr<boolbvt> decision_procedure =
+    std::make_unique<bv_refinementt>(info);
   set_decision_procedure_time_limit(*decision_procedure);
-  return util_make_unique<solvert>(
+  return std::make_unique<solvert>(
     std::move(decision_procedure), std::move(prop));
 }
 
@@ -330,8 +426,7 @@ solver_factoryt::get_string_refinement()
 {
   string_refinementt::infot info;
   info.ns = &ns;
-  auto prop =
-    make_satcheck_prop<satcheck_no_simplifiert>(message_handler, options);
+  auto prop = get_sat_solver(message_handler, options);
   info.prop = prop.get();
   info.refinement_bound = DEFAULT_MAX_NB_REFINEMENT;
   info.output_xml = output_xml_in_refinement;
@@ -342,29 +437,27 @@ solver_factoryt::get_string_refinement()
   info.refine_arithmetic = options.get_bool_option("refine-arithmetic");
   info.message_handler = &message_handler;
 
-  auto decision_procedure = util_make_unique<string_refinementt>(info);
+  std::unique_ptr<boolbvt> decision_procedure =
+    std::make_unique<string_refinementt>(info);
   set_decision_procedure_time_limit(*decision_procedure);
-  return util_make_unique<solvert>(
+  return std::make_unique<solvert>(
     std::move(decision_procedure), std::move(prop));
 }
 
 std::unique_ptr<std::ofstream> open_outfile_and_check(
   const std::string &filename,
-  message_handlert &message_handler)
+  message_handlert &message_handler,
+  const std::string &arg_name)
 {
   if(filename.empty())
     return nullptr;
 
-#ifdef _MSC_VER
-  auto out = util_make_unique<std::ofstream>(widen(filename));
-#else
-  auto out = util_make_unique<std::ofstream>(filename);
-#endif
+  auto out = std::make_unique<std::ofstream>(widen_if_needed(filename));
 
   if(!*out)
   {
     throw invalid_command_line_argument_exceptiont(
-      "failed to open file: " + filename, "--outfile");
+      "failed to open file: " + filename, arg_name);
   }
 
   messaget log(message_handler);
@@ -379,6 +472,14 @@ solver_factoryt::get_incremental_smt2(std::string solver_command)
   no_beautification();
 
   const std::string outfile_arg = options.get_option("outfile");
+  const std::string dump_smt_formula = options.get_option("dump-smt-formula");
+
+  if(!outfile_arg.empty() && !dump_smt_formula.empty())
+  {
+    throw invalid_command_line_argument_exceptiont(
+      "Argument --outfile is incompatible with --dump-smt-formula. ",
+      "--outfile");
+  }
 
   std::unique_ptr<smt_base_solver_processt> solver_process = nullptr;
 
@@ -386,19 +487,27 @@ solver_factoryt::get_incremental_smt2(std::string solver_command)
   {
     bool on_std_out = outfile_arg == "-";
     std::unique_ptr<std::ostream> outfile =
-      on_std_out ? nullptr
-                 : open_outfile_and_check(outfile_arg, message_handler);
-    solver_process = util_make_unique<smt_incremental_dry_run_solvert>(
+      on_std_out
+        ? nullptr
+        : open_outfile_and_check(outfile_arg, message_handler, "--outfile");
+    solver_process = std::make_unique<smt_incremental_dry_run_solvert>(
       message_handler, on_std_out ? std::cout : *outfile, std::move(outfile));
   }
   else
   {
-    solver_process = util_make_unique<smt_piped_solver_processt>(
-      std::move(solver_command), message_handler);
+    const auto out_filename = options.get_option("dump-smt-formula");
+
+    // If no out_filename is provided `open_outfile_and_check` will return
+    // `nullptr`, and the solver will work normally without any logging.
+    solver_process = std::make_unique<smt_piped_solver_processt>(
+      std::move(solver_command),
+      message_handler,
+      open_outfile_and_check(
+        out_filename, message_handler, "--dump-smt-formula"));
   }
 
-  return util_make_unique<solvert>(
-    util_make_unique<smt2_incremental_decision_proceduret>(
+  return std::make_unique<solvert>(
+    std::make_unique<smt2_incremental_decision_proceduret>(
       ns, std::move(solver_process), message_handler));
 }
 
@@ -419,7 +528,7 @@ solver_factoryt::get_smt2(smt2_dect::solvert solver)
         "provide a filename with --outfile");
     }
 
-    auto smt2_dec = util_make_unique<smt2_dect>(
+    auto smt2_dec = std::make_unique<smt2_dect>(
       ns,
       "cbmc",
       std::string("Generated by CBMC ") + CBMC_VERSION,
@@ -430,12 +539,11 @@ solver_factoryt::get_smt2(smt2_dect::solvert solver)
     if(options.get_bool_option("fpa"))
       smt2_dec->use_FPA_theory = true;
 
-    set_decision_procedure_time_limit(*smt2_dec);
-    return util_make_unique<solvert>(std::move(smt2_dec));
+    return std::make_unique<solvert>(std::move(smt2_dec));
   }
   else if(filename == "-")
   {
-    auto smt2_conv = util_make_unique<smt2_convt>(
+    auto smt2_conv = std::make_unique<smt2_convt>(
       ns,
       "cbmc",
       std::string("Generated by CBMC ") + CBMC_VERSION,
@@ -446,14 +554,13 @@ solver_factoryt::get_smt2(smt2_dect::solvert solver)
     if(options.get_bool_option("fpa"))
       smt2_conv->use_FPA_theory = true;
 
-    set_decision_procedure_time_limit(*smt2_conv);
-    return util_make_unique<solvert>(std::move(smt2_conv));
+    return std::make_unique<solvert>(std::move(smt2_conv));
   }
   else
   {
-    auto out = open_outfile_and_check(filename, message_handler);
+    auto out = open_outfile_and_check(filename, message_handler, "--outfile");
 
-    auto smt2_conv = util_make_unique<smt2_convt>(
+    auto smt2_conv = std::make_unique<smt2_convt>(
       ns,
       "cbmc",
       std::string("Generated by CBMC ") + CBMC_VERSION,
@@ -464,8 +571,7 @@ solver_factoryt::get_smt2(smt2_dect::solvert solver)
     if(options.get_bool_option("fpa"))
       smt2_conv->use_FPA_theory = true;
 
-    set_decision_procedure_time_limit(*smt2_conv);
-    return util_make_unique<solvert>(std::move(smt2_conv), std::move(out));
+    return std::make_unique<solvert>(std::move(smt2_conv), std::move(out));
   }
 }
 
@@ -517,6 +623,9 @@ static void parse_sat_options(const cmdlinet &cmdline, optionst &options)
     options.set_option("dimacs", true);
   if(cmdline.isset("wcnf"))
     options.set_option("wcnf", true);
+
+  if(cmdline.isset("sat-solver"))
+    options.set_option("sat-solver", cmdline.get_value("sat-solver"));
 }
 
 static void parse_smt2_options(const cmdlinet &cmdline, optionst &options)
@@ -528,6 +637,12 @@ static void parse_smt2_options(const cmdlinet &cmdline, optionst &options)
     options.set_option("fpa", true);
 
   bool solver_set = false;
+
+  if(cmdline.isset("bitwuzla"))
+  {
+    options.set_option("bitwuzla", true), solver_set = true;
+    options.set_option("smt2", true);
+  }
 
   if(cmdline.isset("boolector"))
   {
@@ -550,6 +665,12 @@ static void parse_smt2_options(const cmdlinet &cmdline, optionst &options)
   if(cmdline.isset("cvc4"))
   {
     options.set_option("cvc4", true), solver_set = true;
+    options.set_option("smt2", true);
+  }
+
+  if(cmdline.isset("cvc5"))
+  {
+    options.set_option("cvc5", true), solver_set = true;
     options.set_option("smt2", true);
   }
 
@@ -594,6 +715,10 @@ void parse_solver_options(const cmdlinet &cmdline, optionst &options)
 
   if(cmdline.isset("outfile"))
     options.set_option("outfile", cmdline.get_value("outfile"));
+
+  if(cmdline.isset("dump-smt-formula"))
+    options.set_option(
+      "dump-smt-formula", cmdline.get_value("dump-smt-formula"));
 
   if(cmdline.isset("write-solver-stats-to"))
   {

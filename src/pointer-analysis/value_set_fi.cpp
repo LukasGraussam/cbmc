@@ -14,10 +14,8 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <util/arith_tools.h>
 #include <util/byte_operators.h>
 #include <util/c_types.h>
-#include <util/expr_util.h>
 #include <util/namespace.h>
 #include <util/pointer_expr.h>
-#include <util/prefix.h>
 #include <util/simplify_expr.h>
 #include <util/std_code.h>
 #include <util/symbol.h>
@@ -48,7 +46,7 @@ void value_set_fit::output(
 
     const entryt &e=v_it->second;
 
-    if(has_prefix(id2string(e.identifier), "value_set::dynamic_object"))
+    if(e.identifier.starts_with("value_set::dynamic_object"))
     {
       display_name=id2string(e.identifier)+e.suffix;
       identifier.clear();
@@ -158,7 +156,7 @@ void value_set_fit::flatten_rec(
   #endif
 
   std::string identifier = id2string(e.identifier);
-  assert(seen.find(identifier + e.suffix)==seen.end());
+  CHECK_RETURN(seen.find(identifier + e.suffix) == seen.end());
 
   bool generalize_index = false;
 
@@ -253,10 +251,9 @@ bool value_set_fit::make_union(const value_set_fit::valuest &new_values)
     if(it2==values.end())
     {
       // we always track these
-      if(has_prefix(id2string(it->second.identifier),
-                    "value_set::dynamic_object") ||
-         has_prefix(id2string(it->second.identifier),
-                    "value_set::return_value"))
+      if(
+        it->second.identifier.starts_with("value_set::dynamic_object") ||
+        it->second.identifier.starts_with("value_set::return_value"))
       {
         values.insert(*it);
         result=true;
@@ -303,7 +300,7 @@ value_set_fit::get_value_set(const exprt &expr, const namespacet &ns) const
     const exprt &object = object_numbering[object_entry.first];
     if(object.type().id()=="#REF#")
     {
-      assert(object.id()==ID_symbol);
+      DATA_INVARIANT(object.id() == ID_symbol, "reference to symbol required");
 
       const irep_idt &ident = object.get(ID_identifier);
       valuest::const_iterator v_it = values.find(ident);
@@ -361,12 +358,15 @@ void value_set_fit::get_value_set(
   simplify(tmp, ns);
 
   gvs_recursion_sett recset;
-  get_value_set_rec(tmp, dest, "", tmp.type(), ns, recset);
+  bool includes_nondet_pointer = false;
+  get_value_set_rec(
+    tmp, dest, includes_nondet_pointer, "", tmp.type(), ns, recset);
 }
 
 void value_set_fit::get_value_set_rec(
   const exprt &expr,
   object_mapt &dest,
+  bool &includes_nondet_pointer,
   const std::string &suffix,
   const typet &original_type,
   const namespacet &ns,
@@ -390,6 +390,7 @@ void value_set_fit::get_value_set_rec(
         get_value_set_rec(
           object_numbering[object_entry.first],
           dest,
+          includes_nondet_pointer,
           suffix,
           original_type,
           ns,
@@ -417,6 +418,7 @@ void value_set_fit::get_value_set_rec(
       get_value_set_rec(
         to_index_expr(expr).array(),
         dest,
+        includes_nondet_pointer,
         "[]" + suffix,
         original_type,
         ns,
@@ -433,10 +435,11 @@ void value_set_fit::get_value_set_rec(
 
     if(compound.is_not_nil())
     {
-      const typet &type = ns.follow(compound.type());
-
       DATA_INVARIANT(
-        type.id() == ID_struct || type.id() == ID_union,
+        compound.type().id() == ID_struct ||
+          compound.type().id() == ID_struct_tag ||
+          compound.type().id() == ID_union ||
+          compound.type().id() == ID_union_tag,
         "operand 0 of member expression must be struct or union");
 
       const std::string &component_name =
@@ -445,6 +448,7 @@ void value_set_fit::get_value_set_rec(
       get_value_set_rec(
         compound,
         dest,
+        includes_nondet_pointer,
         "." + component_name + suffix,
         original_type,
         ns,
@@ -460,7 +464,7 @@ void value_set_fit::get_value_set_rec(
     irep_idt ident = id2string(to_symbol_expr(expr).get_identifier()) + suffix;
     valuest::const_iterator v_it=values.find(ident);
 
-    if(has_prefix(id2string(ident), alloc_adapter_prefix))
+    if(ident.starts_with(alloc_adapter_prefix))
     {
       insert(dest, expr, mp_integer{0});
       return;
@@ -478,6 +482,7 @@ void value_set_fit::get_value_set_rec(
     get_value_set_rec(
       to_if_expr(expr).true_case(),
       dest,
+      includes_nondet_pointer,
       suffix,
       original_type,
       ns,
@@ -485,6 +490,7 @@ void value_set_fit::get_value_set_rec(
     get_value_set_rec(
       to_if_expr(expr).false_case(),
       dest,
+      includes_nondet_pointer,
       suffix,
       original_type,
       ns,
@@ -509,8 +515,14 @@ void value_set_fit::get_value_set_rec(
       for(const auto &object_entry : object_map)
       {
         const exprt &object = object_numbering[object_entry.first];
-        get_value_set_rec(object, dest, suffix,
-                          original_type, ns, recursion_set);
+        get_value_set_rec(
+          object,
+          dest,
+          includes_nondet_pointer,
+          suffix,
+          original_type,
+          ns,
+          recursion_set);
       }
 
       return;
@@ -519,7 +531,7 @@ void value_set_fit::get_value_set_rec(
   else if(expr.is_constant())
   {
     // check if NULL
-    if(is_null_pointer(to_constant_expr(expr)))
+    if(to_constant_expr(expr).is_null_pointer())
     {
       insert(
         dest,
@@ -533,6 +545,7 @@ void value_set_fit::get_value_set_rec(
     get_value_set_rec(
       to_typecast_expr(expr).op(),
       dest,
+      includes_nondet_pointer,
       suffix,
       original_type,
       ns,
@@ -550,21 +563,29 @@ void value_set_fit::get_value_set_rec(
       // find the pointer operand
       const exprt *ptr_operand=nullptr;
 
-      forall_operands(it, expr)
-        if(it->type().id()==ID_pointer)
+      for(const auto &op : expr.operands())
+      {
+        if(op.type().id() == ID_pointer)
         {
           if(ptr_operand==nullptr)
-            ptr_operand=&(*it);
+            ptr_operand = &op;
           else
             throw "more than one pointer operand in pointer arithmetic";
         }
+      }
 
       if(ptr_operand==nullptr)
         throw "pointer type sum expected to have pointer operand";
 
       object_mapt pointer_expr_set;
-      get_value_set_rec(*ptr_operand, pointer_expr_set, "",
-                        ptr_operand->type(), ns, recursion_set);
+      get_value_set_rec(
+        *ptr_operand,
+        pointer_expr_set,
+        includes_nondet_pointer,
+        "",
+        ptr_operand->type(),
+        ns,
+        recursion_set);
 
       for(const auto &object_entry : pointer_expr_set.read())
       {
@@ -630,7 +651,7 @@ void value_set_fit::get_value_set_rec(
             statement==ID_cpp_new_array)
     {
       PRECONDITION(suffix.empty());
-      assert(expr.type().id()==ID_pointer);
+      PRECONDITION(expr.type().id() == ID_pointer);
 
       dynamic_object_exprt dynamic_object(
         to_pointer_type(expr.type()).base_type());
@@ -657,8 +678,17 @@ void value_set_fit::get_value_set_rec(
           expr.id()==ID_array)
   {
     // an array constructor, possibly containing addresses
-    forall_operands(it, expr)
-      get_value_set_rec(*it, dest, suffix, original_type, ns, recursion_set);
+    for(const auto &op : expr.operands())
+    {
+      get_value_set_rec(
+        op,
+        dest,
+        includes_nondet_pointer,
+        suffix,
+        original_type,
+        ns,
+        recursion_set);
+    }
   }
   else if(expr.id()==ID_dynamic_object)
   {
@@ -690,7 +720,7 @@ void value_set_fit::dereference_rec(
   // remove pointer typecasts
   if(src.id()==ID_typecast)
   {
-    assert(src.type().id()==ID_pointer);
+    PRECONDITION(src.type().id() == ID_pointer);
 
     dereference_rec(to_typecast_expr(src).op(), dest);
   }
@@ -800,9 +830,11 @@ void value_set_fit::get_reference_set_sharing_rec(
   {
     gvs_recursion_sett recset;
     object_mapt temp;
+    bool includes_nondet_pointer = false;
     get_value_set_rec(
       to_dereference_expr(expr).pointer(),
       temp,
+      includes_nondet_pointer,
       "",
       to_dereference_expr(expr).pointer().type(),
       ns,
@@ -936,7 +968,7 @@ void value_set_fit::get_reference_set_sharing_rec(
         member_exprt member_expr(object, component_name, expr.type());
 
         // adjust type?
-        if(ns.follow(struct_op.type())!=ns.follow(object.type()))
+        if(struct_op.type() != object.type())
         {
           member_expr.compound() =
             typecast_exprt(member_expr.compound(), struct_op.type());
@@ -975,18 +1007,19 @@ void value_set_fit::assign(
     return;
   }
 
-  const typet &type=ns.follow(lhs.type());
-
-  if(type.id()==ID_struct ||
-     type.id()==ID_union)
+  if(
+    lhs.type().id() == ID_struct || lhs.type().id() == ID_struct_tag ||
+    lhs.type().id() == ID_union || lhs.type().id() == ID_union_tag)
   {
-    const struct_union_typet &struct_type=to_struct_union_type(type);
+    const auto &components =
+      (lhs.type().id() == ID_struct_tag || lhs.type().id() == ID_union_tag)
+        ? ns.follow_tag(to_struct_or_union_tag_type(lhs.type())).components()
+        : to_struct_union_type(lhs.type()).components();
 
     std::size_t no=0;
 
-    for(struct_typet::componentst::const_iterator
-        c_it=struct_type.components().begin();
-        c_it!=struct_type.components().end();
+    for(struct_typet::componentst::const_iterator c_it = components.begin();
+        c_it != components.end();
         c_it++, no++)
     {
       const typet &subtype=c_it->type();
@@ -1015,10 +1048,10 @@ void value_set_fit::assign(
                 "rhs.type():\n"+rhs.type().pretty()+"\n"+
                 "type:\n"+lhs.type().pretty();
 
-        if(rhs.id()==ID_struct ||
-           rhs.id()==ID_constant)
+        if(rhs.id() == ID_struct || rhs.is_constant())
         {
-          assert(no<rhs.operands().size());
+          DATA_INVARIANT(
+            no < rhs.operands().size(), "component index must be in bounds");
           rhs_member=rhs.operands()[no];
         }
         else if(rhs.id()==ID_with)
@@ -1054,18 +1087,20 @@ void value_set_fit::assign(
       }
     }
   }
-  else if(type.id()==ID_array)
+  else if(lhs.type().id() == ID_array)
   {
     const index_exprt lhs_index(
       lhs,
       exprt(ID_unknown, c_index_type()),
-      to_array_type(type).element_type());
+      to_array_type(lhs.type()).element_type());
 
     if(rhs.id()==ID_unknown ||
        rhs.id()==ID_invalid)
     {
       assign(
-        lhs_index, exprt(rhs.id(), to_array_type(type).element_type()), ns);
+        lhs_index,
+        exprt(rhs.id(), to_array_type(lhs.type()).element_type()),
+        ns);
     }
     else if(rhs.is_nil())
     {
@@ -1073,21 +1108,20 @@ void value_set_fit::assign(
     }
     else
     {
-      if(rhs.type() != type)
+      if(rhs.type() != lhs.type())
         throw "value_set_fit::assign type mismatch: "
               "rhs.type():\n"+rhs.type().pretty()+"\n"+
-              "type:\n"+type.pretty();
+              "type:\n"+lhs.type().pretty();
 
       if(rhs.id()==ID_array_of)
       {
         assign(lhs_index, to_array_of_expr(rhs).what(), ns);
       }
-      else if(rhs.id()==ID_array ||
-              rhs.id()==ID_constant)
+      else if(rhs.id() == ID_array || rhs.is_constant())
       {
-        forall_operands(o_it, rhs)
+        for(const auto &op : rhs.operands())
         {
-          assign(lhs_index, *o_it, ns);
+          assign(lhs_index, op, ns);
         }
       }
       else if(rhs.id()==ID_with)
@@ -1095,7 +1129,7 @@ void value_set_fit::assign(
         const index_exprt op0_index(
           to_with_expr(rhs).old(),
           exprt(ID_unknown, c_index_type()),
-          to_array_type(type).element_type());
+          to_array_type(lhs.type()).element_type());
 
         assign(lhs_index, op0_index, ns);
         assign(lhs_index, to_with_expr(rhs).new_value(), ns);
@@ -1105,7 +1139,7 @@ void value_set_fit::assign(
         const index_exprt rhs_index(
           rhs,
           exprt(ID_unknown, c_index_type()),
-          to_array_type(type).element_type());
+          to_array_type(lhs.type()).element_type());
         assign(lhs_index, rhs_index, ns);
       }
     }
@@ -1143,8 +1177,15 @@ void value_set_fit::assign_rec(
     const irep_idt &ident = lhs.get(ID_identifier);
     object_mapt temp;
     gvs_recursion_sett recset;
+    bool includes_nondet_pointer = false;
     get_value_set_rec(
-      lhs, temp, "", to_type_with_subtype(lhs.type()).subtype(), ns, recset);
+      lhs,
+      temp,
+      includes_nondet_pointer,
+      "",
+      to_type_with_subtype(lhs.type()).subtype(),
+      ns,
+      recset);
 
     if(recursion_set.find(ident)!=recursion_set.end())
     {
@@ -1165,12 +1206,11 @@ void value_set_fit::assign_rec(
   {
     const irep_idt &identifier = to_symbol_expr(lhs).get_identifier();
 
-    if(has_prefix(id2string(identifier),
-                  "value_set::dynamic_object") ||
-       has_prefix(id2string(identifier),
-                  "value_set::return_value") ||
-       values.find(id2string(identifier)+suffix)!=values.end())
-       // otherwise we don't track this value
+    if(
+      identifier.starts_with("value_set::dynamic_object") ||
+      identifier.starts_with("value_set::return_value") ||
+      values.find(id2string(identifier) + suffix) != values.end())
+    // otherwise we don't track this value
     {
       entryt &entry = get_entry(identifier, suffix);
 
@@ -1226,19 +1266,17 @@ void value_set_fit::assign_rec(
       return;
 
     const std::string &component_name=lhs.get_string(ID_component_name);
-
-    const typet &type = ns.follow(to_member_expr(lhs).compound().type());
+    const exprt &compound = to_member_expr(lhs).compound();
 
     DATA_INVARIANT(
-      type.id() == ID_struct || type.id() == ID_union,
+      compound.type().id() == ID_struct ||
+        compound.type().id() == ID_struct_tag ||
+        compound.type().id() == ID_union ||
+        compound.type().id() == ID_union_tag,
       "operand 0 of member expression must be struct or union");
 
     assign_rec(
-      to_member_expr(lhs).compound(),
-      values_rhs,
-      "." + component_name + suffix,
-      ns,
-      recursion_set);
+      compound, values_rhs, "." + component_name + suffix, ns, recursion_set);
   }
   else if(lhs.id()=="valid_object" ||
           lhs.id()=="dynamic_type")

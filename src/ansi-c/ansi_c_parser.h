@@ -18,46 +18,37 @@ Author: Daniel Kroening, kroening@kroening.com
 #include "ansi_c_parse_tree.h"
 #include "ansi_c_scope.h"
 
-int yyansi_cparse();
+class ansi_c_parsert;
+int yyansi_cparse(ansi_c_parsert &);
 
 class ansi_c_parsert:public parsert
 {
 public:
   ansi_c_parse_treet parse_tree;
 
-  ansi_c_parsert()
-    : tag_following(false),
+  explicit ansi_c_parsert(message_handlert &message_handler)
+    : parsert(message_handler),
+      tag_following(false),
       asm_block_following(false),
       parenthesis_counter(0),
       mode(modet::NONE),
       cpp98(false),
       cpp11(false),
       for_has_scope(false),
-      ts_18661_3_Floatn_types(false)
+      ts_18661_3_Floatn_types(false),
+      __float128_is_keyword(false),
+      float16_type(false),
+      bf16_type(false),
+      fp16_type(false)
   {
-  }
-
-  virtual bool parse() override
-  {
-    return yyansi_cparse()!=0;
-  }
-
-  virtual void clear() override
-  {
-    parsert::clear();
-    parse_tree.clear();
-
-    // scanner state
-    tag_following=false;
-    asm_block_following=false;
-    parenthesis_counter=0;
-    string_literal.clear();
-    pragma_pack.clear();
-    pragma_cprover_stack.clear();
-
     // set up global scope
     scopes.clear();
     scopes.push_back(scopet());
+  }
+
+  bool parse() override
+  {
+    return yyansi_cparse(*this) != 0;
   }
 
   // internal state of the scanner
@@ -78,6 +69,10 @@ public:
 
   // ISO/IEC TS 18661-3:2015
   bool ts_18661_3_Floatn_types;
+  bool __float128_is_keyword;
+  bool float16_type;
+  bool bf16_type;
+  bool fp16_type;
 
   typedef ansi_c_identifiert identifiert;
   typedef ansi_c_scopet scopet;
@@ -102,7 +97,7 @@ public:
 
   scopet &current_scope()
   {
-    assert(!scopes.empty());
+    PRECONDITION(!scopes.empty());
     return scopes.back();
   }
 
@@ -116,7 +111,7 @@ public:
 
   void copy_item(const ansi_c_declarationt &declaration)
   {
-    assert(declaration.id()==ID_declaration);
+    PRECONDITION(declaration.id() == ID_declaration);
     parse_tree.items.push_back(declaration);
   }
 
@@ -166,9 +161,6 @@ private:
   std::list<std::map<const irep_idt, bool>> pragma_cprover_stack;
 };
 
-extern ansi_c_parsert ansi_c_parser;
-
-int yyansi_cerror(const std::string &error);
-void ansi_c_scanner_init();
+void ansi_c_scanner_init(ansi_c_parsert &);
 
 #endif // CPROVER_ANSI_C_ANSI_C_PARSER_H

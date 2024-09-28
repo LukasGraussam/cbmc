@@ -1,12 +1,9 @@
-CORE
+CORE dfcc-only
 main.c
---dfcc main --replace-call-with-contract foo
+--no-malloc-may-fail --dfcc main --replace-call-with-contract foo _ --no-standard-checks
+^VERIFICATION SUCCESSFUL$
 ^EXIT=0$
 ^SIGNAL=0$
-^\[foo.precondition.\d+\] line \d+ Check requires clause of contract contract::foo for function foo: SUCCESS$
-^\[main.assertion.\d+\] line \d+ assertion o >\= 10 \&\& o \=\= \*n \+ 5: SUCCESS$
-^\[main.assertion.\d+\] line \d+ assertion n\[9\] == 113: SUCCESS$
-^VERIFICATION SUCCESSFUL$
 --
 --
-Checks whether CBMC successfuly assert __CPROVER_is_fresh for arrays.
+Checks whether CBMC successfully asserts __CPROVER_is_fresh for arrays.

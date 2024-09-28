@@ -8,13 +8,6 @@ Author: Daniel Poetzl
 
 #include "get_goto_model_from_c.h"
 
-#include <ansi-c/ansi_c_language.h>
-
-#include <goto-programs/goto_convert_functions.h>
-
-#include <langapi/language_file.h>
-#include <langapi/mode.h>
-
 #include <util/cmdline.h>
 #include <util/config.h>
 #include <util/exception_utils.h>
@@ -22,6 +15,10 @@ Author: Daniel Poetzl
 #include <util/message.h>
 #include <util/symbol_table.h>
 
+#include <ansi-c/ansi_c_language.h>
+#include <ansi-c/goto-conversion/goto_convert_functions.h>
+#include <langapi/language_file.h>
+#include <langapi/mode.h>
 #include <testing-utils/message.h>
 
 goto_modelt get_goto_model_from_c(std::istream &in)
@@ -44,7 +41,6 @@ goto_modelt get_goto_model_from_c(std::istream &in)
   }
 
   language_filest language_files;
-  language_files.set_message_handler(null_message_handler);
 
   language_filet &language_file = language_files.add_file("");
 
@@ -52,10 +48,9 @@ goto_modelt get_goto_model_from_c(std::istream &in)
   CHECK_RETURN(language_file.language);
 
   languaget &language = *language_file.language;
-  language.set_message_handler(null_message_handler);
 
   {
-    const bool error = language.parse(in, "");
+    const bool error = language.parse(in, "", null_message_handler);
 
     if(error)
       throw invalid_input_exceptiont("parsing failed");
@@ -66,15 +61,16 @@ goto_modelt get_goto_model_from_c(std::istream &in)
   goto_modelt goto_model;
 
   {
-    const bool error = language_files.typecheck(goto_model.symbol_table);
+    const bool error =
+      language_files.typecheck(goto_model.symbol_table, null_message_handler);
 
     if(error)
       throw invalid_input_exceptiont("typechecking failed");
   }
 
   {
-    const bool error =
-      language_files.generate_support_functions(goto_model.symbol_table);
+    const bool error = language_files.generate_support_functions(
+      goto_model.symbol_table, null_message_handler);
 
     if(error)
       throw invalid_input_exceptiont("support function generation failed");

@@ -46,8 +46,8 @@ struct procedure_local_cfg_baset<
 
   void operator()(const method_with_amapt &args)
   {
-    const auto &method=args.first;
-    const auto &amap=args.second;
+    const auto &method = args.method_with_amap.first;
+    const auto &amap = args.method_with_amap.second;
     for(const auto &inst : amap)
     {
       // Map instruction PCs onto node indices:
@@ -109,18 +109,18 @@ struct procedure_local_cfg_baset<
   static java_bytecode_convert_methodt::method_offsett
   get_first_node(const method_with_amapt &args)
   {
-    return args.second.begin()->first;
+    return args.method_with_amap.second.begin()->first;
   }
 
   static java_bytecode_convert_methodt::method_offsett
   get_last_node(const method_with_amapt &args)
   {
-    return (--args.second.end())->first;
+    return (--args.method_with_amap.second.end())->first;
   }
 
   static bool nodes_empty(const method_with_amapt &args)
   {
-    return args.second.empty();
+    return args.method_with_amap.second.empty();
   }
 };
 
@@ -488,7 +488,7 @@ static java_bytecode_convert_methodt::method_offsett get_common_dominator(
       ++domit;
       ++repeats;
     }
-    assert(repeats<=merge_vars.size());
+    INVARIANT(repeats <= merge_vars.size(), "out of bounds");
     if(repeats==merge_vars.size())
       return dom;
   }
@@ -832,13 +832,9 @@ void java_bytecode_convert_methodt::setup_local_variables(
       result, v.var.start_pc, v.var.length, false, std::move(v.holes));
 
     // Register the local variable in the symbol table
-    symbolt new_symbol;
-    new_symbol.name=identifier;
-    new_symbol.type=t;
+    symbolt new_symbol{identifier, t, ID_java};
     new_symbol.base_name=v.var.name;
     new_symbol.pretty_name=id2string(identifier).substr(6, std::string::npos);
-    new_symbol.mode=ID_java;
-    new_symbol.is_type=false;
     new_symbol.is_file_local=true;
     new_symbol.is_thread_local=true;
     new_symbol.is_lvalue=true;

@@ -22,16 +22,14 @@ simplify_exprt::resultt<> simplify_exprt::simplify_boolean(const exprt &expr)
   if(!expr.has_operands())
     return unchanged(expr);
 
-  if(expr.type().id()!=ID_bool)
+  if(!expr.is_boolean())
     return unchanged(expr);
 
   if(expr.id()==ID_implies)
   {
     const auto &implies_expr = to_implies_expr(expr);
 
-    if(
-      implies_expr.op0().type().id() != ID_bool ||
-      implies_expr.op1().type().id() != ID_bool)
+    if(!implies_expr.op0().is_boolean() || !implies_expr.op1().is_boolean())
     {
       return unchanged(expr);
     }
@@ -53,7 +51,7 @@ simplify_exprt::resultt<> simplify_exprt::simplify_boolean(const exprt &expr)
     for(exprt::operandst::const_iterator it = new_operands.begin();
         it != new_operands.end();)
     {
-      if(it->type().id()!=ID_bool)
+      if(!it->is_boolean())
         return unchanged(expr);
 
       bool erase;
@@ -101,13 +99,15 @@ simplify_exprt::resultt<> simplify_exprt::simplify_boolean(const exprt &expr)
     bool no_change = true;
     bool may_be_reducible_to_interval =
       expr.id() == ID_or && expr.operands().size() > 2;
+    bool may_be_reducible_to_singleton_interval =
+      expr.id() == ID_and && expr.operands().size() == 2;
 
     exprt::operandst new_operands = expr.operands();
 
     for(exprt::operandst::const_iterator it = new_operands.begin();
         it != new_operands.end();)
     {
-      if(it->type().id()!=ID_bool)
+      if(!it->is_boolean())
         return unchanged(expr);
 
       bool is_true=it->is_true();
@@ -139,9 +139,103 @@ simplify_exprt::resultt<> simplify_exprt::simplify_boolean(const exprt &expr)
       }
     }
 
+    // NOLINTNEXTLINE(whitespace/line_length)
+    // This block reduces singleton intervals like (value >= 255 && value <= 255)
+    // to just (value == 255). We also need to be careful with the operands
+    // as some of them are erased in the previous step. We proceed only if
+    // no operands have been erased (i.e. the expression structure has been
+    // preserved by previous simplification rounds.)
+    if(may_be_reducible_to_singleton_interval && new_operands.size() == 2)
+    {
+      struct boundst
+      {
+        mp_integer lower;
+        mp_integer higher;
+        exprt non_const_value;
+      };
+      boundst bounds;
+
+      // Before we do anything else, we need to "pattern match" against the
+      // expression and make sure that it has the structure we're looking for.
+      // The structure we're looking for is going to be
+      //      (value >= 255 && !(value >= 256))   -- 255, 256 values indicative.
+      // (this is because previous simplification runs will have transformed
+      //  the less_than_or_equal expression to a not(greater_than_or_equal)
+      // expression)
+
+      // matching (value >= 255)
+      auto const match_first_operand = [&bounds](const exprt &op) -> bool {
+        if(
+          const auto ge_expr =
+            expr_try_dynamic_cast<greater_than_or_equal_exprt>(op))
+        {
+          // The construction of these expressions ensures that the RHS
+          // is constant, therefore if we don't have a constant, it's a
+          // different expression, so we bail.
+          if(!ge_expr->rhs().is_constant())
+            return false;
+          if(
+            auto int_opt =
+              numeric_cast<mp_integer>(to_constant_expr(ge_expr->rhs())))
+          {
+            bounds.non_const_value = ge_expr->lhs();
+            bounds.lower = *int_opt;
+            return true;
+          }
+          return false;
+        }
+        return false;
+      };
+
+      // matching !(value >= 256)
+      auto const match_second_operand = [&bounds](const exprt &op) -> bool {
+        if(const auto not_expr = expr_try_dynamic_cast<not_exprt>(op))
+        {
+          PRECONDITION(not_expr->operands().size() == 1);
+          if(
+            const auto ge_expr =
+              expr_try_dynamic_cast<greater_than_or_equal_exprt>(
+                not_expr->op()))
+          {
+            // If the rhs() is not constant, it has a different structure
+            // (e.g. i >= j)
+            if(!ge_expr->rhs().is_constant())
+              return false;
+            if(ge_expr->lhs() != bounds.non_const_value)
+              return false;
+            if(
+              auto int_opt =
+                numeric_cast<mp_integer>(to_constant_expr(ge_expr->rhs())))
+            {
+              bounds.higher = *int_opt - 1;
+              return true;
+            }
+            return false;
+          }
+          return false;
+        }
+        return false;
+      };
+
+      // We need to match both operands, at the particular sequence we expect.
+      bool structure_matched = match_first_operand(new_operands[0]) &&
+                               match_second_operand(new_operands[1]);
+
+      if(structure_matched && bounds.lower == bounds.higher)
+      {
+        // If we are here, we have matched the structure we expected, so we can
+        // make some reasonable assumptions about where certain info we need is
+        // located at.
+        const auto ge_expr =
+          expr_dynamic_cast<greater_than_or_equal_exprt>(new_operands[0]);
+        equal_exprt new_expr{ge_expr.lhs(), ge_expr.rhs()};
+        return changed(new_expr);
+      }
+    }
+
     if(may_be_reducible_to_interval)
     {
-      optionalt<symbol_exprt> symbol_opt;
+      std::optional<symbol_exprt> symbol_opt;
       std::set<mp_integer> values;
       for(const exprt &op : new_operands)
       {
@@ -201,7 +295,7 @@ simplify_exprt::resultt<> simplify_exprt::simplify_boolean(const exprt &expr)
     // search for a and !a
     for(const exprt &op : new_operands)
       if(
-        op.id() == ID_not && op.type().id() == ID_bool &&
+        op.id() == ID_not && op.is_boolean() &&
         expr_set.find(to_not_expr(op).op()) != expr_set.end())
       {
         return make_boolean_expr(expr.id() == ID_or);
@@ -231,8 +325,7 @@ simplify_exprt::resultt<> simplify_exprt::simplify_not(const not_exprt &expr)
 {
   const exprt &op = expr.op();
 
-  if(expr.type().id()!=ID_bool ||
-     op.type().id()!=ID_bool)
+  if(!expr.is_boolean() || !op.is_boolean())
   {
     return unchanged(expr);
   }

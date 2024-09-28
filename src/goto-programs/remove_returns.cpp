@@ -17,8 +17,9 @@ Date:   September 2009
 #include <util/std_expr.h>
 #include <util/suffix.h>
 
-#include "goto_model.h"
+#include <goto-symex/shadow_memory.h>
 
+#include "goto_model.h"
 #include "remove_skip.h"
 
 #define RETURN_VALUE_SUFFIX "#return_value"
@@ -58,11 +59,11 @@ protected:
   void undo_function_calls(
     goto_programt &goto_program);
 
-  optionalt<symbol_exprt>
+  std::optional<symbol_exprt>
   get_or_create_return_value_symbol(const irep_idt &function_id);
 };
 
-optionalt<symbol_exprt>
+std::optional<symbol_exprt>
 remove_returnst::get_or_create_return_value_symbol(const irep_idt &function_id)
 {
   const namespacet ns(symbol_table);
@@ -129,8 +130,8 @@ void remove_returnst::replace_returns(
 
         // now turn the `return' into `assignment'
         auto labels = std::move(instruction.labels);
-        instruction = goto_programt::make_assignment(
-          assignment, instruction.source_location());
+        instruction.clear(goto_program_instruction_typet::ASSIGN);
+        instruction.code_nonconst() = std::move(assignment);
         instruction.labels = std::move(labels);
       }
       else
@@ -172,7 +173,7 @@ bool remove_returnst::do_function_calls(
         exprt rhs;
 
         bool is_stub = function_is_stub(function_id);
-        optionalt<symbol_exprt> return_value;
+        std::optional<symbol_exprt> return_value;
 
         if(!is_stub)
           return_value = get_or_create_return_value_symbol(function_id);
@@ -225,7 +226,10 @@ void remove_returnst::operator()(goto_functionst &goto_functions)
         findit != goto_functions.function_map.end(),
         "called function `" + id2string(function_id) +
           "' should have an entry in the function map");
-      return !findit->second.body_available();
+      return !findit->second.body_available() &&
+             function_id != CPROVER_PREFIX SHADOW_MEMORY_FIELD_DECL &&
+             function_id != CPROVER_PREFIX SHADOW_MEMORY_GET_FIELD &&
+             function_id != CPROVER_PREFIX SHADOW_MEMORY_SET_FIELD;
     };
 
     replace_returns(gf_entry.first, gf_entry.second);

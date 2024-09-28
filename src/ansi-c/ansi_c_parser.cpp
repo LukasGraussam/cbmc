@@ -10,8 +10,6 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include "c_storage_spec.h"
 
-ansi_c_parsert ansi_c_parser;
-
 ansi_c_id_classt ansi_c_parsert::lookup(
   const irep_idt &base_name,
   irep_idt &identifier, // output
@@ -73,19 +71,11 @@ void ansi_c_parsert::add_tag_with_body(irept &tag)
   }
 }
 
-extern char *yyansi_ctext;
-
-int yyansi_cerror(const std::string &error)
-{
-  ansi_c_parser.parse_error(error, yyansi_ctext);
-  return 0;
-}
-
 void ansi_c_parsert::add_declarator(
   exprt &declaration,
   irept &declarator)
 {
-  assert(declarator.is_not_nil());
+  PRECONDITION(declarator.is_not_nil());
   ansi_c_declarationt &ansi_c_declaration=
     to_ansi_c_declaration(declaration);
 

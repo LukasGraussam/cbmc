@@ -51,9 +51,13 @@ void initialize_from_source_files(
 void set_up_custom_entry_point(
   language_filest &language_files,
   symbol_tablet &symbol_table,
-  const std::function<void(const irep_idt &)> &unload,
+  const std::function<std::size_t(const irep_idt &)> &unload,
   const optionst &options,
   bool try_mode_lookup,
   message_handlert &message_handler);
+
+/// Update the initial value of `__CPROVER_max_malloc_size` in case the number
+/// of object bits has changed.
+void update_max_malloc_size(goto_modelt &, message_handlert &);
 
 #endif // CPROVER_GOTO_PROGRAMS_INITIALIZE_GOTO_MODEL_H

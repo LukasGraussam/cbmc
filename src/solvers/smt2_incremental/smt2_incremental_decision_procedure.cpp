@@ -4,18 +4,19 @@
 
 #include <util/arith_tools.h>
 #include <util/byte_operators.h>
-#include <util/expr.h>
-#include <util/namespace.h>
-#include <util/nodiscard.h>
+#include <util/c_types.h>
 #include <util/range.h>
+#include <util/simplify_expr.h>
 #include <util/std_expr.h>
-#include <util/symbol.h>
+#include <util/string_constant.h>
 
 #include <solvers/smt2_incremental/ast/smt_commands.h>
 #include <solvers/smt2_incremental/ast/smt_responses.h>
 #include <solvers/smt2_incremental/ast/smt_terms.h>
 #include <solvers/smt2_incremental/construct_value_expr_from_smt.h>
 #include <solvers/smt2_incremental/convert_expr_to_smt.h>
+#include <solvers/smt2_incremental/encoding/enum_encoding.h>
+#include <solvers/smt2_incremental/encoding/nondet_padding.h>
 #include <solvers/smt2_incremental/smt_solver_process.h>
 #include <solvers/smt2_incremental/theories/smt_array_theory.h>
 #include <solvers/smt2_incremental/theories/smt_core_theory.h>
@@ -39,7 +40,9 @@ static smt_responset get_response_to_command(
     return response;
 }
 
-static optionalt<std::string>
+/// Returns a message string describing the problem in the case where the
+/// response from the solver is an error status. Returns empty otherwise.
+static std::optional<std::string>
 get_problem_messages(const smt_responset &response)
 {
   if(const auto error = response.cast<smt_error_responset>())
@@ -66,19 +69,37 @@ get_problem_messages(const smt_responset &response)
 ///   returned by this`gather_dependent_expressions` function.
 /// \details `symbol_exprt`, `array_exprt` and `nondet_symbol_exprt` add
 ///   dependant expressions.
-static std::vector<exprt> gather_dependent_expressions(const exprt &expr)
+static std::vector<exprt> gather_dependent_expressions(const exprt &root_expr)
 {
   std::vector<exprt> dependent_expressions;
-  expr.visit_pre([&](const exprt &expr_node) {
+
+  std::stack<const exprt *> stack;
+  stack.push(&root_expr);
+
+  while(!stack.empty())
+  {
+    const exprt &expr_node = *stack.top();
+    stack.pop();
     if(
       can_cast_expr<symbol_exprt>(expr_node) ||
       can_cast_expr<array_exprt>(expr_node) ||
       can_cast_expr<array_of_exprt>(expr_node) ||
-      can_cast_expr<nondet_symbol_exprt>(expr_node))
+      can_cast_expr<nondet_symbol_exprt>(expr_node) ||
+      can_cast_expr<string_constantt>(expr_node))
     {
       dependent_expressions.push_back(expr_node);
     }
-  });
+    // The decision procedure does not depend on the values inside address of
+    // code typed expressions. We can build the address without knowing the
+    // value at that memory location. In this case the hypothetical compiled
+    // machine instructions at the address are not relevant to solving, only
+    // representing *which* function a pointer points to is needed.
+    const auto address_of = expr_try_dynamic_cast<address_of_exprt>(expr_node);
+    if(address_of && can_cast_type<code_typet>(address_of->object().type()))
+      continue;
+    for(auto &operand : expr_node.operands())
+      stack.push(&operand);
+  }
   return dependent_expressions;
 }
 
@@ -115,6 +136,13 @@ void smt2_incremental_decision_proceduret::initialize_array_elements(
       smt_array_theoryt::select(array_identifier, array_index_identifier),
       element_value)}};
   solver_process->send(elements_definition);
+}
+
+void smt2_incremental_decision_proceduret::initialize_array_elements(
+  const string_constantt &string,
+  const smt_identifier_termt &array_identifier)
+{
+  initialize_array_elements(string.to_array_expr(), array_identifier);
 }
 
 template <typename t_exprt>
@@ -180,27 +208,12 @@ void smt2_incremental_decision_proceduret::define_dependent_functions(
       continue;
     if(const auto symbol_expr = expr_try_dynamic_cast<symbol_exprt>(current))
     {
-      const irep_idt &identifier = symbol_expr->get_identifier();
-      const symbolt *symbol = nullptr;
-      if(ns.lookup(identifier, symbol) || symbol->value.is_nil())
-      {
-        send_function_definition(
-          *symbol_expr,
-          symbol_expr->get_identifier(),
-          solver_process,
-          expression_identifiers,
-          identifier_table);
-      }
-      else
-      {
-        if(push_dependencies_needed(symbol->value))
-          continue;
-        const smt_define_function_commandt function{
-          symbol->name, {}, convert_expr_to_smt(symbol->value)};
-        expression_identifiers.emplace(*symbol_expr, function.identifier());
-        identifier_table.emplace(identifier, function.identifier());
-        solver_process->send(function);
-      }
+      send_function_definition(
+        *symbol_expr,
+        symbol_expr->get_identifier(),
+        solver_process,
+        expression_identifiers,
+        identifier_table);
     }
     else if(const auto array_expr = expr_try_dynamic_cast<array_exprt>(current))
       define_array_function(*array_expr);
@@ -208,6 +221,11 @@ void smt2_incremental_decision_proceduret::define_dependent_functions(
       const auto array_of_expr = expr_try_dynamic_cast<array_of_exprt>(current))
     {
       define_array_function(*array_of_expr);
+    }
+    else if(
+      const auto string = expr_try_dynamic_cast<string_constantt>(current))
+    {
+      define_array_function(*string);
     }
     else if(
       const auto nondet_symbol =
@@ -249,13 +267,33 @@ smt2_incremental_decision_proceduret::smt2_incremental_decision_proceduret(
     number_of_solver_calls{0},
     solver_process(std::move(_solver_process)),
     log{message_handler},
-    object_map{initial_smt_object_map()}
+    object_map{initial_smt_object_map()},
+    struct_encoding{_ns}
 {
   solver_process->send(
     smt_set_option_commandt{smt_option_produce_modelst{true}});
   solver_process->send(smt_set_logic_commandt{smt_logic_allt{}});
   solver_process->send(object_size_function.declaration);
   solver_process->send(is_dynamic_object_function.declaration);
+}
+
+static exprt lower_rw_ok_pointer_in_range(exprt expr, const namespacet &ns)
+{
+  expr.visit_pre([&ns](exprt &expr) {
+    if(
+      auto prophecy_r_or_w_ok =
+        expr_try_dynamic_cast<prophecy_r_or_w_ok_exprt>(expr))
+    {
+      expr = simplify_expr(prophecy_r_or_w_ok->lower(ns), ns);
+    }
+    else if(
+      auto prophecy_pointer_in_range =
+        expr_try_dynamic_cast<prophecy_pointer_in_range_exprt>(expr))
+    {
+      expr = simplify_expr(prophecy_pointer_in_range->lower(ns), ns);
+    }
+  });
+  return expr;
 }
 
 void smt2_incremental_decision_proceduret::ensure_handle_for_expr_defined(
@@ -268,7 +306,7 @@ void smt2_incremental_decision_proceduret::ensure_handle_for_expr_defined(
     return;
   }
 
-  const exprt lowered_expr = lower_byte_operators(in_expr, ns);
+  const exprt lowered_expr = lower(in_expr);
 
   define_dependent_functions(lowered_expr);
   smt_define_function_commandt function{
@@ -310,12 +348,28 @@ void smt2_incremental_decision_proceduret::define_index_identifiers(
   });
 }
 
+exprt smt2_incremental_decision_proceduret::substitute_defined_padding(
+  exprt root_expr)
+{
+  root_expr.visit_pre([&](exprt &node) {
+    if(const auto pad = expr_try_dynamic_cast<nondet_padding_exprt>(node))
+    {
+      const auto instance = "padding_" + std::to_string(padding_sequence());
+      const auto term =
+        smt_identifier_termt{instance, convert_type_to_smt_sort(pad->type())};
+      solver_process->send(smt_declare_function_commandt{term, {}});
+      node = symbol_exprt{instance, node.type()};
+    }
+  });
+  return root_expr;
+}
+
 smt_termt
 smt2_incremental_decision_proceduret::convert_expr_to_smt(const exprt &expr)
 {
   define_index_identifiers(expr);
-  const exprt substituted =
-    substitute_identifiers(expr, expression_identifiers);
+  const exprt substituted = substitute_defined_padding(
+    substitute_identifiers(expr, expression_identifiers));
   track_expression_objects(substituted, ns, object_map);
   associate_pointer_sizes(
     substituted,
@@ -341,23 +395,31 @@ exprt smt2_incremental_decision_proceduret::handle(const exprt &expr)
   return expr;
 }
 
-static optionalt<smt_termt> get_identifier(
-  const exprt &expr,
-  const std::unordered_map<exprt, smt_identifier_termt, irep_hash>
-    &expression_handle_identifiers,
-  const std::unordered_map<exprt, smt_identifier_termt, irep_hash>
-    &expression_identifiers)
+std::optional<smt_termt>
+smt2_incremental_decision_proceduret::get_identifier(const exprt &expr) const
 {
+  // Lookup the non-lowered form first.
   const auto handle_find_result = expression_handle_identifiers.find(expr);
   if(handle_find_result != expression_handle_identifiers.cend())
     return handle_find_result->second;
   const auto expr_find_result = expression_identifiers.find(expr);
   if(expr_find_result != expression_identifiers.cend())
     return expr_find_result->second;
+
+  // If that didn't yield any results, then try the lowered form.
+  const exprt lowered_expr = lower(expr);
+  const auto lowered_handle_find_result =
+    expression_handle_identifiers.find(lowered_expr);
+  if(lowered_handle_find_result != expression_handle_identifiers.cend())
+    return lowered_handle_find_result->second;
+  const auto lowered_expr_find_result =
+    expression_identifiers.find(lowered_expr);
+  if(lowered_expr_find_result != expression_identifiers.cend())
+    return lowered_expr_find_result->second;
   return {};
 }
 
-array_exprt smt2_incremental_decision_proceduret::get_expr(
+std::optional<exprt> smt2_incremental_decision_proceduret::get_expr(
   const smt_termt &array,
   const array_typet &type) const
 {
@@ -372,24 +434,61 @@ array_exprt smt2_incremental_decision_proceduret::get_expr(
   elements.reserve(*size);
   for(std::size_t index = 0; index < size; ++index)
   {
-    elements.push_back(get_expr(
-      smt_array_theoryt::select(
-        array,
-        ::convert_expr_to_smt(
-          from_integer(index, index_type),
-          object_map,
-          pointer_sizes_map,
-          object_size_function.make_application,
-          is_dynamic_object_function.make_application)),
-      type.element_type()));
+    const auto index_term = ::convert_expr_to_smt(
+      from_integer(index, index_type),
+      object_map,
+      pointer_sizes_map,
+      object_size_function.make_application,
+      is_dynamic_object_function.make_application);
+    auto element = get_expr(
+      smt_array_theoryt::select(array, index_term), type.element_type());
+    if(!element)
+      return {};
+    elements.push_back(std::move(*element));
   }
   return array_exprt{elements, type};
 }
 
-exprt smt2_incremental_decision_proceduret::get_expr(
+std::optional<exprt> smt2_incremental_decision_proceduret::get_expr(
+  const smt_termt &struct_term,
+  const struct_tag_typet &type) const
+{
+  const auto encoded_result =
+    get_expr(struct_term, struct_encoding.encode(type));
+  if(!encoded_result)
+    return {};
+  return {struct_encoding.decode(*encoded_result, type)};
+}
+
+std::optional<exprt> smt2_incremental_decision_proceduret::get_expr(
+  const smt_termt &union_term,
+  const union_tag_typet &type) const
+{
+  const auto encoded_result =
+    get_expr(union_term, struct_encoding.encode(type));
+  if(!encoded_result)
+    return {};
+  return {struct_encoding.decode(*encoded_result, type)};
+}
+
+std::optional<exprt> smt2_incremental_decision_proceduret::get_expr(
   const smt_termt &descriptor,
   const typet &type) const
 {
+  if(const auto array_type = type_try_dynamic_cast<array_typet>(type))
+  {
+    if(array_type->is_incomplete())
+      return {};
+    return get_expr(descriptor, *array_type);
+  }
+  if(const auto struct_type = type_try_dynamic_cast<struct_tag_typet>(type))
+  {
+    return get_expr(descriptor, *struct_type);
+  }
+  if(const auto union_type = type_try_dynamic_cast<union_tag_typet>(type))
+  {
+    return get_expr(descriptor, *union_type);
+  }
   const smt_get_value_commandt get_value_command{descriptor};
   const smt_responset response = get_response_to_command(
     *solver_process, get_value_command, identifier_table);
@@ -408,7 +507,30 @@ exprt smt2_incremental_decision_proceduret::get_expr(
       response.pretty()};
   }
   return construct_value_expr_from_smt(
-    get_value_response->pairs()[0].get().value(), type);
+    get_value_response->pairs()[0].get().value(), type, ns);
+}
+
+// This is a fall back which builds resulting expression based on getting the
+// values of its operands. It is used during trace building in the case where
+// certain kinds of expression appear on the left hand side of an
+// assignment. For example in the following trace assignment -
+//   `byte_extract_little_endian(x, offset) = 1`
+// `::get` will be called on `byte_extract_little_endian(x, offset)` and
+// we build a resulting expression where `x` and `offset` are substituted
+// with their values.
+static exprt build_expr_based_on_getting_operands(
+  const exprt &expr,
+  const stack_decision_proceduret &decision_procedure)
+{
+  exprt copy = expr;
+  for(auto &op : copy.operands())
+  {
+    exprt eval_op = decision_procedure.get(op);
+    if(eval_op.is_nil())
+      return nil_exprt{};
+    op = std::move(eval_op);
+  }
+  return copy;
 }
 
 exprt smt2_incremental_decision_proceduret::get(const exprt &expr) const
@@ -416,64 +538,46 @@ exprt smt2_incremental_decision_proceduret::get(const exprt &expr) const
   log.conditional_output(log.debug(), [&](messaget::mstreamt &debug) {
     debug << "`get` - \n  " + expr.pretty(2, 0) << messaget::eom;
   });
-  auto descriptor = [&]() -> optionalt<smt_termt> {
+  auto descriptor = [&]() -> std::optional<smt_termt> {
     if(const auto index_expr = expr_try_dynamic_cast<index_exprt>(expr))
     {
-      const auto array = get_identifier(
-        index_expr->array(),
-        expression_handle_identifiers,
-        expression_identifiers);
-      const auto index = get_identifier(
-        index_expr->index(),
-        expression_handle_identifiers,
-        expression_identifiers);
+      const auto array = get_identifier(index_expr->array());
+      const auto index = get_identifier(index_expr->index());
       if(!array || !index)
         return {};
       return smt_array_theoryt::select(*array, *index);
     }
-    return get_identifier(
-      expr, expression_handle_identifiers, expression_identifiers);
-  }();
-  if(!descriptor)
-  {
-    if(gather_dependent_expressions(expr).empty())
+    if(auto identifier_descriptor = get_identifier(expr))
+    {
+      return identifier_descriptor;
+    }
+    const exprt lowered = lower(expr);
+    if(gather_dependent_expressions(lowered).empty())
     {
       INVARIANT(
-        objects_are_already_tracked(expr, object_map),
+        objects_are_already_tracked(lowered, object_map),
         "Objects in expressions being read should already be tracked from "
         "point of being set/handled.");
-      descriptor = ::convert_expr_to_smt(
-        expr,
+      return ::convert_expr_to_smt(
+        lowered,
         object_map,
         pointer_sizes_map,
         object_size_function.make_application,
         is_dynamic_object_function.make_application);
     }
-    else
-    {
-      const auto symbol_expr = expr_try_dynamic_cast<symbol_exprt>(expr);
-      INVARIANT(
-        symbol_expr, "Unhandled expressions are expected to be symbols");
-      // Note this case is currently expected to be encountered during trace
-      // generation for -
-      //  * Steps which were removed via --slice-formula.
-      //  * Getting concurrency clock values.
-      // The below implementation which returns the given expression was chosen
-      // based on the implementation of `smt2_convt::get` in the non-incremental
-      // smt2 decision procedure.
-      log.warning()
-        << "`get` attempted for unknown symbol, with identifier - \n"
-        << symbol_expr->get_identifier() << messaget::eom;
-      return expr;
-    }
-  }
-  if(const auto array_type = type_try_dynamic_cast<array_typet>(expr.type()))
+    return {};
+  }();
+  if(!descriptor)
   {
-    if(array_type->is_incomplete())
-      return expr;
-    return get_expr(*descriptor, *array_type);
+    INVARIANT_WITH_DIAGNOSTICS(
+      !can_cast_expr<symbol_exprt>(expr),
+      "symbol expressions must have a known value",
+      irep_pretty_diagnosticst{expr});
+    return build_expr_based_on_getting_operands(expr, *this);
   }
-  return get_expr(*descriptor, expr.type());
+  if(auto result = get_expr(*descriptor, expr.type()))
+    return std::move(*result);
+  return expr;
 }
 
 void smt2_incremental_decision_proceduret::print_assignment(
@@ -498,12 +602,12 @@ void smt2_incremental_decision_proceduret::set_to(
   const exprt &in_expr,
   bool value)
 {
-  const exprt lowered_expr = lower_byte_operators(in_expr, ns);
-  PRECONDITION(can_cast_type<bool_typet>(lowered_expr.type()));
   log.conditional_output(log.debug(), [&](messaget::mstreamt &debug) {
     debug << "`set_to` (" << std::string{value ? "true" : "false"} << ") -\n  "
-          << lowered_expr.pretty(2, 0) << messaget::eom;
+          << in_expr.pretty(2, 0) << messaget::eom;
   });
+  const exprt lowered_expr = lower(in_expr);
+  PRECONDITION(can_cast_type<bool_typet>(lowered_expr.type()));
 
   define_dependent_functions(lowered_expr);
   auto converted_term = [&]() -> smt_termt {
@@ -540,8 +644,8 @@ void smt2_incremental_decision_proceduret::pop()
   UNIMPLEMENTED_FEATURE("`pop`.");
 }
 
-NODISCARD
-static decision_proceduret::resultt lookup_decision_procedure_result(
+[[nodiscard]] static decision_proceduret::resultt
+lookup_decision_procedure_result(
   const smt_check_sat_response_kindt &response_kind)
 {
   if(response_kind.cast<smt_sat_responset>())
@@ -571,7 +675,20 @@ void smt2_incremental_decision_proceduret::define_object_properties()
   }
 }
 
-decision_proceduret::resultt smt2_incremental_decision_proceduret::dec_solve()
+exprt smt2_incremental_decision_proceduret::lower(exprt expression) const
+{
+  const exprt lowered = struct_encoding.encode(lower_enum(
+    lower_byte_operators(lower_rw_ok_pointer_in_range(expression, ns), ns),
+    ns));
+  log.conditional_output(log.debug(), [&](messaget::mstreamt &debug) {
+    if(lowered != expression)
+      debug << "lowered to -\n  " << lowered.pretty(2, 0) << messaget::eom;
+  });
+  return lowered;
+}
+
+decision_proceduret::resultt
+smt2_incremental_decision_proceduret::dec_solve(const exprt &assumption)
 {
   ++number_of_solver_calls;
   define_object_properties();

@@ -12,16 +12,16 @@ Author: Daniel Kroening, kroening@kroening.com
 #ifndef CPROVER_GOTO_PROGRAMS_GOTO_PROGRAM_H
 #define CPROVER_GOTO_PROGRAMS_GOTO_PROGRAM_H
 
+#include <util/invariant.h>
+#include <util/source_location.h>
+
 #include "goto_instruction_code.h"
 
 #include <iosfwd>
-#include <set>
 #include <limits>
+#include <list>
+#include <set>
 #include <string>
-
-#include <util/deprecate.h>
-#include <util/invariant.h>
-#include <util/source_location.h>
 
 class code_gotot;
 class namespacet;
@@ -186,13 +186,6 @@ public:
     goto_instruction_codet _code;
 
   public:
-    /// Get the code represented by this instruction
-    DEPRECATED(SINCE(2021, 10, 12, "Use code() instead"))
-    const goto_instruction_codet &get_code() const
-    {
-      return _code;
-    }
-
     /// Get the code represented by this instruction
     const goto_instruction_codet &code() const
     {
@@ -392,6 +385,33 @@ public:
     typedef std::list<targett> targetst;
     typedef std::list<const_targett> const_targetst;
 
+    /// A total order over `targett` and `const_targett`. Note that the specific
+    /// ordering may vary from execution to execution for it uses comparison on
+    /// virtual memory locations. If a consistent ordering is required,
+    /// implement a comparison on some aspect of `instructiont` that is stable
+    /// at the particular call site.
+    struct target_less_than // NOLINT(readability/identifiers)
+    {
+      static inline bool
+      order_const_target(const const_targett i1, const const_targett i2)
+      {
+        const instructiont &_i1 = *i1;
+        const instructiont &_i2 = *i2;
+        return &_i1 < &_i2;
+      }
+
+      inline bool
+      operator()(const const_targett &i1, const const_targett &i2) const
+      {
+        return order_const_target(i1, i2);
+      }
+
+      inline bool operator()(const targett &i1, const targett &i2) const
+      {
+        return &(*i1) < &(*i2);
+      }
+    };
+
     /// The list of successor instructions
     targetst targets;
 
@@ -429,7 +449,7 @@ public:
     labelst labels;
 
     // will go away
-    std::set<targett> incoming_edges;
+    std::set<targett, target_less_than> incoming_edges;
 
     /// Is this node a branch target?
     bool is_target() const
@@ -583,7 +603,7 @@ public:
 
     /// Apply given transformer to all expressions; no return value
     /// means no change needed.
-    void transform(std::function<optionalt<exprt>(exprt)>);
+    void transform(std::function<std::optional<exprt>(exprt)>);
 
     /// Apply given function to all expressions
     void apply(std::function<void(const exprt &)>) const;
@@ -599,6 +619,8 @@ public:
   typedef instructionst::const_iterator const_targett;
   typedef std::list<targett> targetst;
   typedef std::list<const_targett> const_targetst;
+  // NOLINTNEXTLINE(readability/identifiers)
+  typedef instructiont::target_less_than target_less_than;
 
   /// The list of instructions in the goto program
   instructionst instructions;
@@ -738,29 +760,8 @@ public:
     return add(instructiont(type));
   }
 
-  /// Output goto program to given stream
-  DEPRECATED(SINCE(2022, 5, 29, "Use output(out) instead"))
-  std::ostream &output(
-    const namespacet &ns,
-    const irep_idt &identifier,
-    std::ostream &out) const
-  {
-    return output(out);
-  }
-
   /// Output goto-program to given stream
   std::ostream &output(std::ostream &out) const;
-
-  /// Output a single instruction
-  DEPRECATED(SINCE(2022, 5, 29, "Use instruction.output(out) instead"))
-  std::ostream &output_instruction(
-    const namespacet &ns,
-    const irep_idt &identifier,
-    std::ostream &out,
-    const instructionst::value_type &instruction) const
-  {
-    return instruction.output(out);
-  }
 
   /// Compute the target numbers
   void compute_target_numbers();
@@ -1039,7 +1040,7 @@ public:
     const exprt &_cond,
     const source_locationt &l = source_locationt::nil())
   {
-    PRECONDITION(_cond.type().id() == ID_bool);
+    PRECONDITION(_cond.is_boolean());
     return instructiont(
       static_cast<const goto_instruction_codet &>(get_nil_irep()),
       l,
@@ -1207,15 +1208,6 @@ std::list<Target> goto_programt::get_successors(
   return std::list<Target>();
 }
 
-inline bool order_const_target(
-  const goto_programt::const_targett i1,
-  const goto_programt::const_targett i2)
-{
-  const goto_programt::instructiont &_i1=*i1;
-  const goto_programt::instructiont &_i2=*i2;
-  return &_i1<&_i2;
-}
-
 // NOLINTNEXTLINE(readability/identifiers)
 struct const_target_hash
 {
@@ -1271,20 +1263,6 @@ void for_each_instruction(GotoFunctionT &&goto_function, HandlerT handler)
   for(goto_programt::instructionst::iterator \
       it=(program).instructions.begin(); \
       it!=(program).instructions.end(); it++)
-
-inline bool operator<(
-  const goto_programt::const_targett &i1,
-  const goto_programt::const_targett &i2)
-{
-  return order_const_target(i1, i2);
-}
-
-inline bool operator<(
-  const goto_programt::targett &i1,
-  const goto_programt::targett &i2)
-{
-  return &(*i1)<&(*i2);
-}
 
 std::list<exprt> objects_read(const goto_programt::instructiont &);
 std::list<exprt> objects_written(const goto_programt::instructiont &);

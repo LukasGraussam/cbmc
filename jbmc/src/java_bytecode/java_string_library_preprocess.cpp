@@ -29,8 +29,9 @@ Date:   April 2017
 #include <util/string_expr.h>
 #include <util/symbol_table_base.h>
 
-#include <goto-programs/allocate_objects.h>
 #include <goto-programs/class_identifier.h>
+
+#include <ansi-c/allocate_objects.h>
 
 #include "java_types.h"
 #include "java_utils.h"
@@ -221,8 +222,7 @@ void java_string_library_preprocesst::add_string_type(
   symbol_table_baset &symbol_table)
 {
   irep_idt class_symbol_name = "java::" + id2string(class_name);
-  symbolt tmp_string_symbol;
-  tmp_string_symbol.name = class_symbol_name;
+  type_symbolt tmp_string_symbol{class_symbol_name, typet{}, ID_java};
   symbolt *string_symbol = nullptr;
   bool already_exists = symbol_table.move(tmp_string_symbol, string_symbol);
 
@@ -250,8 +250,6 @@ void java_string_library_preprocesst::add_string_type(
     string_symbol->base_name = id2string(class_name);
     string_symbol->pretty_name = id2string(class_name);
     string_symbol->type = new_string_type;
-    string_symbol->is_type = true;
-    string_symbol->mode = ID_java;
   }
 
   auto &string_type = to_java_class_type(string_symbol->type);
@@ -810,7 +808,8 @@ codet java_string_library_preprocesst::code_assign_components_to_java_string(
   {
     // Initialise the supertype with the appropriate classid:
     namespacet ns(symbol_table);
-    const struct_typet &lhs_type = to_struct_type(ns.follow(deref.type()));
+    const struct_typet &lhs_type =
+      ns.follow_tag(to_struct_tag_type(deref.type()));
     auto zero_base_object = *zero_initializer(
       lhs_type.components().front().type(), source_locationt{}, ns);
     set_class_identifier(

@@ -88,12 +88,12 @@ public:
 
     const irep_idt &get_base_name() const
     {
-      return get(ID_base_name);
+      return get(ID_C_base_name);
     }
 
     void set_base_name(const irep_idt &base_name)
     {
-      return set(ID_base_name, base_name);
+      return set(ID_C_base_name, base_name);
     }
 
     const irep_idt &get_access() const
@@ -108,12 +108,12 @@ public:
 
     const irep_idt &get_pretty_name() const
     {
-      return get(ID_pretty_name);
+      return get(ID_C_pretty_name);
     }
 
     void set_pretty_name(const irep_idt &name)
     {
-      return set(ID_pretty_name, name);
+      return set(ID_C_pretty_name, name);
     }
 
     bool get_anonymous() const
@@ -277,7 +277,7 @@ public:
   /// Return the base with the given name, if exists.
   /// \param id: The name of the base we are looking for.
   /// \return The base if exists.
-  optionalt<baset> get_base(const irep_idt &id) const;
+  std::optional<baset> get_base(const irep_idt &id) const;
 
   /// Test whether `id` is a base class/struct.
   /// \param id: symbol type name
@@ -444,12 +444,56 @@ inline tag_typet &to_tag_type(typet &type)
   return static_cast<tag_typet &>(type);
 }
 
+/// A struct or union tag type. This is only to be used to create type-safe /
+/// APIs, no instances of this one can be created directly, use \ref
+/// struct_tag_typet or \ref union_tag_typet when creating objects.
+class struct_or_union_tag_typet : public tag_typet
+{
+protected:
+  struct_or_union_tag_typet(const irep_idt &id, const irep_idt &identifier)
+    : tag_typet(id, identifier)
+  {
+    PRECONDITION(id == ID_struct_tag || id == ID_union_tag);
+  }
+};
+
+/// Check whether a reference to a typet is a \ref struct_or_union_tag_typet.
+/// \param type: Source type.
+/// \return True if \p type is a \ref struct_or_union_tag_typet.
+template <>
+inline bool can_cast_type<struct_or_union_tag_typet>(const typet &type)
+{
+  return type.id() == ID_struct_tag || type.id() == ID_union_tag;
+}
+
+/// \brief Cast a typet to a \ref struct_or_union_tag_typet
+///
+/// This is an unchecked conversion. \a type must be known to be \ref
+/// struct_or_union_tag_typet. Will fail with a precondition violation if type
+/// doesn't match.
+///
+/// \param type: Source type.
+/// \return Object of type \ref struct_or_union_tag_typet
+inline const struct_or_union_tag_typet &
+to_struct_or_union_tag_type(const typet &type)
+{
+  PRECONDITION(can_cast_type<struct_or_union_tag_typet>(type));
+  return static_cast<const struct_or_union_tag_typet &>(type);
+}
+
+/// \copydoc to_struct_or_union_tag_type(const typet &)
+inline struct_or_union_tag_typet &to_struct_or_union_tag_type(typet &type)
+{
+  PRECONDITION(can_cast_type<struct_or_union_tag_typet>(type));
+  return static_cast<struct_or_union_tag_typet &>(type);
+}
+
 /// A struct tag type, i.e., \ref struct_typet with an identifier
-class struct_tag_typet:public tag_typet
+class struct_tag_typet : public struct_or_union_tag_typet
 {
 public:
-  explicit struct_tag_typet(const irep_idt &identifier):
-    tag_typet(ID_struct_tag, identifier)
+  explicit struct_tag_typet(const irep_idt &identifier)
+    : struct_or_union_tag_typet(ID_struct_tag, identifier)
   {
   }
 };
@@ -780,16 +824,12 @@ public:
   }
 
   /// The type of the elements of the array.
-  /// This method is preferred over .subtype(),
-  /// which will eventually be deprecated.
   const typet &element_type() const
   {
     return subtype();
   }
 
   /// The type of the elements of the array.
-  /// This method is preferred over .subtype(),
-  /// which will eventually be deprecated.
   typet &element_type()
   {
     return subtype();
@@ -822,6 +862,10 @@ public:
   static void check(
     const typet &type,
     const validation_modet vm = validation_modet::INVARIANT);
+
+protected:
+  // Use element_type() instead
+  using type_with_subtypet::subtype;
 };
 
 /// Check whether a reference to a typet is a \ref array_typet.
@@ -1021,16 +1065,12 @@ public:
   }
 
   /// The type of the elements of the vector.
-  /// This method is preferred over .subtype(),
-  /// which will eventually be deprecated.
   const typet &element_type() const
   {
     return subtype();
   }
 
   /// The type of the elements of the vector.
-  /// This method is preferred over .subtype(),
-  /// which will eventually be deprecated.
   typet &element_type()
   {
     return subtype();
@@ -1038,6 +1078,10 @@ public:
 
   const constant_exprt &size() const;
   constant_exprt &size();
+
+protected:
+  // Use element_type() instead
+  using type_with_subtypet::subtype;
 };
 
 /// Check whether a reference to a typet is a \ref vector_typet.

@@ -50,7 +50,6 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include <util/deprecate.h>
 #include <util/json.h>
-#include <util/make_unique.h>
 #include <util/message.h>
 #include <util/xml.h>
 
@@ -67,9 +66,8 @@ Author: Daniel Kroening, kroening@kroening.com
 /// Users of abstract interpreters should use the interface given by this class.
 /// It breaks into three categories:
 ///
-/// 1. Running an analysis, via
-///    \ref ai_baset#operator()(const irep_idt&,const goto_programt&, <!--
-///    --> const namespacet&),
+/// 1. Running an analysis, via \ref
+///    #operator()(const irep_idt&,const goto_programt&, const namespacet&),
 ///    \ref ai_baset#operator()(const goto_functionst&,const namespacet&)
 ///    and \ref ai_baset#operator()(const abstract_goto_modelt&)
 /// 2. Accessing the results of an analysis, by looking up the history objects
@@ -281,6 +279,28 @@ public:
     const goto_programt &goto_program,
     std::ostream &out) const;
 
+  /// Output the abstract states for a single function as JSON
+  /// \param ns: The namespace
+  /// \param goto_program: The goto program
+  /// \param function_id: The identifier used to find a symbol to
+  ///   identify the source language
+  /// \return The JSON object
+  virtual jsont output_json(
+    const namespacet &ns,
+    const irep_idt &function_id,
+    const goto_programt &goto_program) const;
+
+  /// Output the abstract states for a single function as XML
+  /// \param ns: The namespace
+  /// \param goto_program: The goto program
+  /// \param function_id: The identifier used to find a symbol to
+  ///   identify the source language
+  /// \return The XML object
+  virtual xmlt output_xml(
+    const namespacet &ns,
+    const irep_idt &function_id,
+    const goto_programt &goto_program) const;
+
   /// Output the abstract states for a whole program
   virtual void output(
     const namespacet &ns,
@@ -389,28 +409,6 @@ protected:
   /// Set the abstract state of the entry location of a whole program to the
   /// entry state required by the analysis
   trace_ptrt entry_state(const goto_functionst &goto_functions);
-
-  /// Output the abstract states for a single function as JSON
-  /// \param ns: The namespace
-  /// \param goto_program: The goto program
-  /// \param function_id: The identifier used to find a symbol to
-  ///   identify the source language
-  /// \return The JSON object
-  virtual jsont output_json(
-    const namespacet &ns,
-    const irep_idt &function_id,
-    const goto_programt &goto_program) const;
-
-  /// Output the abstract states for a single function as XML
-  /// \param ns: The namespace
-  /// \param goto_program: The goto program
-  /// \param function_id: The identifier used to find a symbol to
-  ///   identify the source language
-  /// \return The XML object
-  virtual xmlt output_xml(
-    const namespacet &ns,
-    const irep_idt &function_id,
-    const goto_programt &goto_program) const;
 
   /// The work queue, sorted using the history's ordering operator
   typedef trace_sett working_sett;
@@ -566,20 +564,20 @@ public:
   // constructor
   ait()
     : ai_recursive_interproceduralt(
-        util_make_unique<
+        std::make_unique<
           ai_history_factory_default_constructort<ahistoricalt>>(),
-        util_make_unique<ai_domain_factory_default_constructort<domainT>>(),
-        util_make_unique<location_sensitive_storaget>(),
+        std::make_unique<ai_domain_factory_default_constructort<domainT>>(),
+        std::make_unique<location_sensitive_storaget>(),
         no_logging)
   {
   }
 
   explicit ait(std::unique_ptr<ai_domain_factory_baset> &&df)
     : ai_recursive_interproceduralt(
-        util_make_unique<
+        std::make_unique<
           ai_history_factory_default_constructort<ahistoricalt>>(),
         std::move(df),
-        util_make_unique<location_sensitive_storaget>(),
+        std::make_unique<location_sensitive_storaget>(),
         no_logging)
   {
   }

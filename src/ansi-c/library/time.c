@@ -7,9 +7,24 @@
 
 #undef time
 
-time_t __VERIFIER_nondet_time_t();
+time_t __VERIFIER_nondet_time_t(void);
+time_t __time64(time_t *);
 
 time_t time(time_t *tloc)
+{
+  return __time64(tloc);
+}
+
+/* FUNCTION: __time64 */
+
+#ifndef __CPROVER_TIME_H_INCLUDED
+#  include <time.h>
+#  define __CPROVER_TIME_H_INCLUDED
+#endif
+
+time_t __VERIFIER_nondet_time_t(void);
+
+time_t __time64(time_t *tloc)
 {
   time_t res=__VERIFIER_nondet_time_t();
   if(tloc)
@@ -26,7 +41,7 @@ time_t time(time_t *tloc)
 #    define __CPROVER_TIME_H_INCLUDED
 #  endif
 
-time_t __VERIFIER_nondet_time_t();
+time_t __VERIFIER_nondet_time_t(void);
 
 time_t _time64(time_t *tloc)
 {
@@ -47,7 +62,7 @@ time_t _time64(time_t *tloc)
 #    define __CPROVER_TIME_H_INCLUDED
 #  endif
 
-__time32_t __VERIFIER_nondet_time32_t();
+__time32_t __VERIFIER_nondet_time32_t(void);
 
 __time32_t _time32(__time32_t *tloc)
 {
@@ -150,7 +165,7 @@ struct tm *localtime_r(const time_t *clock, struct tm *result)
 
 #undef mktime
 
-time_t __VERIFIER_nondet_time_t();
+time_t __VERIFIER_nondet_time_t(void);
 
 time_t mktime(struct tm *timeptr)
 {
@@ -168,7 +183,7 @@ time_t mktime(struct tm *timeptr)
 
 #undef timegm
 
-time_t __VERIFIER_nondet_time_t();
+time_t __VERIFIER_nondet_time_t(void);
 
 time_t timegm(struct tm *timeptr)
 {
@@ -217,4 +232,51 @@ char *ctime(const time_t *clock)
   static char ctime_result[1];
   return ctime_result;
   #endif
+}
+
+/* FUNCTION: strftime */
+
+#ifndef __CPROVER_TIME_H_INCLUDED
+#  include <time.h>
+#  define __CPROVER_TIME_H_INCLUDED
+#endif
+
+__CPROVER_size_t __VERIFIER_nondet_size_t(void);
+
+__CPROVER_size_t
+strftime(char *s, __CPROVER_size_t max, const char *format, const struct tm *tm)
+{
+  (void)*format;
+  (void)*tm;
+  __CPROVER_havoc_slice(s, max);
+  __CPROVER_size_t length = __VERIFIER_nondet_size_t();
+  if(length >= max)
+    return 0;
+  s[length] = '\0';
+  return length;
+}
+
+/* FUNCTION: _strftime */
+
+#ifndef __CPROVER_TIME_H_INCLUDED
+#  include <time.h>
+#  define __CPROVER_TIME_H_INCLUDED
+#endif
+
+__CPROVER_size_t __VERIFIER_nondet_size_t(void);
+
+__CPROVER_size_t _strftime(
+  char *s,
+  __CPROVER_size_t max,
+  const char *format,
+  const struct tm *tm)
+{
+  (void)*format;
+  (void)*tm;
+  __CPROVER_havoc_slice(s, max);
+  __CPROVER_size_t length = __VERIFIER_nondet_size_t();
+  if(length >= max)
+    return 0;
+  s[length] = '\0';
+  return length;
 }

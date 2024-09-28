@@ -171,14 +171,11 @@ void generate_class_stub(
   class_type.set_is_stub(true);
 
   // produce class symbol
-  symbolt new_symbol;
+  irep_idt qualified_class_name = "java::" + id2string(class_name);
+  class_type.set_name(qualified_class_name);
+  type_symbolt new_symbol{qualified_class_name, std::move(class_type), ID_java};
   new_symbol.base_name=class_name;
   new_symbol.pretty_name=class_name;
-  new_symbol.name="java::"+id2string(class_name);
-  class_type.set_name(new_symbol.name);
-  new_symbol.type=class_type;
-  new_symbol.mode=ID_java;
-  new_symbol.is_type=true;
 
   std::pair<symbolt &, bool> res=symbol_table.insert(std::move(new_symbol));
 
@@ -209,7 +206,7 @@ void merge_source_location_rec(
 
 bool is_java_string_literal_id(const irep_idt &id)
 {
-  return has_prefix(id2string(id), JAVA_STRING_LITERAL_PREFIX);
+  return id.starts_with(JAVA_STRING_LITERAL_PREFIX);
 }
 
 irep_idt resolve_friendly_method_name(
@@ -224,8 +221,7 @@ irep_idt resolve_friendly_method_name(
     std::set<irep_idt> matches;
 
     for(const auto &s : symbol_table.symbols)
-      if(has_prefix(id2string(s.first), prefix) &&
-         s.second.type.id()==ID_code)
+      if(s.first.starts_with(prefix) && s.second.type.id() == ID_code)
         matches.insert(s.first);
 
     if(matches.empty())
@@ -448,7 +444,7 @@ std::string pretty_print_java_type(const std::string &fqn_java_type)
 ///   ancestors including interfaces, rather than just parents.
 /// \return the concrete component referred to if any is found, or an invalid
 ///   resolve_inherited_componentt::inherited_componentt otherwise.
-optionalt<resolve_inherited_componentt::inherited_componentt>
+std::optional<resolve_inherited_componentt::inherited_componentt>
 get_inherited_component(
   const irep_idt &component_class_id,
   const irep_idt &component_name,
@@ -569,10 +565,10 @@ symbolt &fresh_java_symbol(
     type, name_prefix, basename_prefix, source_location, ID_java, symbol_table);
 }
 
-optionalt<irep_idt> declaring_class(const symbolt &symbol)
+std::optional<irep_idt> declaring_class(const symbolt &symbol)
 {
   const irep_idt &class_id = symbol.type.get(ID_C_class);
-  return class_id.empty() ? optionalt<irep_idt>{} : class_id;
+  return class_id.empty() ? std::optional<irep_idt>{} : class_id;
 }
 
 void set_declaring_class(symbolt &symbol, const irep_idt &declaring_class)
@@ -580,7 +576,7 @@ void set_declaring_class(symbolt &symbol, const irep_idt &declaring_class)
   symbol.type.set(ID_C_class, declaring_class);
 }
 
-NODISCARD optionalt<std::string>
+[[nodiscard]] std::optional<std::string>
 class_name_from_method_name(const std::string &method_name)
 {
   const auto signature_index = method_name.rfind(":");

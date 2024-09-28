@@ -13,16 +13,13 @@ Date:   December 2016
 
 #include "slice_global_inits.h"
 
-#include <analyses/call_graph.h>
-
+#include <util/cprover_prefix.h>
 #include <util/find_symbols.h>
 #include <util/std_expr.h>
-#include <util/cprover_prefix.h>
-#include <util/prefix.h>
 
+#include <analyses/call_graph.h>
 #include <linking/static_lifetime_init.h>
 
-#include "goto_convert_functions.h"
 #include "goto_functions.h"
 #include "goto_model.h"
 
@@ -99,7 +96,7 @@ void slice_global_inits(
         // if we are to keep the left-hand side, then we also need to keep all
         // symbols occurring in the right-hand side
         if(
-          has_prefix(id2string(id), CPROVER_PREFIX) ||
+          id.starts_with(CPROVER_PREFIX) ||
           symbols_to_keep.find(id) != symbols_to_keep.end())
         {
           fixed_point_reached = false;
@@ -116,15 +113,17 @@ void slice_global_inits(
 
   // now remove unnecessary initializations
   bool changed = false;
-  for(auto &entry : goto_model.symbol_table)
+  for(auto it = goto_model.symbol_table.begin();
+      it != goto_model.symbol_table.end();
+      ++it)
   {
     if(
-      entry.second.is_static_lifetime && !entry.second.is_type &&
-      !entry.second.is_macro && entry.second.type.id() != ID_code &&
-      !has_prefix(id2string(entry.first), CPROVER_PREFIX) &&
-      symbols_to_keep.find(entry.first) == symbols_to_keep.end())
+      it->second.is_static_lifetime && !it->second.is_type &&
+      !it->second.is_macro && it->second.type.id() != ID_code &&
+      !it->first.starts_with(CPROVER_PREFIX) &&
+      symbols_to_keep.find(it->first) == symbols_to_keep.end())
     {
-      symbolt &symbol = goto_model.symbol_table.get_writeable_ref(entry.first);
+      symbolt &symbol = it.get_writeable_symbol();
       symbol.is_extern = true;
       symbol.value.make_nil();
       symbol.value.set(ID_C_no_nondet_initialization, 1);
@@ -132,18 +131,6 @@ void slice_global_inits(
     }
   }
 
-  if(
-    changed &&
-    goto_model.goto_functions.function_map.erase(INITIALIZE_FUNCTION) != 0)
-  {
-    static_lifetime_init(
-      goto_model.symbol_table,
-      goto_model.symbol_table.lookup_ref(INITIALIZE_FUNCTION).location);
-    goto_convert(
-      INITIALIZE_FUNCTION,
-      goto_model.symbol_table,
-      goto_model.goto_functions,
-      message_handler);
-    goto_model.goto_functions.update();
-  }
+  if(changed && goto_model.can_produce_function(INITIALIZE_FUNCTION))
+    recreate_initialize_function(goto_model, message_handler);
 }

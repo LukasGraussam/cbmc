@@ -40,7 +40,8 @@ static std::string type2name_tag(
   if(ns.lookup(identifier, symbol))
     return "SYM#"+id2string(identifier)+"#";
 
-  assert(symbol && symbol->is_type);
+  DATA_INVARIANT(symbol, "symbol not found");
+  DATA_INVARIANT(symbol->is_type, "not a type symbol");
 
   if(symbol->type.id()!=ID_struct &&
      symbol->type.id()!=ID_union)
@@ -244,7 +245,11 @@ static std::string type2name(
   else if(type.id()==ID_c_bit_field)
     result+="BF"+pointer_offset_bits_as_string(type, ns);
   else if(type.id()==ID_vector)
-    result+="VEC"+type.get_string(ID_size);
+  {
+    const constant_exprt &size = to_vector_type(type).size();
+    const auto size_int = numeric_cast_v<mp_integer>(size);
+    result += "VEC" + integer2string(size_int);
+  }
   else
     throw "unknown type '"+type.id_string()+"' encountered";
 
@@ -255,8 +260,7 @@ static std::string type2name(
       type2name(to_type_with_subtype(type).subtype(), ns, symbol_number);
     result+='}';
   }
-
-  if(type.has_subtypes())
+  else if(type.has_subtypes())
   {
     result+='$';
     for(const typet &subtype : to_type_with_subtypes(type).subtypes())

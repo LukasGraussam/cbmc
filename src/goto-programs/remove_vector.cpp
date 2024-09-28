@@ -53,9 +53,11 @@ static bool have_to_remove_vector(const exprt &expr)
   if(have_to_remove_vector(expr.type()))
     return true;
 
-  forall_operands(it, expr)
-    if(have_to_remove_vector(*it))
+  for(const auto &op : expr.operands())
+  {
+    if(have_to_remove_vector(op))
       return true;
+  }
 
   return false;
 }
@@ -342,17 +344,17 @@ static void remove_vector(symbolt &symbol)
 }
 
 /// removes vector data type
-static void remove_vector(symbol_tablet &symbol_table)
+static void remove_vector(symbol_table_baset &symbol_table)
 {
-  for(const auto &named_symbol : symbol_table.symbols)
-    remove_vector(symbol_table.get_writeable_ref(named_symbol.first));
+  for(auto it = symbol_table.begin(); it != symbol_table.end(); ++it)
+    remove_vector(it.get_writeable_symbol());
 }
 
 /// removes vector data type
 void remove_vector(goto_functionst::goto_functiont &goto_function)
 {
   for(auto &i : goto_function.body.instructions)
-    i.transform([](exprt e) -> optionalt<exprt> {
+    i.transform([](exprt e) -> std::optional<exprt> {
       if(have_to_remove_vector(e))
       {
         remove_vector(e);
@@ -372,7 +374,7 @@ static void remove_vector(goto_functionst &goto_functions)
 
 /// removes vector data type
 void remove_vector(
-  symbol_tablet &symbol_table,
+  symbol_table_baset &symbol_table,
   goto_functionst &goto_functions)
 {
   remove_vector(symbol_table);
@@ -383,4 +385,26 @@ void remove_vector(
 void remove_vector(goto_modelt &goto_model)
 {
   remove_vector(goto_model.symbol_table, goto_model.goto_functions);
+}
+
+bool has_vector(const goto_functionst &goto_functions)
+{
+  for(auto &function_it : goto_functions.function_map)
+    for(auto &instruction : function_it.second.body.instructions)
+    {
+      bool has_vector = false;
+      instruction.apply([&has_vector](const exprt &expr) {
+        if(have_to_remove_vector(expr))
+          has_vector = true;
+      });
+      if(has_vector)
+        return true;
+    }
+
+  return false;
+}
+
+bool has_vector(const goto_modelt &goto_model)
+{
+  return has_vector(goto_model.goto_functions);
 }

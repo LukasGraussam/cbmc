@@ -9,24 +9,23 @@ Author: Daniel Kroening, kroening@kroening.com
 /// \file
 /// Symbolic Execution
 
-#include "goto_symex.h"
-
-#include <memory>
-
-#include <pointer-analysis/value_set_dereference.h>
-
 #include <util/exception_utils.h>
 #include <util/expr_iterator.h>
 #include <util/expr_util.h>
 #include <util/format.h>
 #include <util/format_expr.h>
 #include <util/invariant.h>
-#include <util/make_unique.h>
+#include <util/magic.h>
 #include <util/mathematical_expr.h>
 #include <util/replace_symbol.h>
 #include <util/std_expr.h>
 
+#include <pointer-analysis/value_set_dereference.h>
+
+#include "goto_symex.h"
 #include "path_storage.h"
+
+#include <memory>
 
 #include <iostream> // LUGR debug
 
@@ -41,8 +40,6 @@ symex_configt::symex_configt(const optionst &options)
     simplify_opt(options.get_bool_option("simplify")),
     unwinding_assertions(options.get_bool_option("unwinding-assertions")),
     partial_loops(options.get_bool_option("partial-loops")),
-    havoc_undefined_functions(
-      options.get_bool_option("havoc-undefined-functions")),
     run_validation_checks(options.get_bool_option("validate-ssa-equation")),
     show_symex_steps(options.get_bool_option("show-goto-symex-steps")),
     show_points_to_sets(options.get_bool_option("show-points-to-sets")),
@@ -178,11 +175,13 @@ void goto_symext::symex_assert(
   if(msg.empty())
     msg = "assertion";
 
-  vcc(l2_condition, msg, state);
+  vcc(
+    l2_condition, instruction.source_location().get_property_id(), msg, state);
 }
 
 void goto_symext::vcc(
   const exprt &condition,
+  const irep_idt &property_id,
   const std::string &msg,
   statet &state)
 {
@@ -195,7 +194,8 @@ void goto_symext::vcc(
   const exprt guarded_condition = state.guard.guard_expr(condition);
 
   state.remaining_vccs++;
-  target.assertion(state.guard.as_expr(), guarded_condition, msg, state.source);
+  target.assertion(
+    state.guard.as_expr(), guarded_condition, property_id, msg, state.source);
 }
 
 void goto_symext::symex_assume(statet &state, const exprt &cond)
@@ -322,10 +322,9 @@ void goto_symext::symex_threaded_step(
   }
 }
 
-void goto_symext::symex_with_state(
+symbol_tablet goto_symext::symex_with_state(
   statet &state,
-  const get_goto_functiont &get_goto_function,
-  symbol_tablet &new_symbol_table)
+  const get_goto_functiont &get_goto_function)
 {
   // resets the namespace to only wrap a single symbol table, and does so upon
   // destruction of an object of this type; instantiating the type is thus all
@@ -362,28 +361,27 @@ void goto_symext::symex_with_state(
 
   symex_threaded_step(state, get_goto_function);
   if(should_pause_symex)
-    return;
+    return state.symbol_table;
+
   while(!state.call_stack().empty())
   {
     state.has_saved_jump_target = false;
     state.has_saved_next_instruction = false;
     symex_threaded_step(state, get_goto_function);
     if(should_pause_symex)
-      return;
+      return state.symbol_table;
   }
 
   // Clients may need to construct a namespace with both the names in
   // the original goto-program and the names generated during symbolic
   // execution, so return the names generated through symbolic execution
-  // through `new_symbol_table`.
-  new_symbol_table = state.symbol_table;
+  return state.symbol_table;
 }
 
-void goto_symext::resume_symex_from_saved_state(
+symbol_tablet goto_symext::resume_symex_from_saved_state(
   const get_goto_functiont &get_goto_function,
   const statet &saved_state,
-  symex_target_equationt *const saved_equation,
-  symbol_tablet &new_symbol_table)
+  symex_target_equationt *const saved_equation)
 {
   // saved_state contains a pointer to a symex_target_equationt that is
   // almost certainly stale. This is because equations are owned by bmcts,
@@ -395,10 +393,7 @@ void goto_symext::resume_symex_from_saved_state(
 
   // Do NOT do the same initialization that `symex_with_state` does for a
   // fresh state, as that would clobber the saved state's program counter
-  symex_with_state(
-      state,
-      get_goto_function,
-      new_symbol_table);
+  return symex_with_state(state, get_goto_function);
 }
 
 std::unique_ptr<goto_symext::statet> goto_symext::initialize_entry_point_state(
@@ -421,7 +416,7 @@ std::unique_ptr<goto_symext::statet> goto_symext::initialize_entry_point_state(
   auto *storage = &path_storage;
 
   // create and prepare the state
-  auto state = util_make_unique<statet>(
+  auto state = std::make_unique<statet>(
     symex_targett::sourcet(entry_point_id, start_function->body),
     symex_config.max_field_sensitivity_array_size,
     symex_config.simplify_opt,
@@ -468,20 +463,25 @@ std::unique_ptr<goto_symext::statet> goto_symext::initialize_entry_point_state(
   return state;
 }
 
-void goto_symext::symex_from_entry_point_of(
+symbol_tablet goto_symext::symex_from_entry_point_of(
   const get_goto_functiont &get_goto_function,
-  symbol_tablet &new_symbol_table)
+  const shadow_memory_field_definitionst &fields)
 {
   auto state = initialize_entry_point_state(get_goto_function);
+  // Initialize declared shadow memory fields
+  state->shadow_memory.fields = fields;
 
-  symex_with_state(*state, get_goto_function, new_symbol_table);
+  return symex_with_state(*state, get_goto_function);
 }
 
 void goto_symext::initialize_path_storage_from_entry_point_of(
   const get_goto_functiont &get_goto_function,
-  symbol_table_baset &new_symbol_table)
+  symbol_table_baset &new_symbol_table,
+  const shadow_memory_field_definitionst &fields)
 {
   auto state = initialize_entry_point_state(get_goto_function);
+  // Initialize declared shadow memory fields
+  state->shadow_memory.fields = fields;
 
   path_storaget::patht entry_point_start(target, *state);
   entry_point_start.state.saved_target = state->source.pc;
@@ -766,18 +766,18 @@ void goto_symext::kill_instruction_local_symbols(statet &state)
 /// multiple times)
 /// \param expr: The expression to examine
 /// \return If only one unique symbol occurs in \p expr then return it;
-///   otherwise return an empty optionalt
-static optionalt<symbol_exprt>
+///   otherwise return an empty std::optional
+static std::optional<symbol_exprt>
 find_unique_pointer_typed_symbol(const exprt &expr)
 {
-  optionalt<symbol_exprt> return_value;
+  std::optional<symbol_exprt> return_value;
   for(auto it = expr.depth_cbegin(); it != expr.depth_cend(); ++it)
   {
     const symbol_exprt *symbol_expr = expr_try_dynamic_cast<symbol_exprt>(*it);
     if(symbol_expr && can_cast_type<pointer_typet>(symbol_expr->type()))
     {
       // If we already have a potential return value, check if it is the same
-      // symbol, and return an empty optionalt if not
+      // symbol, and return an empty std::optional if not
       if(return_value && *symbol_expr != *return_value)
       {
         return {};
@@ -801,7 +801,7 @@ void goto_symext::try_filter_value_sets(
 {
   condition = state.rename<L1>(std::move(condition), ns).get();
 
-  optionalt<symbol_exprt> symbol_expr =
+  std::optional<symbol_exprt> symbol_expr =
     find_unique_pointer_typed_symbol(condition);
 
   if(!symbol_expr)

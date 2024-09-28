@@ -13,6 +13,10 @@ Author: Daniel Kroening, Peter Schrammel
 
 #include <util/ui_message.h>
 
+#include <goto-programs/remove_function_pointers.h>
+#include <goto-programs/remove_vector.h>
+
+#include <assembler/remove_asm.h>
 #include <goto-symex/solver_hardness.h>
 
 #include "bmc_util.h"
@@ -27,6 +31,10 @@ multi_path_symex_checkert::multi_path_symex_checkert(
     equation_generated(false),
     property_decider(options, ui_message_handler, equation, ns)
 {
+  // check for certain unsupported language features
+  PRECONDITION(!has_asm(goto_model.get_goto_functions()));
+  PRECONDITION(!has_function_pointers(goto_model.get_goto_functions()));
+  PRECONDITION(!has_vector(goto_model.get_goto_functions()));
 }
 
 incremental_goto_checkert::resultt multi_path_symex_checkert::
@@ -106,8 +114,7 @@ goto_tracet multi_path_symex_checkert::build_shortest_trace() const
   {
     // NOLINTNEXTLINE(whitespace/braces)
     counterexample_beautificationt{ui_message_handler}(
-      dynamic_cast<boolbvt &>(property_decider.get_stack_decision_procedure()),
-      equation);
+      property_decider.get_boolbv_decision_procedure(), equation);
   }
 
   goto_tracet goto_trace;
@@ -154,7 +161,7 @@ multi_path_symex_checkert::localize_fault(const irep_idt &property_id) const
     options,
     ui_message_handler,
     equation,
-    property_decider.get_stack_decision_procedure());
+    property_decider.get_decision_procedure());
 
   return fault_localizer(property_id);
 }

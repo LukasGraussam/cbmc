@@ -11,25 +11,25 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include "initialize_goto_model.h"
 
-#include <fstream>
-
+#include <util/arith_tools.h>
+#include <util/c_types.h>
 #include <util/config.h>
+#include <util/exception_utils.h>
 #include <util/message.h>
 #include <util/options.h>
+#include <util/unicode.h>
 
-#ifdef _MSC_VER
-#  include <util/unicode.h>
-#endif
+#include <goto-programs/rebuild_goto_start_function.h>
 
+#include <ansi-c/goto-conversion/goto_convert_functions.h>
 #include <langapi/language.h>
 #include <langapi/language_file.h>
 #include <langapi/mode.h>
+#include <linking/static_lifetime_init.h>
 
-#include <goto-programs/rebuild_goto_start_function.h>
-#include <util/exception_utils.h>
-
-#include "goto_convert_functions.h"
 #include "read_goto_binary.h"
+
+#include <fstream>
 
 /// Generate an entry point that calls a function with the given name, based on
 /// the functions language mode in the symbol table
@@ -40,21 +40,24 @@ static bool generate_entry_point_for_function(
 {
   const irep_idt &entry_function_name = options.get_option("function");
   CHECK_RETURN(!entry_function_name.empty());
-  auto const entry_function_sym = symbol_table.lookup(entry_function_name);
-  if(entry_function_sym == nullptr)
+  auto matches = symbol_table.match_name_or_base_name(entry_function_name);
+  // it's ok if this is ambiguous at this point, we just need to get a mode, the
+  // actual entry point generator will take care of resolving (or rejecting)
+  // ambiguity
+  if(matches.empty())
   {
     throw invalid_command_line_argument_exceptiont{
-      // NOLINTNEXTLINE(whitespace/braces)
-      std::string{"couldn't find function with name '"} +
+      std::string("couldn't find entry with name '") +
         id2string(entry_function_name) + "' in symbol table",
       "--function"};
   }
-  PRECONDITION(!entry_function_sym->mode.empty());
-  auto const entry_language = get_language_from_mode(entry_function_sym->mode);
+  const auto &entry_point_mode = matches.front()->second.mode;
+  PRECONDITION(!entry_point_mode.empty());
+  auto const entry_language = get_language_from_mode(entry_point_mode);
   CHECK_RETURN(entry_language != nullptr);
-  entry_language->set_message_handler(message_handler);
-  entry_language->set_language_options(options);
-  return entry_language->generate_support_functions(symbol_table);
+  entry_language->set_language_options(options, message_handler);
+  return entry_language->generate_support_functions(
+    symbol_table, message_handler);
 }
 
 void initialize_from_source_files(
@@ -71,53 +74,47 @@ void initialize_from_source_files(
 
   for(const auto &filename : sources)
   {
-      #ifdef _MSC_VER
-      std::ifstream infile(widen(filename));
-      #else
-      std::ifstream infile(filename);
-      #endif
+    std::ifstream infile(widen_if_needed(filename));
 
-      if(!infile)
-      {
-        throw system_exceptiont(
-          "Failed to open input file '" + filename + '\'');
-      }
-
-      language_filet &lf=language_files.add_file(filename);
-      lf.language=get_language_from_filename(filename);
-
-      if(lf.language==nullptr)
-      {
-        throw invalid_command_line_argument_exceptiont{
-          "Failed to figure out type of file", filename};
-      }
-
-      languaget &language=*lf.language;
-      language.set_message_handler(message_handler);
-      language.set_language_options(options);
-
-      msg.status() << "Parsing " << filename << messaget::eom;
-
-      if(language.parse(infile, filename))
-      {
-        throw invalid_input_exceptiont("PARSING ERROR");
-      }
-
-      lf.get_modules();
-    }
-
-    msg.status() << "Converting" << messaget::eom;
-
-    if(language_files.typecheck(symbol_table))
+    if(!infile)
     {
-      throw invalid_input_exceptiont("CONVERSION ERROR");
+      throw system_exceptiont("Failed to open input file '" + filename + '\'');
     }
+
+    language_filet &lf = language_files.add_file(filename);
+    lf.language = get_language_from_filename(filename);
+
+    if(lf.language == nullptr)
+    {
+      throw invalid_command_line_argument_exceptiont{
+        "Failed to figure out type of file", filename};
+    }
+
+    languaget &language = *lf.language;
+    language.set_language_options(options, message_handler);
+
+    msg.progress() << "Parsing " << filename << messaget::eom;
+
+    if(language.parse(infile, filename, message_handler))
+    {
+      throw invalid_input_exceptiont("PARSING ERROR");
+    }
+
+    lf.get_modules();
+  }
+
+  msg.progress() << "Converting" << messaget::eom;
+
+  if(language_files.typecheck(symbol_table, message_handler))
+  {
+    throw invalid_input_exceptiont("CONVERSION ERROR");
+  }
 }
 
 void set_up_custom_entry_point(
   language_filest &language_files,
   symbol_tablet &symbol_table,
-  const std::function<void(const irep_idt &)> &unload,
+  const std::function<std::size_t(const irep_idt &)> &unload,
   const optionst &options,
   bool try_mode_lookup,
   message_handlert &message_handler)
@@ -142,7 +139,7 @@ void set_up_custom_entry_point(
 
     // Create the new entry-point
     entry_point_generation_failed =
-      language->generate_support_functions(symbol_table);
+      language->generate_support_functions(symbol_table, message_handler);
 
     // Remove the function from the goto functions so it is copied back in
     // from the symbol table during goto_convert
@@ -164,8 +161,8 @@ void set_up_custom_entry_point(
     {
       // Allow all language front-ends to try to provide the user-specified
       // (--function) entry-point, or some language-specific default:
-      entry_point_generation_failed =
-        language_files.generate_support_functions(symbol_table);
+      entry_point_generation_failed = language_files.generate_support_functions(
+        symbol_table, message_handler);
     }
   }
 
@@ -200,10 +197,7 @@ goto_modelt initialize_goto_model(
   }
 
   language_filest language_files;
-  language_files.set_message_handler(message_handler);
-
   goto_modelt goto_model;
-
   initialize_from_source_files(
     sources, options, language_files, goto_model.symbol_table, message_handler);
 
@@ -213,7 +207,7 @@ goto_modelt initialize_goto_model(
   set_up_custom_entry_point(
     language_files,
     goto_model.symbol_table,
-    [&goto_model](const irep_idt &id) { goto_model.goto_functions.unload(id); },
+    [&goto_model](const irep_idt &id) { return goto_model.unload(id); },
     options,
     true,
     message_handler);
@@ -244,4 +238,30 @@ goto_modelt initialize_goto_model(
     goto_model.symbol_table);
 
   return goto_model;
+}
+
+void update_max_malloc_size(
+  goto_modelt &goto_model,
+  message_handlert &message_handler)
+{
+  if(!goto_model.symbol_table.has_symbol(CPROVER_PREFIX "max_malloc_size"))
+    return;
+
+  const auto previous_max_malloc_size_value = numeric_cast<mp_integer>(
+    goto_model.symbol_table.lookup_ref(CPROVER_PREFIX "max_malloc_size").value);
+  const mp_integer current_max_malloc_size = config.max_malloc_size();
+
+  if(
+    !previous_max_malloc_size_value.has_value() ||
+    *previous_max_malloc_size_value != current_max_malloc_size)
+  {
+    symbolt &max_malloc_size_sym = goto_model.symbol_table.get_writeable_ref(
+      CPROVER_PREFIX "max_malloc_size");
+    max_malloc_size_sym.value =
+      from_integer(current_max_malloc_size, size_type());
+    max_malloc_size_sym.value.set(ID_C_no_nondet_initialization, true);
+
+    if(goto_model.can_produce_function(INITIALIZE_FUNCTION))
+      recreate_initialize_function(goto_model, message_handler);
+  }
 }

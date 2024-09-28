@@ -26,6 +26,8 @@ Date: November 2011
 
 #include <linking/static_lifetime_init.h>
 
+#include <regex>
+
 /// See the return.
 /// \param symbol_expr: The symbol expression to analyze.
 /// \param ns: Namespace for resolving type information
@@ -38,7 +40,7 @@ bool is_nondet_initializable_static(
   const irep_idt &id = symbol_expr.get_identifier();
 
   // is it a __CPROVER_* variable?
-  if(has_prefix(id2string(id), CPROVER_PREFIX))
+  if(id.starts_with(CPROVER_PREFIX))
     return false;
 
   // variable not in symbol table such as symex variable?
@@ -75,16 +77,17 @@ bool is_nondet_initializable_static(
 /// assigned to nondet-initializable static variables with nondeterministic
 /// values.
 /// \param ns: Namespace for resolving type information.
-/// \param [out] goto_functions: Existing goto-functions to be updated.
+/// \param [inout] goto_model: Existing goto-functions and symbol table to
+///   be updated.
 /// \param fct_name: Name of the goto-function to be updated.
 static void nondet_static(
   const namespacet &ns,
-  goto_functionst &goto_functions,
+  goto_modelt &goto_model,
   const irep_idt &fct_name)
 {
   goto_functionst::function_mapt::iterator fct_entry =
-    goto_functions.function_map.find(fct_name);
-  CHECK_RETURN(fct_entry != goto_functions.function_map.end());
+    goto_model.goto_functions.function_map.find(fct_name);
+  CHECK_RETURN(fct_entry != goto_model.goto_functions.function_map.end());
 
   goto_programt &init = fct_entry->second.body;
 
@@ -97,11 +100,11 @@ static void nondet_static(
 
       if(is_nondet_initializable_static(sym, ns))
       {
-        const auto source_location = instruction.source_location();
-        instruction = goto_programt::make_assignment(
-          code_assignt(
-            sym, side_effect_expr_nondett(sym.type(), source_location)),
-          source_location);
+        side_effect_expr_nondett nondet{
+          sym.type(), instruction.source_location()};
+        instruction.assign_rhs_nonconst() = nondet;
+        goto_model.symbol_table.get_writeable_ref(sym.get_identifier()).value =
+          nondet;
       }
     }
     else if(instruction.is_function_call())
@@ -109,36 +112,26 @@ static void nondet_static(
       const symbol_exprt &fsym = to_symbol_expr(instruction.call_function());
 
       // see cpp/cpp_typecheck.cpp, which creates initialization functions
-      if(has_prefix(
-           id2string(fsym.get_identifier()), "#cpp_dynamic_initialization#"))
+      if(fsym.get_identifier().starts_with("#cpp_dynamic_initialization#"))
       {
-        nondet_static(ns, goto_functions, fsym.get_identifier());
+        nondet_static(ns, goto_model, fsym.get_identifier());
       }
     }
   }
 
   // update counters etc.
-  goto_functions.update();
-}
-
-/// Nondeterministically initializes global scope variables in
-/// CPROVER_initialize function.
-/// \param ns: Namespace for resolving type information.
-/// \param [out] goto_functions: Existing goto-functions to be updated.
-void nondet_static(const namespacet &ns, goto_functionst &goto_functions)
-{
-  nondet_static(ns, goto_functions, INITIALIZE_FUNCTION);
+  goto_model.goto_functions.update();
 }
 
 /// First main entry point of the module. Nondeterministically initializes
 /// global scope variables, except for constants (such as string literals, final
 /// fields) and internal variables (such as CPROVER and symex variables,
 /// language specific internal variables).
-/// \param [out] goto_model: Existing goto-model to be updated.
+/// \param [inout] goto_model: Existing goto-model to be updated.
 void nondet_static(goto_modelt &goto_model)
 {
   const namespacet ns(goto_model.symbol_table);
-  nondet_static(ns, goto_model.goto_functions);
+  nondet_static(ns, goto_model, INITIALIZE_FUNCTION);
 }
 
 /// Second main entry point of the module. Nondeterministically initializes
@@ -198,5 +191,33 @@ void nondet_static(
     }
   }
 
-  nondet_static(ns, goto_model.goto_functions, INITIALIZE_FUNCTION);
+  nondet_static(ns, goto_model, INITIALIZE_FUNCTION);
+}
+
+/// Nondeterministically initializes global scope variables that
+/// match the given regex.
+/// \param [out] goto_model: Existing goto-model to be updated.
+/// \param regex: regex for matching variables in the format
+///   "filename:variable" (same format as those of except_values in
+///   nondet_static(goto_model, except_values) variant above).
+void nondet_static_matching(goto_modelt &goto_model, const std::string &regex)
+{
+  const auto regex_matcher = std::regex(regex);
+  symbol_tablet &symbol_table = goto_model.symbol_table;
+
+  for(symbol_tablet::iteratort symbol_it = symbol_table.begin();
+      symbol_it != symbol_table.end();
+      symbol_it++)
+  {
+    symbolt &symbol = symbol_it.get_writeable_symbol();
+    std::string qualified_name = id2string(symbol.location.get_file()) + ":" +
+                                 id2string(symbol.display_name());
+    if(!std::regex_match(qualified_name, regex_matcher))
+    {
+      symbol.value.set(ID_C_no_nondet_initialization, 1);
+    }
+  }
+
+  const namespacet ns(goto_model.symbol_table);
+  nondet_static(ns, goto_model, INITIALIZE_FUNCTION);
 }

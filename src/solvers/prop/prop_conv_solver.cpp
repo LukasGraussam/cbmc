@@ -38,7 +38,7 @@ void prop_conv_solvert::set_all_frozen()
 exprt prop_conv_solvert::handle(const exprt &expr)
 {
   // We can only improve Booleans.
-  if(expr.type().id() != ID_bool)
+  if(!expr.is_boolean())
     return expr;
 
   // We convert to a literal to obtain a 'small' handle
@@ -74,7 +74,7 @@ literalt prop_conv_solvert::get_literal(const irep_idt &identifier)
   return literal;
 }
 
-optionalt<bool> prop_conv_solvert::get_bool(const exprt &expr) const
+std::optional<bool> prop_conv_solvert::get_bool(const exprt &expr) const
 {
   // trivial cases
 
@@ -107,7 +107,7 @@ optionalt<bool> prop_conv_solvert::get_bool(const exprt &expr) const
 
   if(expr.id() == ID_not)
   {
-    if(expr.type().id() == ID_bool)
+    if(expr.is_boolean())
     {
       auto tmp = get_bool(to_not_expr(expr).op());
       if(tmp.has_value())
@@ -118,11 +118,11 @@ optionalt<bool> prop_conv_solvert::get_bool(const exprt &expr) const
   }
   else if(expr.id() == ID_and || expr.id() == ID_or)
   {
-    if(expr.type().id() == ID_bool && expr.operands().size() >= 1)
+    if(expr.is_boolean() && expr.operands().size() >= 1)
     {
-      forall_operands(it, expr)
+      for(const auto &op : expr.operands())
       {
-        auto tmp = get_bool(*it);
+        auto tmp = get_bool(op);
         if(!tmp.has_value())
           return {};
 
@@ -153,7 +153,7 @@ optionalt<bool> prop_conv_solvert::get_bool(const exprt &expr) const
 
 literalt prop_conv_solvert::convert(const exprt &expr)
 {
-  if(!use_cache || expr.id() == ID_symbol || expr.id() == ID_constant)
+  if(!use_cache || expr.id() == ID_symbol || expr.is_constant())
   {
     literalt literal = convert_bool(expr);
     if(freeze_all && !literal.is_constant())
@@ -189,7 +189,7 @@ literalt prop_conv_solvert::convert(const exprt &expr)
 
 literalt prop_conv_solvert::convert_bool(const exprt &expr)
 {
-  PRECONDITION(expr.type().id() == ID_bool);
+  PRECONDITION(expr.is_boolean());
 
   const exprt::operandst &op = expr.operands();
 
@@ -240,8 +240,8 @@ literalt prop_conv_solvert::convert_bool(const exprt &expr)
     std::vector<literalt> op_bv;
     op_bv.reserve(op.size());
 
-    forall_operands(it, expr)
-      op_bv.push_back(convert(*it));
+    for(const auto &op : expr.operands())
+      op_bv.push_back(convert(op));
 
     // add constraints
 
@@ -292,7 +292,7 @@ literalt prop_conv_solvert::convert_bool(const exprt &expr)
     INVARIANT(op.size() == 2, "equality takes two operands");
     bool equal = (expr.id() == ID_equal);
 
-    if(op[0].type().id() == ID_bool && op[1].type().id() == ID_bool)
+    if(op[0].is_boolean() && op[1].is_boolean())
     {
       literalt tmp1 = convert(op[0]), tmp2 = convert(op[1]);
       return equal ? prop.lequal(tmp1, tmp2) : prop.lxor(tmp1, tmp2);
@@ -345,11 +345,11 @@ bool prop_conv_solvert::set_equality_to_true(const equal_exprt &expr)
 
 void prop_conv_solvert::add_constraints_to_prop(const exprt &expr, bool value)
 {
-  PRECONDITION(expr.type().id() == ID_bool);
+  PRECONDITION(expr.is_boolean());
 
   const bool has_only_boolean_operands = std::all_of(
     expr.operands().begin(), expr.operands().end(), [](const exprt &expr) {
-      return expr.type().id() == ID_bool;
+      return expr.is_boolean();
     });
 
   if(has_only_boolean_operands)
@@ -367,8 +367,8 @@ void prop_conv_solvert::add_constraints_to_prop(const exprt &expr, bool value)
 
         if(expr.id() == ID_and)
         {
-          forall_operands(it, expr)
-            add_constraints_to_prop(*it, true);
+          for(const auto &op : expr.operands())
+            add_constraints_to_prop(op, true);
 
           return;
         }
@@ -382,8 +382,8 @@ void prop_conv_solvert::add_constraints_to_prop(const exprt &expr, bool value)
             bvt bv;
             bv.reserve(expr.operands().size());
 
-            forall_operands(it, expr)
-              bv.push_back(convert(*it));
+            for(const auto &op : expr.operands())
+              bv.push_back(convert(op));
 
             prop.lcnf(bv);
             return;
@@ -416,8 +416,8 @@ void prop_conv_solvert::add_constraints_to_prop(const exprt &expr, bool value)
         }
         else if(expr.id() == ID_or) // !(a || b)  ==  (!a && !b)
         {
-          forall_operands(it, expr)
-            add_constraints_to_prop(*it, false);
+          for(const auto &op : expr.operands())
+            add_constraints_to_prop(op, false);
           return;
         }
       }
@@ -439,27 +439,37 @@ void prop_conv_solvert::finish_eager_conversion()
 {
 }
 
-decision_proceduret::resultt prop_conv_solvert::dec_solve()
+decision_proceduret::resultt
+prop_conv_solvert::dec_solve(const exprt &assumption)
 {
   // post-processing isn't incremental yet
   if(!post_processing_done)
   {
     const auto post_process_start = std::chrono::steady_clock::now();
 
-    log.statistics() << "Post-processing" << messaget::eom;
+    log.progress() << "Post-processing" << messaget::eom;
     finish_eager_conversion();
     post_processing_done = true;
 
     const auto post_process_stop = std::chrono::steady_clock::now();
     std::chrono::duration<double> post_process_runtime =
       std::chrono::duration<double>(post_process_stop - post_process_start);
-    log.status() << "Runtime Post-process: " << post_process_runtime.count()
-                 << "s" << messaget::eom;
+    log.statistics() << "Runtime Post-process: " << post_process_runtime.count()
+                     << "s" << messaget::eom;
   }
 
-  log.statistics() << "Solving with " << prop.solver_text() << messaget::eom;
+  log.progress() << "Solving with " << prop.solver_text() << messaget::eom;
 
-  switch(prop.prop_solve())
+  if(assumption.is_nil())
+    push();
+  else
+    push({assumption});
+
+  auto prop_result = prop.prop_solve(assumption_stack);
+
+  pop();
+
+  switch(prop_result)
   {
   case propt::resultt::P_SATISFIABLE:
     return resultt::D_SATISFIABLE;
@@ -474,7 +484,7 @@ decision_proceduret::resultt prop_conv_solvert::dec_solve()
 
 exprt prop_conv_solvert::get(const exprt &expr) const
 {
-  if(expr.type().id() == ID_bool)
+  if(expr.is_boolean())
   {
     auto value = get_bool(expr);
 
@@ -529,10 +539,13 @@ void prop_conv_solvert::push(const std::vector<exprt> &assumptions)
   // We push the given assumptions as a single context onto the stack.
   assumption_stack.reserve(assumption_stack.size() + assumptions.size());
   for(const auto &assumption : assumptions)
-    assumption_stack.push_back(to_literal_expr(assumption).get_literal());
+  {
+    auto literal = convert(assumption);
+    if(!literal.is_constant())
+      set_frozen(literal);
+    assumption_stack.push_back(literal);
+  }
   context_size_stack.push_back(assumptions.size());
-
-  prop.set_assumptions(assumption_stack);
 }
 
 void prop_conv_solvert::push()
@@ -543,8 +556,6 @@ void prop_conv_solvert::push()
 
   assumption_stack.push_back(context_literal);
   context_size_stack.push_back(1);
-
-  prop.set_assumptions(assumption_stack);
 }
 
 void prop_conv_solvert::pop()
@@ -552,8 +563,6 @@ void prop_conv_solvert::pop()
   // We remove the context from the stack.
   assumption_stack.resize(assumption_stack.size() - context_size_stack.back());
   context_size_stack.pop_back();
-
-  prop.set_assumptions(assumption_stack);
 }
 
 // This method out-of-line because gcc-5.5.0-12ubuntu1 20171010 miscompiles it

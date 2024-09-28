@@ -1,5 +1,3 @@
-project(CBMC)
-
 find_package(BISON REQUIRED)
 find_package(FLEX REQUIRED)
 
@@ -66,8 +64,8 @@ endmacro(generic_flex)
 macro(generic_includes name)
     target_include_directories(${name}
         PUBLIC
-        ${CBMC_BINARY_DIR}
-        ${CBMC_SOURCE_DIR}
+        ${CBMC_BINARY_DIR}/src
+        ${CBMC_SOURCE_DIR}/src
         ${CMAKE_CURRENT_BINARY_DIR}
         ${CMAKE_CURRENT_SOURCE_DIR}
     )
@@ -98,7 +96,7 @@ add_subdirectory(xmllang)
 add_subdirectory(goto-checker)
 add_subdirectory(goto-programs)
 add_subdirectory(goto-symex)
-add_subdirectory(jsil)
+add_subdirectory(goto-inspect)
 add_subdirectory(json)
 add_subdirectory(json-symtab-language)
 add_subdirectory(langapi)
@@ -116,8 +114,11 @@ add_subdirectory(goto-instrument)
 add_subdirectory(goto-analyzer)
 add_subdirectory(goto-diff)
 add_subdirectory(goto-harness)
+add_subdirectory(goto-synthesizer)
 add_subdirectory(symtab2gb)
+add_subdirectory(libcprover-cpp)
+add_subdirectory(goto-bmc)
 
-if(UNIX OR WITH_MEMORY_ANALYZER)
+if(WITH_MEMORY_ANALYZER)
 add_subdirectory(memory-analyzer)
 endif()

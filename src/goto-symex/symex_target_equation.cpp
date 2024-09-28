@@ -311,6 +311,7 @@ void symex_target_equationt::assumption(
 void symex_target_equationt::assertion(
   const exprt &guard,
   const exprt &cond,
+  const irep_idt &property_id,
   const std::string &msg,
   const sourcet &source)
 {
@@ -320,6 +321,7 @@ void symex_target_equationt::assertion(
   SSA_step.guard=guard;
   SSA_step.cond_expr=cond;
   SSA_step.comment=msg;
+  SSA_step.property_id = property_id;
 
   merge_ireps(SSA_step);
 }
@@ -389,8 +391,8 @@ void symex_target_equationt::convert(
   const auto convert_SSA_stop = std::chrono::steady_clock::now();
   std::chrono::duration<double> convert_SSA_runtime =
     std::chrono::duration<double>(convert_SSA_stop - convert_SSA_start);
-  log.status() << "Runtime Convert SSA: " << convert_SSA_runtime.count() << "s"
-               << messaget::eom;
+  log.statistics() << "Runtime Convert SSA: " << convert_SSA_runtime.count()
+                   << "s" << messaget::eom;
 }
 
 void symex_target_equationt::convert_assignments(

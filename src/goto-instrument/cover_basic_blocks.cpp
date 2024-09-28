@@ -13,7 +13,7 @@ Author: Peter Schrammel
 
 #include <util/message.h>
 
-optionalt<std::size_t> cover_basic_blockst::continuation_of_block(
+std::optional<std::size_t> cover_basic_blockst::continuation_of_block(
   const goto_programt::const_targett &instruction,
   cover_basic_blockst::block_mapt &block_map)
 {
@@ -29,15 +29,34 @@ optionalt<std::size_t> cover_basic_blockst::continuation_of_block(
   return {};
 }
 
+static bool
+same_source_line(const source_locationt &a, const source_locationt &b)
+{
+  return a.get_file() == b.get_file() && a.get_line() == b.get_line();
+}
+
 cover_basic_blockst::cover_basic_blockst(const goto_programt &goto_program)
 {
   bool next_is_target = true;
+  const goto_programt::instructiont *preceding_assume = nullptr;
   std::size_t current_block = 0;
 
   forall_goto_program_instructions(it, goto_program)
   {
+    // For the purposes of coverage blocks, multiple consecutive assume
+    // instructions with the same source location are considered to be part of
+    // the same block. Assumptions should terminate a block, as subsequent
+    // instructions may be unreachable. However check instrumentation passes
+    // may insert multiple assertions in the same program location. Therefore
+    // these are combined for reasons of readability of the coverage output.
+    bool end_of_assume_group =
+      preceding_assume &&
+      !(it->is_assume() &&
+        same_source_line(
+          preceding_assume->source_location(), it->source_location()));
+
     // Is it a potential beginning of a block?
-    if(next_is_target || it->is_target())
+    if(next_is_target || it->is_target() || end_of_assume_group)
     {
       if(auto block_number = continuation_of_block(it, block_map))
       {
@@ -72,13 +91,8 @@ cover_basic_blockst::cover_basic_blockst(const goto_programt &goto_program)
       block_info.source_location = it->source_location();
     }
 
-    next_is_target =
-#if 0
-      // Disabled for being too messy
-      it->is_goto() || it->is_function_call() || it->is_assume();
-#else
-      it->is_goto() || it->is_function_call();
-#endif
+    next_is_target = it->is_goto() || it->is_function_call();
+    preceding_assume = it->is_assume() ? &*it : nullptr;
   }
 }
 
@@ -89,7 +103,7 @@ std::size_t cover_basic_blockst::block_of(goto_programt::const_targett t) const
   return it->second;
 }
 
-optionalt<goto_programt::const_targett>
+std::optional<goto_programt::const_targett>
 cover_basic_blockst::instruction_of(const std::size_t block_nr) const
 {
   INVARIANT(block_nr < block_infos.size(), "block number out of range");
@@ -163,7 +177,7 @@ void cover_basic_blockst::add_block_lines(
     }
   };
   add_location(instruction.source_location());
-  instruction.get_code().visit_pre([&](const exprt &expr) {
+  instruction.code().visit_pre([&](const exprt &expr) {
     const auto &location = expr.source_location();
     if(!location.get_function().empty())
       add_location(location);
@@ -200,7 +214,7 @@ cover_basic_blocks_javat::block_of(goto_programt::const_targett t) const
   return it->second;
 }
 
-optionalt<goto_programt::const_targett>
+std::optional<goto_programt::const_targett>
 cover_basic_blocks_javat::instruction_of(const std::size_t block_nr) const
 {
   PRECONDITION(block_nr < block_infos.size());

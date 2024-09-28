@@ -12,6 +12,7 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <util/json.h>
 #include <util/message.h>
 #include <util/replace_expr.h>
+#include <util/replace_symbol.h>
 #include <util/std_expr.h>
 
 #include <solvers/prop/literal_expr.h>
@@ -95,7 +96,8 @@ void arrayst::collect_indices(const exprt &expr)
       array_comprehension_args.insert(
         to_array_comprehension_expr(expr).arg().get_identifier());
 
-    forall_operands(op, expr) collect_indices(*op);
+    for(const auto &op : expr.operands())
+      collect_indices(op);
   }
   else
   {
@@ -201,9 +203,7 @@ void arrayst::collect_arrays(const exprt &a)
       "unexpected array expression: member with '" + struct_op.id_string() +
         "'");
   }
-  else if(a.id()==ID_constant ||
-          a.id()==ID_array ||
-          a.id()==ID_string_constant)
+  else if(a.is_constant() || a.id() == ID_array || a.id() == ID_string_constant)
   {
   }
   else if(a.id()==ID_array_of)
@@ -237,6 +237,11 @@ void arrayst::collect_arrays(const exprt &a)
   }
   else if(a.id() == ID_array_comprehension)
   {
+  }
+  else if(auto let_expr = expr_try_dynamic_cast<let_exprt>(a))
+  {
+    arrays.make_union(a, let_expr->where());
+    collect_arrays(let_expr->where());
   }
   else
   {
@@ -486,11 +491,10 @@ void arrayst::add_array_constraints(
     return add_array_constraints_comprehension(
       index_set, to_array_comprehension_expr(expr));
   }
-  else if(expr.id()==ID_symbol ||
-          expr.id()==ID_nondet_symbol ||
-          expr.id()==ID_constant ||
-          expr.id()=="zero_string" ||
-          expr.id()==ID_string_constant)
+  else if(
+    expr.id() == ID_symbol || expr.id() == ID_nondet_symbol ||
+    expr.is_constant() || expr.id() == "zero_string" ||
+    expr.id() == ID_string_constant)
   {
   }
   else if(
@@ -529,6 +533,33 @@ void arrayst::add_array_constraints(
   }
   else if(expr.id()==ID_index)
   {
+  }
+  else if(auto let_expr = expr_try_dynamic_cast<let_exprt>(expr))
+  {
+    // we got x=let(a=e, A)
+    // add x[i]=A[a/e][i]
+
+    exprt where = let_expr->where();
+    replace_symbolt replace_symbol;
+    for(const auto &binding :
+        make_range(let_expr->variables()).zip(let_expr->values()))
+    {
+      replace_symbol.insert(binding.first, binding.second);
+    }
+    replace_symbol(where);
+
+    for(const auto &index : index_set)
+    {
+      index_exprt index_expr{expr, index};
+      index_exprt where_indexed{where, index};
+
+      // add constraint
+      lazy_constraintt lazy{
+        lazy_typet::ARRAY_LET, equal_exprt{index_expr, where_indexed}};
+
+      add_array_constraint(lazy, false); // added immediately
+      array_constraint_count[constraint_typet::ARRAY_LET]++;
+    }
   }
   else
   {
@@ -717,7 +748,7 @@ void arrayst::add_array_constraints_array_constant(
       // We have a constant index - just pick the element at that index from the
       // array constant.
 
-      const optionalt<std::size_t> i =
+      const std::optional<std::size_t> i =
         numeric_cast<std::size_t>(to_constant_expr(index));
       // if the access is out of bounds, we leave it unconstrained
       if(!i.has_value() || *i >= operands.size())
@@ -877,6 +908,8 @@ std::string arrayst::enum_to_string(constraint_typet type)
     return "arrayComprehension";
   case constraint_typet::ARRAY_EQUALITY:
     return "arrayEquality";
+  case constraint_typet::ARRAY_LET:
+    return "arrayLet";
   default:
     UNREACHABLE;
   }

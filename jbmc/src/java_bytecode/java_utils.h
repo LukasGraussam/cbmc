@@ -11,7 +11,6 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include <unordered_set>
 
-#include <util/nodiscard.h>
 #include <util/pointer_expr.h>
 
 #include <goto-programs/resolve_inherited_component.h>
@@ -154,7 +153,7 @@ irep_idt strip_java_namespace_prefix(const irep_idt &to_strip);
 
 std::string pretty_print_java_type(const std::string &fqn_java_type);
 
-optionalt<resolve_inherited_componentt::inherited_componentt>
+std::optional<resolve_inherited_componentt::inherited_componentt>
 get_inherited_component(
   const irep_idt &component_class_id,
   const irep_idt &component_name,
@@ -165,7 +164,11 @@ bool is_non_null_library_global(const irep_idt &);
 
 extern const std::unordered_set<std::string> cprover_methods_to_ignore;
 
-symbolt &fresh_java_symbol(
+#if defined(__GNUC__) && __GNUC__ >= 14
+[[gnu::no_dangling]]
+#endif
+symbolt &
+fresh_java_symbol(
   const typet &type,
   const std::string &basename_prefix,
   const source_locationt &source_location,
@@ -176,7 +179,7 @@ symbolt &fresh_java_symbol(
 /// symbol is not declared by a class then an empty optional is returned. This
 /// is used for method symbols and static field symbols to link them back to the
 /// class which declared them.
-optionalt<irep_idt> declaring_class(const symbolt &symbol);
+std::optional<irep_idt> declaring_class(const symbolt &symbol);
 
 /// Sets the identifier of the class which declared a given \p symbol to \p
 /// declaring_class.
@@ -185,7 +188,7 @@ void set_declaring_class(symbolt &symbol, const irep_idt &declaring_class);
 /// Get JVM type name of the class in which \p method_name is defined.
 /// Returns an empty optional if the class name cannot be retrieved,
 /// e.g. method_name is an internal function.
-NODISCARD optionalt<std::string>
+[[nodiscard]] std::optional<std::string>
 class_name_from_method_name(const std::string &method_name);
 
 #endif // CPROVER_JAVA_BYTECODE_JAVA_UTILS_H

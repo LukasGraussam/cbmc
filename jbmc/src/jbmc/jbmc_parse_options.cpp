@@ -13,14 +13,13 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include <util/config.h>
 #include <util/exit_codes.h>
+#include <util/help_formatter.h>
 #include <util/invariant.h>
-#include <util/make_unique.h>
 #include <util/version.h>
 #include <util/xml.h>
 
 #include <goto-programs/adjust_float_expressions.h>
 #include <goto-programs/goto_check.h>
-#include <goto-programs/goto_convert_functions.h>
 #include <goto-programs/instrument_preconditions.h>
 #include <goto-programs/loop_ids.h>
 #include <goto-programs/remove_returns.h>
@@ -33,6 +32,7 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <goto-programs/show_symbol_table.h>
 
 #include <ansi-c/ansi_c_language.h>
+#include <ansi-c/goto-conversion/goto_convert_functions.h>
 #include <goto-checker/all_properties_verifier.h>
 #include <goto-checker/all_properties_verifier_with_fault_localization.h>
 #include <goto-checker/all_properties_verifier_with_trace_storage.h>
@@ -187,6 +187,9 @@ void jbmc_parse_optionst::get_command_line_options(optionst &options)
   {
     options.set_option(
       "symex-complexity-limit", cmdline.get_value("symex-complexity-limit"));
+    log.warning() << "**** WARNING: Complexity-limited analysis may yield "
+                     "unsound verification results"
+                  << messaget::eom;
   }
 
   if(cmdline.isset("symex-complexity-failed-child-loops-limit"))
@@ -194,18 +197,50 @@ void jbmc_parse_optionst::get_command_line_options(optionst &options)
     options.set_option(
       "symex-complexity-failed-child-loops-limit",
       cmdline.get_value("symex-complexity-failed-child-loops-limit"));
+    if(!cmdline.isset("symex-complexity-limit"))
+    {
+      log.warning() << "**** WARNING: Complexity-limited analysis may yield "
+                       "unsound verification results"
+                    << messaget::eom;
+    }
   }
 
+  // generate unwinding assertions
+  options.set_option(
+    "unwinding-assertions",
+    cmdline.isset("unwinding-assertions") ||
+      !cmdline.isset("no-unwinding-assertions"));
+
   if(cmdline.isset("unwind"))
+  {
     options.set_option("unwind", cmdline.get_value("unwind"));
+    if(!options.get_bool_option("unwinding-assertions"))
+    {
+      log.warning() << "**** WARNING: Use --unwinding-assertions to obtain "
+                       "sound verification results"
+                    << messaget::eom;
+    }
+  }
 
   if(cmdline.isset("depth"))
+  {
     options.set_option("depth", cmdline.get_value("depth"));
+    log.warning()
+      << "**** WARNING: Depth-bounded analysis may yield unsound verification "
+         "results"
+      << messaget::eom;
+  }
 
   if(cmdline.isset("unwindset"))
   {
     options.set_option(
       "unwindset", cmdline.get_comma_separated_values("unwindset"));
+    if(!options.get_bool_option("unwinding-assertions"))
+    {
+      log.warning() << "**** WARNING: Use --unwinding-assertions to obtain "
+                       "sound verification results"
+                    << messaget::eom;
+    }
   }
 
   // constant propagation
@@ -229,14 +264,14 @@ void jbmc_parse_optionst::get_command_line_options(optionst &options)
   if(cmdline.isset("no-assumptions"))
     options.set_option("assumptions", false);
 
-  // generate unwinding assertions
-  if(cmdline.isset("unwinding-assertions"))
-    options.set_option("unwinding-assertions", true);
-
   // generate unwinding assumptions otherwise
-  options.set_option(
-    "partial-loops",
-    cmdline.isset("partial-loops"));
+  if(cmdline.isset("partial-loops"))
+  {
+    options.set_option("partial-loops", true);
+    log.warning()
+      << "**** WARNING: --partial-loops may yield unsound verification results"
+      << messaget::eom;
+  }
 
   // remove unused equations
   options.set_option(
@@ -419,18 +454,18 @@ int jbmc_parse_optionst::doit()
   {
     std::unique_ptr<languaget> language = get_language_from_mode(ID_java);
     CHECK_RETURN(language != nullptr);
-    language->set_language_options(options);
-    language->set_message_handler(ui_message_handler);
+    language->set_language_options(options, ui_message_handler);
 
     log.status() << "Parsing ..." << messaget::eom;
 
-    if(static_cast<java_bytecode_languaget *>(language.get())->parse())
+    std::istringstream unused;
+    if(language.get()->parse(unused, "", ui_message_handler))
     {
       log.error() << "PARSING ERROR" << messaget::eom;
       return CPROVER_EXIT_PARSE_ERROR;
     }
 
-    language->show_parse(std::cout);
+    language->show_parse(std::cout, ui_message_handler);
     return CPROVER_EXIT_SUCCESS;
   }
 
@@ -501,7 +536,7 @@ int jbmc_parse_optionst::doit()
     options.get_bool_option("stop-on-fail") && options.get_bool_option("paths"))
   {
     verifier =
-      util_make_unique<stop_on_fail_verifiert<java_single_path_symex_checkert>>(
+      std::make_unique<stop_on_fail_verifiert<java_single_path_symex_checkert>>(
         options, ui_message_handler, *goto_model_ptr);
   }
   else if(
@@ -511,13 +546,13 @@ int jbmc_parse_optionst::doit()
     if(options.get_bool_option("localize-faults"))
     {
       verifier =
-        util_make_unique<stop_on_fail_verifier_with_fault_localizationt<
+        std::make_unique<stop_on_fail_verifier_with_fault_localizationt<
           java_multi_path_symex_checkert>>(
           options, ui_message_handler, *goto_model_ptr);
     }
     else
     {
-      verifier = util_make_unique<
+      verifier = std::make_unique<
         stop_on_fail_verifiert<java_multi_path_symex_checkert>>(
         options, ui_message_handler, *goto_model_ptr);
     }
@@ -526,7 +561,7 @@ int jbmc_parse_optionst::doit()
     !options.get_bool_option("stop-on-fail") &&
     options.get_bool_option("paths"))
   {
-    verifier = util_make_unique<all_properties_verifier_with_trace_storaget<
+    verifier = std::make_unique<all_properties_verifier_with_trace_storaget<
       java_single_path_symex_checkert>>(
       options, ui_message_handler, *goto_model_ptr);
   }
@@ -537,13 +572,13 @@ int jbmc_parse_optionst::doit()
     if(options.get_bool_option("localize-faults"))
     {
       verifier =
-        util_make_unique<all_properties_verifier_with_fault_localizationt<
+        std::make_unique<all_properties_verifier_with_fault_localizationt<
           java_multi_path_symex_checkert>>(
           options, ui_message_handler, *goto_model_ptr);
     }
     else
     {
-      verifier = util_make_unique<all_properties_verifier_with_trace_storaget<
+      verifier = std::make_unique<all_properties_verifier_with_trace_storaget<
         java_multi_path_symex_checkert>>(
         options, ui_message_handler, *goto_model_ptr);
     }
@@ -569,7 +604,7 @@ int jbmc_parse_optionst::get_goto_program(
   lazy_goto_model.initialize(cmdline.args, options);
 
   class_hierarchy =
-    util_make_unique<class_hierarchyt>(lazy_goto_model.symbol_table);
+    std::make_unique<class_hierarchyt>(lazy_goto_model.symbol_table);
 
   // Show the class hierarchy
   if(cmdline.isset("show-class-hierarchy"))
@@ -593,12 +628,16 @@ int jbmc_parse_optionst::get_goto_program(
 
     // Move the model out of the local lazy_goto_model
     // and into the caller's goto_model
-    goto_model_ptr = lazy_goto_modelt::process_whole_model_and_freeze(
-      std::move(lazy_goto_model));
-    if(goto_model_ptr == nullptr)
+    auto final_goto_model_ptr =
+      lazy_goto_modelt::process_whole_model_and_freeze(
+        std::move(lazy_goto_model));
+    if(final_goto_model_ptr == nullptr)
       return CPROVER_EXIT_INTERNAL_ERROR;
 
-    goto_modelt &goto_model = dynamic_cast<goto_modelt &>(*goto_model_ptr);
+    goto_modelt &goto_model = *final_goto_model_ptr;
+    goto_model_ptr =
+      std::unique_ptr<abstract_goto_modelt>(final_goto_model_ptr.get());
+    final_goto_model_ptr.release();
 
     if(cmdline.isset("validate-goto-model"))
     {
@@ -628,7 +667,7 @@ int jbmc_parse_optionst::get_goto_program(
     }
 
     goto_model_ptr =
-      util_make_unique<lazy_goto_modelt>(std::move(lazy_goto_model));
+      std::make_unique<lazy_goto_modelt>(std::move(lazy_goto_model));
   }
 
   log.status() << config.object_bits_info() << messaget::eom;
@@ -858,11 +897,16 @@ bool jbmc_parse_optionst::process_goto_functions(
   // full slice?
   if(cmdline.isset("full-slice"))
   {
+    log.warning() << "**** WARNING: Experimental option --full-slice, "
+                  << "analysis results may be unsound. See "
+                  << "https://github.com/diffblue/cbmc/issues/260"
+                  << messaget::eom;
     log.status() << "Performing a full slice" << messaget::eom;
     if(cmdline.isset("property"))
-      property_slicer(goto_model, cmdline.get_values("property"));
+      property_slicer(
+        goto_model, cmdline.get_values("property"), ui_message_handler);
     else
-      full_slicer(goto_model);
+      full_slicer(goto_model, ui_message_handler);
   }
 
   // remove any skips introduced
@@ -923,18 +967,20 @@ void jbmc_parse_optionst::help()
             << align_center_with_border("Copyright (C) 2001-2018") << '\n'
             << align_center_with_border("Daniel Kroening, Edmund Clarke") << '\n' // NOLINT(*)
             << align_center_with_border("Carnegie Mellon University, Computer Science Department") << '\n' // NOLINT(*)
-            << align_center_with_border("kroening@kroening.com") << '\n'
-            << "\n"
-    "Usage:                       Purpose:\n"
+            << align_center_with_border("kroening@kroening.com") << '\n';
+
+  std::cout << help_formatter(
     "\n"
-    " jbmc [-?] [-h] [--help]      show help\n"
-    " jbmc\n"
+    "Usage:                     \tPurpose:\n"
+    "\n"
+    " {bjbmc} [{y-?}] [{y-h}] [{y--help}] \t show this help\n"
+    " {bjbmc}\n"
     HELP_JAVA_METHOD_NAME
-    " jbmc\n"
+    " {bjbmc}\n"
     HELP_JAVA_CLASS_NAME
-    " jbmc\n"
+    " {bjbmc}\n"
     HELP_JAVA_JAR
-    " jbmc\n"
+    " {bjbmc}\n"
     HELP_JAVA_GOTO_BINARY
     "\n"
     HELP_JAVA_CLASSPATH
@@ -942,50 +988,50 @@ void jbmc_parse_optionst::help()
     "\n"
     "Analysis options:\n"
     HELP_SHOW_PROPERTIES
-    " --symex-coverage-report f    generate a Cobertura XML coverage report in f\n" // NOLINT(*)
-    " --property id                only check one specific property\n"
-    " --trace                      give a counterexample trace for failed properties\n" //NOLINT(*)
-    " --stop-on-fail               stop analysis once a failed property is detected\n" // NOLINT(*)
-    "                              (implies --trace)\n"
-    " --localize-faults            localize faults (experimental)\n"
+    " {y--symex-coverage-report} {uf} \t generate a Cobertura XML coverage"
+    " report in {uf}\n"
+    " {y--property} {uid} \t only check one specific property\n"
+    " {y--trace} \t give a counterexample trace for failed properties\n"
+    " {y--stop-on-fail} \t stop analysis once a failed property is detected"
+    " (implies {y--trace})\n"
+    " {y--localize-faults} \t localize faults (experimental)\n"
     HELP_JAVA_TRACE_VALIDATION
     "\n"
     "Platform options:\n"
     HELP_CONFIG_PLATFORM
     "\n"
     "Program representations:\n"
-    " --show-parse-tree            show parse tree\n"
-    " --show-symbol-table          show loaded symbol table\n"
-    " --list-symbols               list symbols with type information\n"
+    " {y--show-parse-tree} \t show parse tree\n"
+    " {y--show-symbol-table} \t show loaded symbol table\n"
+    " {y--list-symbols} \t list symbols with type information\n"
     HELP_SHOW_GOTO_FUNCTIONS
-    " --drop-unused-functions      drop functions trivially unreachable\n"
-    "                              from main function\n"
+    " {y--drop-unused-functions} \t drop functions trivially unreachable"
+    " from main function\n"
     HELP_SHOW_CLASS_HIERARCHY
     "\n"
     "Program instrumentation options:\n"
-    " --no-assertions              ignore user assertions\n"
-    " --no-assumptions             ignore user assumptions\n"
-    " --mm MM                      memory consistency model for concurrent programs\n" // NOLINT(*)
+    " {y--no-assertions} \t ignore user assertions\n"
+    " {y--no-assumptions} \t ignore user assumptions\n"
+    " {y--mm} {uMM} \t memory consistency model for concurrent programs\n"
     HELP_REACHABILITY_SLICER
-    HELP_REACHABILITY_SLICER_FB
-    " --full-slice                 run full slicer (experimental)\n" // NOLINT(*)
+    " {y--full-slice} \t run full slicer (experimental)\n"
     "\n"
     "Java Bytecode frontend options:\n"
     JAVA_BYTECODE_LANGUAGE_OPTIONS_HELP
     // This one is handled by jbmc_parse_options not by the Java frontend,
     // hence its presence here:
-    " --java-threading             enable java multi-threading support (experimental)\n" // NOLINT(*)
-    " --java-unwind-enum-static    unwind loops in static initialization of enums\n" // NOLINT(*)
-    // Currently only supported in the JBMC frontend:
-    " --symex-driven-lazy-loading  only load functions when first entered by symbolic\n" // NOLINT(*)
-    "                              execution. Note that --show-symbol-table,\n"
-    "                              --show-goto-functions/properties output\n"
-    "                              will be restricted to loaded methods in this case,\n" // NOLINT(*)
-    "                              and only output after the symex phase.\n"
+    " {y--java-threading} \t enable java multi-threading support"
+    " (experimental)\n"
+    " {y--java-unwind-enum-static} \t unwind loops in static initialization of"
+    " enums\n"
+    " {y--symex-driven-lazy-loading} \t only load functions when first entered"
+    " by symbolic execution. Note that {y--show-symbol-table},"
+    " {y--show-goto-functions}, {y--show-properties} output will be restricted"
+    " to loaded methods in this case, and only output after the symex phase.\n"
     "\n"
     "Semantic transformations:\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --nondet-static              add nondeterministic initialization of variables with static lifetime\n"
+    " {y--nondet-static} \t add nondeterministic initialization of variables"
+    " with static lifetime\n"
     "\n"
     "BMC options:\n"
     HELP_BMC
@@ -994,18 +1040,19 @@ void jbmc_parse_optionst::help()
     HELP_CONFIG_BACKEND
     HELP_SOLVER
     HELP_STRING_REFINEMENT
-    " --arrays-uf-never            never turn arrays into uninterpreted functions\n" // NOLINT(*)
-    " --arrays-uf-always           always turn arrays into uninterpreted functions\n" // NOLINT(*)
+    " {y--arrays-uf-never} \t never turn arrays into uninterpreted functions\n"
+    " {y--arrays-uf-always} \t always turn arrays into uninterpreted"
+    " functions\n"
     "\n"
     "Other options:\n"
-    " --version                    show version and exit\n"
+    " {y--version} \t show version and exit\n"
     HELP_XML_INTERFACE
     HELP_JSON_INTERFACE
     HELP_VALIDATE
     HELP_GOTO_TRACE
     HELP_FLUSH
-    " --verbosity #                verbosity level\n"
+    " {y--verbosity} {u#} \t verbosity level\n"
     HELP_TIMESTAMP
-    "\n";
+    "\n");
   // clang-format on
 }

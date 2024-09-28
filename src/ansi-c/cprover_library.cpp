@@ -98,7 +98,8 @@ std::string get_cprover_library_text(
 
 void cprover_c_library_factory(
   const std::set<irep_idt> &functions,
-  symbol_table_baset &symbol_table,
+  const symbol_table_baset &symbol_table,
+  symbol_table_baset &dest_symbol_table,
   message_handlert &message_handler)
 {
   if(config.ansi_c.lib==configt::ansi_ct::libt::LIB_NONE)
@@ -107,7 +108,7 @@ void cprover_c_library_factory(
   std::string library_text =
     get_cprover_library_text(functions, symbol_table, false);
 
-  add_library(library_text, symbol_table, message_handler);
+  add_library(library_text, dest_symbol_table, message_handler);
 }
 
 void add_library(
@@ -122,10 +123,10 @@ void add_library(
   std::istringstream in(src);
 
   ansi_c_languaget ansi_c_language;
-  ansi_c_language.set_message_handler(message_handler);
-  ansi_c_language.parse(in, "");
+  ansi_c_language.parse(in, "", message_handler);
 
-  ansi_c_language.typecheck(symbol_table, "<built-in-library>", true, keep);
+  ansi_c_language.typecheck(
+    symbol_table, "<built-in-library>", message_handler, true, keep);
 }
 
 void cprover_c_library_factory_force_load(

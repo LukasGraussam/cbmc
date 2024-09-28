@@ -13,11 +13,10 @@ Author: Remi Delmas, delmasrd@amazon.com
 #ifndef CPROVER_GOTO_INSTRUMENT_CONTRACTS_DYNAMIC_FRAMES_DFCC_WRAPPER_PROGRAM_H
 #define CPROVER_GOTO_INSTRUMENT_CONTRACTS_DYNAMIC_FRAMES_DFCC_WRAPPER_PROGRAM_H
 
-#include <goto-programs/goto_convert_class.h>
+#include <ansi-c/goto-conversion/goto_convert_class.h>
 
 #include <util/message.h>
 #include <util/namespace.h>
-#include <util/optional.h>
 #include <util/std_expr.h>
 
 #include "dfcc_contract_functions.h"
@@ -30,7 +29,7 @@ class messaget;
 class message_handlert;
 class dfcc_instrumentt;
 class dfcc_libraryt;
-class dfcc_utilst;
+class dfcc_lift_memory_predicatest;
 class code_with_contract_typet;
 class conditional_target_group_exprt;
 
@@ -105,9 +104,11 @@ public:
   /// to the wrapper function by its caller.
   /// \param goto_model the goto model being transformed
   /// \param message_handler used for debug/warning/error messages
-  /// \param utils utility functions for contracts transformation
   /// \param library the contracts instrumentation library
   /// \param instrument the instrumenter class for goto functions/goto programs
+  /// \param memory_predicates handler for user-defed memory predicates, used to
+  /// adjust call parameters for user defined predicates used in requires and
+  /// ensures clauses.
   dfcc_wrapper_programt(
     const dfcc_contract_modet contract_mode,
     const symbolt &wrapper_symbol,
@@ -116,9 +117,9 @@ public:
     const symbolt &caller_write_set_symbol,
     goto_modelt &goto_model,
     message_handlert &message_handler,
-    dfcc_utilst &utils,
     dfcc_libraryt &library,
-    dfcc_instrumentt &instrument);
+    dfcc_instrumentt &instrument,
+    dfcc_lift_memory_predicatest &memory_predicates);
 
   /// Adds the whole program to `dest` and the discovered function pointer
   /// contracts `dest_fp_contracts`.
@@ -137,7 +138,7 @@ protected:
   const source_locationt wrapper_sl;
 
   /// Symbol for the return value of the wrapped function
-  optionalt<symbol_exprt> return_value_opt;
+  std::optional<symbol_exprt> return_value_opt;
 
   /// Symbol for the write set object derived from the contract
   const symbol_exprt contract_write_set;
@@ -170,9 +171,9 @@ protected:
   goto_modelt &goto_model;
   message_handlert &message_handler;
   messaget log;
-  dfcc_utilst &utils;
   dfcc_libraryt &library;
   dfcc_instrumentt &instrument;
+  dfcc_lift_memory_predicatest &memory_predicates;
   namespacet ns;
   goto_convertt converter;
 
@@ -218,7 +219,7 @@ protected:
   /// (populated by calling functions provided in contract_functions)
   /// - Adds declaration of write set and pointer to write set to \ref preamble
   /// - Adds initialisation function call in \ref write_set_checks
-  /// - Adds contract::assigns and contract::frees function call
+  /// - Adds contract::c_assigns and contract::frees function call
   /// in \ref write_set_checks
   /// - Adds release function call in \ref postamble
   void encode_contract_write_set();

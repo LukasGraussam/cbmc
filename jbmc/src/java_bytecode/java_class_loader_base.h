@@ -10,9 +10,10 @@ Author: Daniel Kroening, kroening@kroening.com
 #define CPROVER_JAVA_BYTECODE_JAVA_CLASS_LOADER_BASE_H
 
 #include <util/irep.h>
-#include <util/optional.h>
 
 #include "jar_pool.h"
+
+#include <list>
 
 class message_handlert;
 struct java_bytecode_parse_treet;
@@ -58,19 +59,19 @@ protected:
   std::list<classpath_entryt> classpath_entries;
 
   /// attempt to load a class from a classpath_entry
-  optionalt<java_bytecode_parse_treet> load_class(
+  std::optional<java_bytecode_parse_treet> load_class(
     const irep_idt &class_name,
     const classpath_entryt &,
     message_handlert &);
 
   /// attempt to load a class from a given jar file
-  optionalt<java_bytecode_parse_treet> get_class_from_jar(
+  std::optional<java_bytecode_parse_treet> get_class_from_jar(
     const irep_idt &class_name,
     const std::string &jar_file,
     message_handlert &);
 
   /// attempt to load a class from a given directory
-  optionalt<java_bytecode_parse_treet> get_class_from_directory(
+  std::optional<java_bytecode_parse_treet> get_class_from_directory(
     const irep_idt &class_name,
     const std::string &path,
     message_handlert &);

@@ -4,6 +4,7 @@ SRC = jbmc_main.cpp \
 
 OBJ += ../$(CPROVER_DIR)/src/ansi-c/ansi-c$(LIBEXT) \
       ../java_bytecode/java_bytecode$(LIBEXT) \
+      ../$(CPROVER_DIR)/src/assembler/assembler$(LIBEXT) \
       ../$(CPROVER_DIR)/src/linking/linking$(LIBEXT) \
       ../$(CPROVER_DIR)/src/big-int/big-int$(LIBEXT) \
       ../$(CPROVER_DIR)/src/goto-checker/goto-checker$(LIBEXT) \
@@ -15,7 +16,6 @@ OBJ += ../$(CPROVER_DIR)/src/ansi-c/ansi-c$(LIBEXT) \
       ../$(CPROVER_DIR)/src/pointer-analysis/value_set_fi$(OBJEXT) \
       ../$(CPROVER_DIR)/src/pointer-analysis/value_set_dereference$(OBJEXT) \
       ../$(CPROVER_DIR)/src/pointer-analysis/add_failed_symbols$(OBJEXT) \
-      ../$(CPROVER_DIR)/src/pointer-analysis/rewrite_index$(OBJEXT) \
       ../$(CPROVER_DIR)/src/pointer-analysis/goto_program_dereference$(OBJEXT) \
       ../$(CPROVER_DIR)/src/goto-instrument/full_slicer$(OBJEXT) \
       ../$(CPROVER_DIR)/src/goto-instrument/reachability_slicer$(OBJEXT) \

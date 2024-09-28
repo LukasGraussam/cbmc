@@ -188,11 +188,15 @@ protected:
 
     /* previous nodes (fwd analysis) */
     typedef std::pair<event_idt, event_idt> nodet;
-    typedef std::map<goto_programt::const_targett, std::set<nodet> >
+    typedef std::map<
+      goto_programt::const_targett,
+      std::set<nodet>,
+      goto_programt::target_less_than>
       incoming_post;
 
     incoming_post in_pos;
-    std::set<goto_programt::const_targett> updated;
+    std::set<goto_programt::const_targett, goto_programt::target_less_than>
+      updated;
 
     /* "next nodes" (bwd steps in fwd/bck analysis) */
     incoming_post out_pos;
@@ -409,10 +413,10 @@ public:
   /* sets rendering options */
   void set_rendering_options(bool aligned, bool file, bool function)
   {
+    PRECONDITION(!file || !function);
     render_po_aligned = aligned;
     render_by_file = file;
     render_by_function = function;
-    assert(!render_by_file || !render_by_function);
   }
 
   /* prints outputs:

@@ -6,10 +6,6 @@ Author: Chris Smowton, chris.smowton@diffblue.com
 
 \*******************************************************************/
 
-#include <testing-utils/call_graph_test_utils.h>
-#include <testing-utils/message.h>
-#include <testing-utils/use_catch.h>
-
 #include <util/arith_tools.h>
 #include <util/c_types.h>
 #include <util/std_code.h>
@@ -17,17 +13,20 @@ Author: Chris Smowton, chris.smowton@diffblue.com
 
 #include <analyses/dependence_graph.h>
 #include <ansi-c/ansi_c_language.h>
-#include <goto-programs/goto_convert_functions.h>
+#include <ansi-c/goto-conversion/goto_convert_functions.h>
 #include <langapi/mode.h>
+#include <testing-utils/call_graph_test_utils.h>
+#include <testing-utils/message.h>
+#include <testing-utils/use_catch.h>
 
-const std::set<goto_programt::const_targett>&
-    dependence_graph_test_get_control_deps(const dep_graph_domaint &domain)
+const std::set<goto_programt::const_targett, goto_programt::target_less_than> &
+dependence_graph_test_get_control_deps(const dep_graph_domaint &domain)
 {
   return domain.control_deps;
 }
 
-const std::set<goto_programt::const_targett>&
-    dependence_graph_test_get_data_deps(const dep_graph_domaint &domain)
+const std::set<goto_programt::const_targett, goto_programt::target_less_than> &
+dependence_graph_test_get_data_deps(const dep_graph_domaint &domain)
 {
   return domain.data_deps;
 }
@@ -53,10 +52,9 @@ SCENARIO("dependence_graph", "[core][analyses][dependence_graph]")
 
     typet int_type = signed_int_type();
 
-    symbolt x_symbol;
-    x_symbol.name = id2string(goto_functionst::entry_point()) + "::x";
+    symbolt x_symbol{
+      id2string(goto_functionst::entry_point()) + "::x", int_type, ID_C};
     x_symbol.base_name = "x";
-    x_symbol.type = int_type;
     x_symbol.is_lvalue = true;
     x_symbol.is_state_var = true;
     x_symbol.is_thread_local = true;
@@ -88,7 +86,7 @@ SCENARIO("dependence_graph", "[core][analyses][dependence_graph]")
 
     WHEN("Constructing a dependence graph")
     {
-      dependence_grapht dep_graph(ns);
+      dependence_grapht dep_graph(ns, null_message_handler);
       dep_graph(goto_model.goto_functions, ns);
 
       THEN("The function call and assignment instructions "
@@ -113,9 +111,13 @@ SCENARIO("dependence_graph", "[core][analyses][dependence_graph]")
         {
           const dep_nodet &node = dep_graph[node_idx];
           const dep_graph_domaint &node_domain = dep_graph[node.PC];
-          const std::set<goto_programt::const_targett> &control_deps =
+          const std::set<
+            goto_programt::const_targett,
+            goto_programt::target_less_than> &control_deps =
             dependence_graph_test_get_control_deps(node_domain);
-          const std::set<goto_programt::const_targett> &data_deps =
+          const std::set<
+            goto_programt::const_targett,
+            goto_programt::target_less_than> &data_deps =
             dependence_graph_test_get_data_deps(node_domain);
 
           std::size_t domain_dep_count =

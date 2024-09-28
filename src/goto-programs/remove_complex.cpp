@@ -68,9 +68,11 @@ static bool have_to_remove_complex(const exprt &expr)
   if(have_to_remove_complex(expr.type()))
      return true;
 
-  forall_operands(it, expr)
-    if(have_to_remove_complex(*it))
+  for(const auto &op : expr.operands())
+  {
+    if(have_to_remove_complex(op))
       return true;
+  }
 
   return false;
 }
@@ -125,13 +127,10 @@ static void remove_complex(exprt &expr)
 
   if(expr.type().id()==ID_complex)
   {
-    if(expr.id()==ID_plus || expr.id()==ID_minus ||
-       expr.id()==ID_mult || expr.id()==ID_div)
+    if(expr.id() == ID_plus || expr.id() == ID_minus)
     {
-      // FIXME plus and mult are defined as n-ary operations
-      //      rather than binary. This code assumes that they
-      //      can only have exactly 2 operands, and it is not clear
-      //      that it is safe to do so in this context
+      // plus and mult are n-ary expressions, but front-ends currently ensure
+      // that we only see them as binary ones
       PRECONDITION(expr.operands().size() == 2);
       // do component-wise:
       // x+y -> complex(x.r+y.r,x.i+y.i)
@@ -150,6 +149,53 @@ static void remove_complex(exprt &expr)
       struct_expr.op1().add_source_location()=expr.source_location();
 
       expr=struct_expr;
+    }
+    else if(expr.id() == ID_mult)
+    {
+      // plus and mult are n-ary expressions, but front-ends currently ensure
+      // that we only see them as binary ones
+      PRECONDITION(expr.operands().size() == 2);
+      exprt lhs_real = complex_member(to_binary_expr(expr).op0(), ID_real);
+      exprt lhs_imag = complex_member(to_binary_expr(expr).op0(), ID_imag);
+      exprt rhs_real = complex_member(to_binary_expr(expr).op1(), ID_real);
+      exprt rhs_imag = complex_member(to_binary_expr(expr).op1(), ID_imag);
+
+      struct_exprt struct_expr{
+        {minus_exprt{
+           mult_exprt{lhs_real, rhs_real}, mult_exprt{lhs_imag, rhs_imag}},
+         plus_exprt{
+           mult_exprt{lhs_imag, rhs_real}, mult_exprt{lhs_real, rhs_imag}}},
+        expr.type()};
+
+      struct_expr.op0().add_source_location() = expr.source_location();
+      struct_expr.op1().add_source_location() = expr.source_location();
+
+      expr = struct_expr;
+    }
+    else if(expr.id() == ID_div)
+    {
+      exprt lhs_real = complex_member(to_binary_expr(expr).op0(), ID_real);
+      exprt lhs_imag = complex_member(to_binary_expr(expr).op0(), ID_imag);
+      exprt rhs_real = complex_member(to_binary_expr(expr).op1(), ID_real);
+      exprt rhs_imag = complex_member(to_binary_expr(expr).op1(), ID_imag);
+
+      plus_exprt numerator_real{
+        mult_exprt{lhs_real, rhs_real}, mult_exprt{lhs_imag, rhs_imag}};
+      minus_exprt numerator_imag{
+        mult_exprt{lhs_imag, rhs_real}, mult_exprt{lhs_real, rhs_imag}};
+
+      plus_exprt denominator{
+        mult_exprt{rhs_real, rhs_real}, mult_exprt{rhs_imag, rhs_imag}};
+
+      struct_exprt struct_expr{
+        {div_exprt{numerator_real, denominator},
+         div_exprt{numerator_imag, denominator}},
+        expr.type()};
+
+      struct_expr.op0().add_source_location() = expr.source_location();
+      struct_expr.op1().add_source_location() = expr.source_location();
+
+      expr = struct_expr;
     }
     else if(expr.id()==ID_unary_minus)
     {
@@ -273,10 +319,10 @@ static void remove_complex(symbolt &symbol)
 }
 
 /// removes complex data type
-void remove_complex(symbol_tablet &symbol_table)
+static void remove_complex(symbol_table_baset &symbol_table)
 {
-  for(const auto &named_symbol : symbol_table.symbols)
-    remove_complex(symbol_table.get_writeable_ref(named_symbol.first));
+  for(auto it = symbol_table.begin(); it != symbol_table.end(); ++it)
+    remove_complex(it.get_writeable_symbol());
 }
 
 /// removes complex data type
@@ -284,7 +330,7 @@ static void remove_complex(
   goto_functionst::goto_functiont &goto_function)
 {
   for(auto &i : goto_function.body.instructions)
-    i.transform([](exprt e) -> optionalt<exprt> {
+    i.transform([](exprt e) -> std::optional<exprt> {
       if(have_to_remove_complex(e))
       {
         remove_complex(e);
@@ -304,7 +350,7 @@ static void remove_complex(goto_functionst &goto_functions)
 
 /// removes complex data type
 void remove_complex(
-  symbol_tablet &symbol_table,
+  symbol_table_baset &symbol_table,
   goto_functionst &goto_functions)
 {
   remove_complex(symbol_table);

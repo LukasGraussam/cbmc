@@ -67,8 +67,7 @@ public:
         continue;
 
       const irep_idt mangled = mangle_fun(sym, extra_info);
-      symbolt new_sym;
-      new_sym = sym;
+      symbolt new_sym = sym;
       new_sym.name = mangled;
       new_sym.base_name = mangled;
       if(new_sym.pretty_name.empty())
@@ -89,16 +88,17 @@ public:
     for(const auto &sym : old_syms)
       model.symbol_table.erase(sym);
 
-    for(const auto &sym_pair : model.symbol_table)
+    for(auto it = model.symbol_table.begin(); it != model.symbol_table.end();
+        ++it)
     {
-      const symbolt &sym = sym_pair.second;
+      const symbolt &sym = it->second;
 
       exprt e = sym.value;
       typet t = sym.type;
       if(rename(e) && rename(t))
         continue;
 
-      symbolt &new_sym = model.symbol_table.get_writeable_ref(sym.name);
+      symbolt &new_sym = it.get_writeable_symbol();
       new_sym.value = e;
       new_sym.type = t;
     }

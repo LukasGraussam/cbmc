@@ -14,13 +14,11 @@ typedef void *HANDLE;                                    // NOLINT
 #endif
 
 #include "message.h"
-#include "nodiscard.h"
-#include "optional.h"
 
 #include <vector>
 
 #define PIPED_PROCESS_INFINITE_TIMEOUT                                         \
-  optionalt<std::size_t>                                                       \
+  std::optional<std::size_t>                                                   \
   {                                                                            \
   }
 
@@ -45,7 +43,7 @@ public:
   /// Send a string message (command) to the child process.
   /// \param message The string message to be sent.
   /// \return
-  NODISCARD send_responset send(const std::string &message);
+  [[nodiscard]] send_responset send(const std::string &message);
   /// Read a string from the child process' output.
   /// \return a string containing data from the process, empty string if no data
   std::string receive();
@@ -64,7 +62,7 @@ public:
   ///        * 0 signifying non-blocking immediate return, and
   ///        * an empty optional representing infinite wait time.
   /// \return true is there is data to read from process, false otherwise
-  bool can_receive(optionalt<std::size_t> wait_time);
+  bool can_receive(std::optional<std::size_t> wait_time);
 
   /// See if this process can receive data from the other process.
   /// Note this calls can_receive(0);

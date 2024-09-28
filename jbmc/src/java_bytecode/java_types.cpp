@@ -6,17 +6,17 @@ Author: Daniel Kroening, kroening@kroening.com
 
 \*******************************************************************/
 
-#include <cctype>
-#include <iterator>
+#include "java_types.h"
 
-#include <util/prefix.h>
 #include <util/c_types.h>
-#include <util/std_expr.h>
 #include <util/ieee_float.h>
 #include <util/invariant.h>
+#include <util/std_expr.h>
 
-#include "java_types.h"
 #include "java_utils.h"
+
+#include <cctype>
+#include <iterator>
 
 #ifdef DEBUG
 #include <iostream>
@@ -232,7 +232,7 @@ exprt get_array_element_type_field(const exprt &pointer)
 ///   of java::array[
 bool is_java_array_tag(const irep_idt& tag)
 {
-  return has_prefix(id2string(tag), "java::array[");
+  return tag.starts_with("java::array[");
 }
 
 /// Constructs a type indicated by the given character:
@@ -558,7 +558,7 @@ java_reference_typet java_reference_array_type(const struct_tag_typet &subtype)
 /// \param class_name_prefix: name of class to append to generic type
 ///   variables/parameters
 /// \return internal type representation for GOTO programs
-optionalt<typet> java_type_from_string(
+std::optional<typet> java_type_from_string(
   const std::string &src,
   const std::string &class_name_prefix)
 {
@@ -1072,7 +1072,7 @@ java_generic_struct_tag_typet::java_generic_struct_tag_typet(
 /// in the vector of generic types.
 /// \param type: The parameter type we are looking for.
 /// \return The index of the type in the vector of generic types.
-optionalt<size_t> java_generic_struct_tag_typet::generic_type_index(
+std::optional<size_t> java_generic_struct_tag_typet::generic_type_index(
   const java_generic_parametert &type) const
 {
   const auto &type_variable = type.get_name();

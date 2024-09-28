@@ -83,7 +83,7 @@ constant_interval_exprt::plus(const constant_interval_exprt &o) const
 
   if(is_max(get_upper()) || is_max(o.get_upper()))
   {
-    upper = max_exprt(type());
+    upper = max_value_exprt(type());
   }
   else
   {
@@ -95,7 +95,7 @@ constant_interval_exprt::plus(const constant_interval_exprt &o) const
 
   if(is_min(get_lower()) || is_min(o.get_lower()))
   {
-    lower = min_exprt(type());
+    lower = min_value_exprt(type());
   }
   else
   {
@@ -165,10 +165,11 @@ constant_interval_exprt::modulo(const constant_interval_exprt &o) const
 
   // If the RHS is 1, or -1 (signed only), then return zero.
   if(
-    o == constant_interval_exprt(from_integer(1, o.type())) ||
-    (o.is_signed() && o == constant_interval_exprt(from_integer(-1, o.type()))))
+    o.is_single_value_interval() &&
+    (o.get_lower() == from_integer(1, o.type()) ||
+     (o.is_signed() && o.get_lower() == from_integer(-1, o.type()))))
   {
-    return constant_interval_exprt(zero());
+    return constant_interval_exprt::singleton(zero());
   }
 
   // If other might be modulo by zero, set everything to top.
@@ -179,7 +180,7 @@ constant_interval_exprt::modulo(const constant_interval_exprt &o) const
 
   if(is_zero())
   {
-    return constant_interval_exprt(zero());
+    return constant_interval_exprt::singleton(zero());
   }
 
   exprt lower = min();
@@ -221,7 +222,7 @@ tvt constant_interval_exprt::is_definitely_true() const
 
 tvt constant_interval_exprt::is_definitely_false() const
 {
-  if(type().id() == ID_bool)
+  if(is_boolean())
   {
     if(is_single_value_interval())
     {
@@ -233,12 +234,12 @@ tvt constant_interval_exprt::is_definitely_false() const
     }
   }
 
-  if(equal(constant_interval_exprt(zero())).is_true())
+  if(is_single_value_interval() && get_lower() == zero())
   {
     return tvt(true);
   }
 
-  if(contains(constant_interval_exprt(zero())))
+  if(contains(constant_interval_exprt::singleton(zero())))
   {
     INVARIANT(
       is_positive(get_upper()) || is_negative(get_lower()),
@@ -252,8 +253,8 @@ tvt constant_interval_exprt::is_definitely_false() const
 
 tvt constant_interval_exprt::logical_or(const constant_interval_exprt &o) const
 {
-  PRECONDITION(type().id() == ID_bool);
-  PRECONDITION(o.type().id() == ID_bool);
+  PRECONDITION(is_boolean());
+  PRECONDITION(o.is_boolean());
 
   tvt a = is_definitely_true();
   tvt b = o.is_definitely_true();
@@ -263,16 +264,16 @@ tvt constant_interval_exprt::logical_or(const constant_interval_exprt &o) const
 
 tvt constant_interval_exprt::logical_and(const constant_interval_exprt &o) const
 {
-  PRECONDITION(type().id() == ID_bool);
-  PRECONDITION(o.type().id() == ID_bool);
+  PRECONDITION(is_boolean());
+  PRECONDITION(o.is_boolean());
 
   return (is_definitely_true() && o.is_definitely_true());
 }
 
 tvt constant_interval_exprt::logical_xor(const constant_interval_exprt &o) const
 {
-  PRECONDITION(type().id() == ID_bool);
-  PRECONDITION(o.type().id() == ID_bool);
+  PRECONDITION(is_boolean());
+  PRECONDITION(o.is_boolean());
 
   return (
     (is_definitely_true() && !o.is_definitely_true()) ||
@@ -281,7 +282,7 @@ tvt constant_interval_exprt::logical_xor(const constant_interval_exprt &o) const
 
 tvt constant_interval_exprt::logical_not() const
 {
-  PRECONDITION(type().id() == ID_bool);
+  PRECONDITION(is_boolean());
 
   if(is_definitely_true().is_true())
   {
@@ -457,12 +458,14 @@ tvt constant_interval_exprt::not_equal(const constant_interval_exprt &o) const
 
 constant_interval_exprt constant_interval_exprt::increment() const
 {
-  return plus(constant_interval_exprt(from_integer(mp_integer(1), type())));
+  return plus(
+    constant_interval_exprt::singleton(from_integer(mp_integer(1), type())));
 }
 
 constant_interval_exprt constant_interval_exprt::decrement() const
 {
-  return minus(constant_interval_exprt(from_integer(mp_integer(1), type())));
+  return minus(
+    constant_interval_exprt::singleton(from_integer(mp_integer(1), type())));
 }
 
 constant_interval_exprt constant_interval_exprt::get_extremes(
@@ -556,11 +559,11 @@ exprt constant_interval_exprt::get_extreme(
   /* Return top */
   if(min_value)
   {
-    return min_exprt(type);
+    return min_value_exprt(type);
   }
   else
   {
-    return max_exprt(type);
+    return max_value_exprt(type);
   }
 
   UNREACHABLE;
@@ -648,8 +651,8 @@ void constant_interval_exprt::append_multiply_expression_max(
     collection.push_back(expr);
   else
   {
-    collection.push_back(max_exprt(expr));
-    collection.push_back(min_exprt(expr));
+    collection.push_back(max_value_exprt(expr));
+    collection.push_back(min_value_exprt(expr));
   }
 }
 
@@ -673,8 +676,8 @@ void constant_interval_exprt::append_multiply_expression_min(
     collection.push_back(other);
   else
   {
-    collection.push_back(min_exprt(min));
-    collection.push_back(max_exprt(min));
+    collection.push_back(min_value_exprt(min));
+    collection.push_back(max_value_exprt(min));
   }
 }
 
@@ -695,7 +698,7 @@ exprt constant_interval_exprt::generate_division_expression(
   {
     if(is_negative(rhs))
     {
-      return min_exprt(lhs);
+      return min_value_exprt(lhs);
     }
 
     return lhs;
@@ -705,7 +708,7 @@ exprt constant_interval_exprt::generate_division_expression(
   {
     if(is_negative(rhs))
     {
-      return max_exprt(lhs);
+      return max_value_exprt(lhs);
     }
 
     return lhs;
@@ -750,7 +753,7 @@ exprt constant_interval_exprt::generate_modulo_expression(
   {
     if(is_negative(rhs))
     {
-      return min_exprt(lhs);
+      return min_value_exprt(lhs);
     }
 
     return lhs;
@@ -760,7 +763,7 @@ exprt constant_interval_exprt::generate_modulo_expression(
   {
     if(is_negative(rhs))
     {
-      return max_exprt(lhs);
+      return max_value_exprt(lhs);
     }
 
     return lhs;
@@ -921,7 +924,7 @@ exprt constant_interval_exprt::generate_shift_expression(
 
   if(is_max(rhs))
   {
-    return min_exprt(rhs);
+    return min_value_exprt(rhs);
   }
 
   INVARIANT(
@@ -939,7 +942,7 @@ constant_interval_exprt::handle_constant_unary_expression(
   if(is_single_value_interval())
   {
     auto expr = unary_exprt(op, get_lower());
-    return constant_interval_exprt(simplified_expr(expr));
+    return constant_interval_exprt::singleton(simplified_expr(expr));
   }
   return top();
 }
@@ -951,7 +954,7 @@ constant_interval_exprt::handle_constant_binary_expression(
 {
   PRECONDITION(is_single_value_interval() && other.is_single_value_interval());
   auto expr = binary_exprt(get_lower(), op, other.get_lower());
-  return constant_interval_exprt(simplified_expr(expr));
+  return constant_interval_exprt::singleton(simplified_expr(expr));
 }
 
 exprt constant_interval_exprt::get_max(const exprt &a, const exprt &b)
@@ -1016,14 +1019,14 @@ constant_exprt constant_interval_exprt::zero() const
   return zero(type());
 }
 
-min_exprt constant_interval_exprt::min() const
+min_value_exprt constant_interval_exprt::min() const
 {
-  return min_exprt(type());
+  return min_value_exprt(type());
 }
 
-max_exprt constant_interval_exprt::max() const
+max_value_exprt constant_interval_exprt::max() const
 {
-  return max_exprt(type());
+  return max_value_exprt(type());
 }
 
 bool constant_interval_exprt::is_top() const
@@ -1044,7 +1047,7 @@ constant_interval_exprt constant_interval_exprt::top(const typet &type)
 
 constant_interval_exprt constant_interval_exprt::bottom(const typet &type)
 {
-  return constant_interval_exprt(max_exprt(type), min_exprt(type));
+  return constant_interval_exprt(max_value_exprt(type), min_value_exprt(type));
 }
 
 constant_interval_exprt constant_interval_exprt::top() const
@@ -1212,12 +1215,12 @@ bool constant_interval_exprt::has_no_lower_bound() const
 
 bool constant_interval_exprt::is_max(const exprt &expr)
 {
-  return expr.id() == ID_max;
+  return expr.id() == ID_max_value;
 }
 
 bool constant_interval_exprt::is_min(const exprt &expr)
 {
-  return expr.id() == ID_min;
+  return expr.id() == ID_min_value;
 }
 
 bool constant_interval_exprt::is_positive(const exprt &expr)
@@ -1298,7 +1301,7 @@ exprt constant_interval_exprt::abs(const exprt &expr)
 {
   if(is_signed(expr) && is_min(expr))
   {
-    return max_exprt(expr);
+    return max_value_exprt(expr);
   }
 
   if(is_max(expr) || is_unsigned(expr) || is_zero(expr) || is_positive(expr))
@@ -1623,7 +1626,7 @@ constant_interval_exprt::unary_minus(const constant_interval_exprt &a)
 constant_interval_exprt
 constant_interval_exprt::typecast(const typet &type) const
 {
-  if(this->type().id() == ID_bool && is_int(type))
+  if(is_boolean() && is_int(type))
   {
     bool lower = !has_no_lower_bound() && get_lower().is_true();
     bool upper = has_no_upper_bound() || get_upper().is_true();
@@ -1638,7 +1641,7 @@ constant_interval_exprt::typecast(const typet &type) const
   else
   {
     auto do_typecast = [&type](exprt e) {
-      if(e.id() == ID_min || e.id() == ID_max)
+      if(e.id() == ID_min_value || e.id() == ID_max_value)
       {
         e.type() = type;
       }
@@ -1826,16 +1829,16 @@ bool constant_interval_exprt::is_max(const constant_interval_exprt &a)
 
 bool constant_interval_exprt::contains_extreme(const exprt expr)
 {
-  forall_operands(it, expr)
+  for(const auto &op : expr.operands())
   {
-    if(is_extreme(*it))
+    if(is_extreme(op))
     {
       return true;
     }
 
-    if(it->has_operands())
+    if(op.has_operands())
     {
-      return contains_extreme(*it);
+      return contains_extreme(op);
     }
   }
 
@@ -1964,11 +1967,11 @@ constant_interval_exprt constant_interval_exprt::tvt_to_interval(const tvt &val)
 {
   if(val.is_true())
   {
-    return constant_interval_exprt(true_exprt());
+    return constant_interval_exprt::singleton(true_exprt());
   }
   else if(val.is_false())
   {
-    return constant_interval_exprt(false_exprt());
+    return constant_interval_exprt::singleton(false_exprt());
   }
   else
   {

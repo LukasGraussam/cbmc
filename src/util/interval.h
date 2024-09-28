@@ -11,69 +11,68 @@
 #include <util/std_expr.h>
 #include <util/threeval.h>
 
-#include <iostream>
+#include <iosfwd>
 
 /// +∞ upper bound for intervals
-class max_exprt : public exprt
+class max_value_exprt : public nullary_exprt
 {
 public:
-  explicit max_exprt(const typet &_type) : exprt(ID_max, _type)
+  explicit max_value_exprt(const typet &_type)
+    : nullary_exprt(ID_max_value, _type)
   {
   }
 
-  explicit max_exprt(const exprt &_expr) : exprt(ID_max, _expr.type())
+  explicit max_value_exprt(const exprt &_expr)
+    : nullary_exprt(ID_max_value, _expr.type())
   {
   }
 };
 
 /// -∞ upper bound for intervals
-class min_exprt : public exprt
+class min_value_exprt : public nullary_exprt
 {
 public:
-  explicit min_exprt(const typet &_type) : exprt(ID_min, _type)
+  explicit min_value_exprt(const typet &_type)
+    : nullary_exprt(ID_min_value, _type)
   {
   }
 
-  explicit min_exprt(const exprt &_expr) : exprt(ID_min, _expr.type())
+  explicit min_value_exprt(const exprt &_expr)
+    : nullary_exprt(ID_min_value, _expr.type())
   {
   }
 };
 
 /// Represents an interval of values.
 /// Bounds should be constant expressions
-/// or min_exprt for the lower bound
-/// or max_exprt for the upper bound
+/// or min_value_exprt for the lower bound
+/// or max_value_exprt for the upper bound
 /// Also, lower bound should always be <= upper bound
 class constant_interval_exprt : public binary_exprt
 {
 public:
-  constant_interval_exprt(
-    const exprt &lower,
-    const exprt &upper,
-    const typet type)
-    : binary_exprt(lower, ID_constant_interval, upper, type)
+  constant_interval_exprt(exprt lower, exprt upper, typet type)
+    : binary_exprt(
+        std::move(lower),
+        ID_constant_interval,
+        std::move(upper),
+        std::move(type))
   {
     PRECONDITION(is_well_formed());
   }
 
-  constant_interval_exprt(const constant_interval_exprt &x)
-    : constant_interval_exprt(x.get_lower(), x.get_upper(), x.type())
-  {
-  }
-
-  explicit constant_interval_exprt(const exprt &x)
-    : constant_interval_exprt(x, x, x.type())
-  {
-  }
-
   explicit constant_interval_exprt(const typet &type)
-    : constant_interval_exprt(min_exprt(type), max_exprt(type), type)
+    : constant_interval_exprt(
+        min_value_exprt(type),
+        max_value_exprt(type),
+        type)
   {
   }
 
   constant_interval_exprt(const exprt &lower, const exprt &upper)
     : constant_interval_exprt(lower, upper, lower.type())
   {
+    PRECONDITION(is_well_formed());
   }
 
   bool is_well_formed() const
@@ -84,7 +83,7 @@ public:
     const exprt &lower = get_lower();
     const exprt &upper = get_upper();
 
-    b &= is_numeric() || type.id() == ID_bool || type.is_nil();
+    b &= is_numeric() || is_boolean() || type.is_nil();
 
     b &= type == lower.type();
     b &= type == upper.type();
@@ -97,15 +96,20 @@ public:
     return b;
   }
 
-  bool is_valid_bound(const exprt &expr) const
+  static constant_interval_exprt singleton(const exprt &x)
+  {
+    return constant_interval_exprt{x, x, x.type()};
+  }
+
+  static bool is_valid_bound(const exprt &expr)
   {
     const irep_idt &id = expr.id();
 
     bool b = true;
 
-    b &= id == ID_constant || id == ID_min || id == ID_max;
+    b &= expr.is_constant() || id == ID_min_value || id == ID_max_value;
 
-    if(type().id() == ID_bool && id == ID_constant)
+    if(expr.is_boolean() && id == ID_constant)
     {
       b &= expr == true_exprt() || expr == false_exprt();
     }
@@ -350,8 +354,8 @@ public:
   static bool is_max(const exprt &expr);
 
   /* Generate min and max exprt according to current type */
-  min_exprt min() const;
-  max_exprt max() const;
+  min_value_exprt min() const;
+  max_value_exprt max() const;
 
   constant_exprt zero() const;
   static constant_exprt zero(const typet &type);

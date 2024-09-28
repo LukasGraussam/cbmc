@@ -20,10 +20,10 @@ Author: Diffblue Ltd.
 #include <util/std_expr.h>
 #include <util/symbol.h>
 
-#include <goto-programs/allocate_objects.h>
 #include <goto-programs/goto_functions.h>
 
-#include <ansi-c/c_object_factory_parameters.h>
+#include "allocate_objects.h"
+#include "c_object_factory_parameters.h"
 
 /// Creates a nondet for expr, including calling itself recursively to make
 /// appropriate symbols to point to if expr is a pointer.
@@ -172,7 +172,7 @@ void symbol_factoryt::gen_nondet_array_init(
 {
   auto const &array_type = to_array_type(expr.type());
   const auto &size = array_type.size();
-  PRECONDITION(size.id() == ID_constant);
+  PRECONDITION(size.is_constant());
   auto const array_size = numeric_cast<mp_integer>(to_constant_expr(size));
   DATA_INVARIANT(
     array_size.has_value() && *array_size >= 0,

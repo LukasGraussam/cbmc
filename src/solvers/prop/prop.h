@@ -17,6 +17,8 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include "literal.h"
 
+#include <cstdint>
+
 /*! \brief TO_BE_DOCUMENTED
 */
 class propt
@@ -82,9 +84,11 @@ public:
   // They overload this to return false and thus avoid some optimisations
   virtual bool cnf_handled_well() const { return true; }
 
-  // assumptions
-  virtual void set_assumptions(const bvt &) { }
-  virtual bool has_set_assumptions() const { return false; }
+  // solving with assumptions
+  virtual bool has_assumptions() const
+  {
+    return false;
+  }
 
   // variables
   virtual literalt new_variable()=0;
@@ -96,6 +100,7 @@ public:
   virtual std::string solver_text() const = 0;
   enum class resultt { P_SATISFIABLE, P_UNSATISFIABLE, P_ERROR };
   resultt prop_solve();
+  resultt prop_solve(const bvt &assumptions);
 
   // satisfying assignment
   virtual tvt l_get(literalt a) const=0;
@@ -120,7 +125,8 @@ public:
   std::size_t get_number_of_solver_calls() const;
 
 protected:
-  virtual resultt do_prop_solve() = 0;
+  // solve under the given assumption
+  virtual resultt do_prop_solve(const bvt &assumptions) = 0;
 
   // to avoid a temporary for lcnf(...)
   bvt lcnf_bv;

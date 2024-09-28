@@ -46,11 +46,11 @@ void goto_symext::havoc_rec(
   {
     const if_exprt &if_expr=to_if_expr(dest);
 
-    guardt guard_t=state.guard;
+    guardt guard_t = guard;
     guard_t.add(if_expr.cond());
     havoc_rec(state, guard_t, if_expr.true_case());
 
-    guardt guard_f=state.guard;
+    guardt guard_f = guard;
     guard_f.add(not_exprt(if_expr.cond()));
     havoc_rec(state, guard_f, if_expr.false_case());
   }
@@ -68,7 +68,11 @@ void goto_symext::havoc_rec(
   }
   else
   {
-    // consider printing a warning
+    INVARIANT_WITH_DIAGNOSTICS(
+      false,
+      "Attempted to symex havoc applied to unsupported expression",
+      state.source.pc->code().pretty(),
+      dest.pretty());
   }
 }
 
@@ -178,6 +182,11 @@ void goto_symext::symex_other(
 
     // obtain the actual array(s)
     process_array_expr(state, array_expr);
+
+    // if we dereferenced a void pointer, we may get a zero-sized (failed)
+    // object -- nothing to be assigned
+    if(array_expr.type().id() == ID_empty)
+      return;
 
     // prepare to build the array_of
     exprt value = clean_expr(code.op1(), state, false);

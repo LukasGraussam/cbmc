@@ -10,19 +10,18 @@ Author: Daniel Kroening, kroening@kroening.com
 /// Remove Virtual Function (Method) Calls
 #include "remove_virtual_functions.h"
 
-#include <algorithm>
-
 #include <util/expr_iterator.h>
 #include <util/expr_util.h>
 #include <util/fresh_symbol.h>
 #include <util/pointer_expr.h>
-#include <util/prefix.h>
 
 #include "class_hierarchy.h"
 #include "class_identifier.h"
 #include "goto_model.h"
 #include "remove_skip.h"
 #include "resolve_inherited_component.h"
+
+#include <algorithm>
 
 class get_virtual_calleest
 {
@@ -45,13 +44,13 @@ private:
   const class_hierarchyt &class_hierarchy;
 
   typedef std::function<
-    optionalt<resolve_inherited_componentt::inherited_componentt>(
+    std::optional<resolve_inherited_componentt::inherited_componentt>(
       const irep_idt &,
       const irep_idt &)>
     function_call_resolvert;
   void get_child_functions_rec(
     const irep_idt &,
-    const optionalt<symbol_exprt> &,
+    const std::optional<symbol_exprt> &,
     const irep_idt &,
     dispatch_table_entriest &,
     dispatch_table_entries_mapt &) const;
@@ -507,7 +506,7 @@ goto_programt::targett remove_virtual_functionst::remove_virtual_function(
 /// \param entry_map: map of class identifiers to dispatch table entries
 void get_virtual_calleest::get_child_functions_rec(
   const irep_idt &this_id,
-  const optionalt<symbol_exprt> &last_method_defn,
+  const std::optional<symbol_exprt> &last_method_defn,
   const irep_idt &component_name,
   dispatch_table_entriest &functions,
   dispatch_table_entries_mapt &entry_map) const
@@ -524,8 +523,7 @@ void get_virtual_calleest::get_child_functions_rec(
     if(
       it != entry_map.end() &&
       (!it->second.symbol_expr.has_value() ||
-       !has_prefix(
-         id2string(it->second.symbol_expr->get_identifier()),
+       !it->second.symbol_expr->get_identifier().starts_with(
          "java::java.lang.Object")))
     {
       continue;
@@ -620,9 +618,9 @@ void get_virtual_calleest::get_functions(
                         ? b.symbol_expr->get_identifier()
                         : irep_idt();
 
-      if(has_prefix(id2string(a_id), "java::java.lang.Object"))
+      if(a_id.starts_with("java::java.lang.Object"))
         return false;
-      else if(has_prefix(id2string(b_id), "java::java.lang.Object"))
+      else if(b_id.starts_with("java::java.lang.Object"))
         return true;
       else
       {

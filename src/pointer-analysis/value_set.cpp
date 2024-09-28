@@ -15,7 +15,6 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <util/bitvector_expr.h>
 #include <util/byte_operators.h>
 #include <util/c_types.h>
-#include <util/expr_util.h>
 #include <util/format_expr.h>
 #include <util/format_type.h>
 #include <util/namespace.h>
@@ -26,6 +25,7 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <util/simplify_expr.h>
 #include <util/std_code.h>
 #include <util/symbol.h>
+#include <util/xml.h>
 
 #include <ostream>
 
@@ -46,9 +46,9 @@ object_numberingt value_sett::object_numbering;
 bool value_sett::field_sensitive(const irep_idt &id, const typet &type)
 {
   // we always track fields on these
-  if(has_prefix(id2string(id), "value_set::dynamic_object") ||
-     id=="value_set::return_value" ||
-     id=="value_set::memory")
+  if(
+    id.starts_with("value_set::dynamic_object") ||
+    id == "value_set::return_value" || id == "value_set::memory")
     return true;
 
   // otherwise it has to be a struct
@@ -143,7 +143,7 @@ void value_sett::output(std::ostream &out, const std::string &indent) const
   values.iterate([&](const irep_idt &, const entryt &e) {
     irep_idt identifier, display_name;
 
-    if(has_prefix(id2string(e.identifier), "value_set::dynamic_object"))
+    if(e.identifier.starts_with("value_set::dynamic_object"))
     {
       display_name = id2string(e.identifier) + e.suffix;
       identifier.clear();
@@ -215,6 +215,39 @@ void value_sett::output(std::ostream &out, const std::string &indent) const
 
     out << " } \n";
   });
+}
+
+xmlt value_sett::output_xml(void) const
+{
+  xmlt output;
+
+  value_sett::valuest::viewt view;
+  this->values.get_view(view);
+
+  for(const auto &values_entry : view)
+  {
+    xmlt &var = output.new_element("variable");
+    var.new_element("identifier").data = id2string(values_entry.first);
+
+#if 0
+    const value_sett::expr_sett &expr_set=
+      value_entries.expr_set();
+
+    for(value_sett::expr_sett::const_iterator
+          e_it=expr_set.begin();
+          e_it!=expr_set.end();
+          e_it++)
+      {
+        std::string value_str=
+          from_expr(ns, identifier, *e_it);
+
+        var.new_element("value").data=
+          xmlt::escape(value_str);
+      }
+#endif
+  }
+
+  return output;
 }
 
 exprt value_sett::to_expr(const object_map_dt::value_type &it) const
@@ -370,7 +403,24 @@ value_sett::object_mapt value_sett::get_value_set(
     simplify(expr, ns);
 
   object_mapt dest;
-  get_value_set_rec(expr, dest, "", expr.type(), ns);
+  bool includes_nondet_pointer = false;
+  get_value_set_rec(expr, dest, includes_nondet_pointer, "", expr.type(), ns);
+
+  if(includes_nondet_pointer && expr.type().id() == ID_pointer)
+  {
+    // we'll take the union of all objects we see, with unspecified offsets
+    values.iterate([this, &dest](const irep_idt &key, const entryt &value) {
+      for(const auto &object : value.object_map.read())
+        insert(dest, object.first, offsett());
+    });
+
+    // we'll add null, in case it's not there yet
+    insert(
+      dest,
+      exprt(ID_null_object, to_pointer_type(expr.type()).base_type()),
+      offsett());
+  }
+
   return dest;
 }
 
@@ -398,7 +448,7 @@ static std::string strip_first_field_from_suffix(
   return suffix.substr(field.length() + 1);
 }
 
-optionalt<irep_idt> value_sett::get_index_of_symbol(
+std::optional<irep_idt> value_sett::get_index_of_symbol(
   irep_idt identifier,
   const typet &type,
   const std::string &suffix,
@@ -455,6 +505,7 @@ optionalt<irep_idt> value_sett::get_index_of_symbol(
 void value_sett::get_value_set_rec(
   const exprt &expr,
   object_mapt &dest,
+  bool &includes_nondet_pointer,
   const std::string &suffix,
   const typet &original_type,
   const namespacet &ns) const
@@ -463,8 +514,6 @@ void value_sett::get_value_set_rec(
   std::cout << "GET_VALUE_SET_REC EXPR: " << format(expr) << "\n";
   std::cout << "GET_VALUE_SET_REC SUFFIX: " << suffix << '\n';
 #endif
-
-  const typet &expr_type=ns.follow(expr.type());
 
   if(expr.id()==ID_unknown || expr.id()==ID_invalid)
   {
@@ -478,22 +527,31 @@ void value_sett::get_value_set_rec(
       type.id() == ID_array, "operand 0 of index expression must be an array");
 
     get_value_set_rec(
-      to_index_expr(expr).array(), dest, "[]" + suffix, original_type, ns);
+      to_index_expr(expr).array(),
+      dest,
+      includes_nondet_pointer,
+      "[]" + suffix,
+      original_type,
+      ns);
   }
   else if(expr.id()==ID_member)
   {
-    const typet &type = ns.follow(to_member_expr(expr).compound().type());
+    const exprt &compound = to_member_expr(expr).compound();
 
     DATA_INVARIANT(
-      type.id() == ID_struct || type.id() == ID_union,
+      compound.type().id() == ID_struct ||
+        compound.type().id() == ID_struct_tag ||
+        compound.type().id() == ID_union ||
+        compound.type().id() == ID_union_tag,
       "compound of member expression must be struct or union");
 
     const std::string &component_name=
       expr.get_string(ID_component_name);
 
     get_value_set_rec(
-      to_member_expr(expr).compound(),
+      compound,
       dest,
+      includes_nondet_pointer,
       "." + component_name + suffix,
       original_type,
       ns);
@@ -501,7 +559,7 @@ void value_sett::get_value_set_rec(
   else if(expr.id()==ID_symbol)
   {
     auto entry_index = get_index_of_symbol(
-      to_symbol_expr(expr).get_identifier(), expr_type, suffix, ns);
+      to_symbol_expr(expr).get_identifier(), expr.type(), suffix, ns);
 
     if(entry_index.has_value())
       make_union(dest, find_entry(*entry_index)->object_map);
@@ -511,28 +569,26 @@ void value_sett::get_value_set_rec(
   else if(expr.id() == ID_nondet_symbol)
   {
     if(expr.type().id() == ID_pointer)
-    {
-      // we'll take the union of all objects we see, with unspecified offsets
-      values.iterate([this, &dest](const irep_idt &key, const entryt &value) {
-        for(const auto &object : value.object_map.read())
-          insert(dest, object.first, offsett());
-      });
-
-      // we'll add null, in case it's not there yet
-      insert(
-        dest,
-        exprt(ID_null_object, to_pointer_type(expr_type).base_type()),
-        offsett());
-    }
+      includes_nondet_pointer = true;
     else
       insert(dest, exprt(ID_unknown, original_type));
   }
   else if(expr.id()==ID_if)
   {
     get_value_set_rec(
-      to_if_expr(expr).true_case(), dest, suffix, original_type, ns);
+      to_if_expr(expr).true_case(),
+      dest,
+      includes_nondet_pointer,
+      suffix,
+      original_type,
+      ns);
     get_value_set_rec(
-      to_if_expr(expr).false_case(), dest, suffix, original_type, ns);
+      to_if_expr(expr).false_case(),
+      dest,
+      includes_nondet_pointer,
+      suffix,
+      original_type,
+      ns);
   }
   else if(expr.id()==ID_address_of)
   {
@@ -556,22 +612,23 @@ void value_sett::get_value_set_rec(
         /// Do not take a reference to object_numbering's storage as we may call
         /// object_numbering.number(), which may reallocate it.
         const exprt object=object_numbering[it1->first];
-        get_value_set_rec(object, dest, suffix, original_type, ns);
+        get_value_set_rec(
+          object, dest, includes_nondet_pointer, suffix, original_type, ns);
       }
     }
   }
   else if(expr.is_constant())
   {
     // check if NULL
-    if(is_null_pointer(to_constant_expr(expr)))
+    if(to_constant_expr(expr).is_null_pointer())
     {
       insert(
         dest,
-        exprt(ID_null_object, to_pointer_type(expr_type).base_type()),
+        exprt(ID_null_object, to_pointer_type(expr.type()).base_type()),
         mp_integer{0});
     }
-    else if(expr_type.id()==ID_unsignedbv ||
-            expr_type.id()==ID_signedbv)
+    else if(
+      expr.type().id() == ID_unsignedbv || expr.type().id() == ID_signedbv)
     {
       // an integer constant got turned into a pointer
       insert(dest, exprt(ID_integer_address, unsigned_char_type()));
@@ -589,7 +646,8 @@ void value_sett::get_value_set_rec(
     if(op_type.id()==ID_pointer)
     {
       // pointer-to-something -- we just ignore the type cast
-      get_value_set_rec(op, dest, suffix, original_type, ns);
+      get_value_set_rec(
+        op, dest, includes_nondet_pointer, suffix, original_type, ns);
     }
     else if(
       op_type.id() == ID_unsignedbv || op_type.id() == ID_signedbv ||
@@ -606,7 +664,8 @@ void value_sett::get_value_set_rec(
         // see if we have something for the integer
         object_mapt tmp;
 
-        get_value_set_rec(op, tmp, suffix, original_type, ns);
+        get_value_set_rec(
+          op, tmp, includes_nondet_pointer, suffix, original_type, ns);
 
         if(tmp.read().empty())
         {
@@ -639,12 +698,12 @@ void value_sett::get_value_set_rec(
       throw expr.id_string()+" expected to have at least two operands";
 
     object_mapt pointer_expr_set;
-    optionalt<mp_integer> i;
+    std::optional<mp_integer> i;
 
     // special case for plus/minus and exactly one pointer
-    optionalt<exprt> ptr_operand;
+    std::optional<exprt> ptr_operand;
     if(
-      expr_type.id() == ID_pointer &&
+      expr.type().id() == ID_pointer &&
       (expr.id() == ID_plus || expr.id() == ID_minus))
     {
       bool non_const_offset = false;
@@ -708,15 +767,20 @@ void value_sett::get_value_set_rec(
     if(ptr_operand.has_value())
     {
       get_value_set_rec(
-        *ptr_operand, pointer_expr_set, "", ptr_operand->type(), ns);
+        *ptr_operand,
+        pointer_expr_set,
+        includes_nondet_pointer,
+        "",
+        ptr_operand->type(),
+        ns);
     }
     else
     {
       // we get the points-to for all operands, even integers
-      forall_operands(it, expr)
+      for(const auto &op : expr.operands())
       {
         get_value_set_rec(
-          *it, pointer_expr_set, "", it->type(), ns);
+          op, pointer_expr_set, includes_nondet_pointer, "", op.type(), ns);
       }
     }
 
@@ -747,10 +811,10 @@ void value_sett::get_value_set_rec(
     object_mapt pointer_expr_set;
 
     // we get the points-to for all operands, even integers
-    forall_operands(it, expr)
+    for(const auto &op : expr.operands())
     {
       get_value_set_rec(
-        *it, pointer_expr_set, "", it->type(), ns);
+        op, pointer_expr_set, includes_nondet_pointer, "", op.type(), ns);
     }
 
     for(object_map_dt::const_iterator
@@ -772,7 +836,12 @@ void value_sett::get_value_set_rec(
 
     object_mapt pointer_expr_set;
     get_value_set_rec(
-      binary_expr.op0(), pointer_expr_set, "", binary_expr.op0().type(), ns);
+      binary_expr.op0(),
+      pointer_expr_set,
+      includes_nondet_pointer,
+      "",
+      binary_expr.op0().type(),
+      ns);
 
     for(const auto &object_map_entry : pointer_expr_set.read())
     {
@@ -810,10 +879,10 @@ void value_sett::get_value_set_rec(
             statement==ID_cpp_new_array)
     {
       PRECONDITION(suffix.empty());
-      assert(expr_type.id()==ID_pointer);
+      PRECONDITION(expr.type().id() == ID_pointer);
 
       dynamic_object_exprt dynamic_object(
-        to_pointer_type(expr_type).base_type());
+        to_pointer_type(expr.type()).base_type());
       dynamic_object.set_instance(location_number);
       dynamic_object.valid()=true_exprt();
 
@@ -824,7 +893,10 @@ void value_sett::get_value_set_rec(
   }
   else if(expr.id()==ID_struct)
   {
-    const auto &struct_components = to_struct_type(expr_type).components();
+    const auto &struct_components =
+      expr.type().id() == ID_struct_tag
+        ? ns.follow_tag(to_struct_tag_type(expr.type())).components()
+        : to_struct_type(expr.type()).components();
     INVARIANT(
       struct_components.size() == expr.operands().size(),
       "struct expression should have an operand per component");
@@ -833,7 +905,7 @@ void value_sett::get_value_set_rec(
 
     // a struct constructor, which may contain addresses
 
-    forall_operands(it, expr)
+    for(const auto &op : expr.operands())
     {
       const std::string &component_name =
         id2string(component_iter->get_name());
@@ -841,7 +913,13 @@ void value_sett::get_value_set_rec(
       {
         std::string remaining_suffix =
           strip_first_field_from_suffix(suffix, component_name);
-        get_value_set_rec(*it, dest, remaining_suffix, original_type, ns);
+        get_value_set_rec(
+          op,
+          dest,
+          includes_nondet_pointer,
+          remaining_suffix,
+          original_type,
+          ns);
         found_component = true;
       }
       ++component_iter;
@@ -852,14 +930,22 @@ void value_sett::get_value_set_rec(
       // Struct field doesn't appear as expected -- this has probably been
       // cast from an incompatible type. Conservatively assume all fields may
       // be of interest.
-      forall_operands(it, expr)
-        get_value_set_rec(*it, dest, suffix, original_type, ns);
+      for(const auto &op : expr.operands())
+      {
+        get_value_set_rec(
+          op, dest, includes_nondet_pointer, suffix, original_type, ns);
+      }
     }
   }
   else if(expr.id() == ID_union)
   {
     get_value_set_rec(
-      to_union_expr(expr).op(), dest, suffix, original_type, ns);
+      to_union_expr(expr).op(),
+      dest,
+      includes_nondet_pointer,
+      suffix,
+      original_type,
+      ns);
   }
   else if(expr.id()==ID_with)
   {
@@ -867,7 +953,9 @@ void value_sett::get_value_set_rec(
 
     // If the suffix is empty we're looking for the whole struct:
     // default to combining both options as below.
-    if(expr_type.id() == ID_struct && !suffix.empty())
+    if(
+      (expr.type().id() == ID_struct_tag || expr.type().id() == ID_struct) &&
+      !suffix.empty())
     {
       irep_idt component_name = with_expr.where().get(ID_component_name);
       if(suffix_starts_with_field(suffix, id2string(component_name)))
@@ -876,23 +964,51 @@ void value_sett::get_value_set_rec(
         std::string remaining_suffix =
           strip_first_field_from_suffix(suffix, id2string(component_name));
         get_value_set_rec(
-          with_expr.new_value(), dest, remaining_suffix, original_type, ns);
+          with_expr.new_value(),
+          dest,
+          includes_nondet_pointer,
+          remaining_suffix,
+          original_type,
+          ns);
       }
-      else if(to_struct_type(expr_type).has_component(component_name))
+      else if(
+        (expr.type().id() == ID_struct &&
+         to_struct_type(expr.type()).has_component(component_name)) ||
+        (expr.type().id() == ID_struct_tag &&
+         ns.follow_tag(to_struct_tag_type(expr.type()))
+           .has_component(component_name)))
       {
         // Looking for a non-overwritten member, look through this expression
-        get_value_set_rec(with_expr.old(), dest, suffix, original_type, ns);
+        get_value_set_rec(
+          with_expr.old(),
+          dest,
+          includes_nondet_pointer,
+          suffix,
+          original_type,
+          ns);
       }
       else
       {
         // Member we're looking for is not defined in this struct -- this
         // must be a reinterpret cast of some sort. Default to conservatively
         // assuming either operand might be involved.
-        get_value_set_rec(with_expr.old(), dest, suffix, original_type, ns);
-        get_value_set_rec(with_expr.new_value(), dest, "", original_type, ns);
+        get_value_set_rec(
+          with_expr.old(),
+          dest,
+          includes_nondet_pointer,
+          suffix,
+          original_type,
+          ns);
+        get_value_set_rec(
+          with_expr.new_value(),
+          dest,
+          includes_nondet_pointer,
+          "",
+          original_type,
+          ns);
       }
     }
-    else if(expr_type.id() == ID_array && !suffix.empty())
+    else if(expr.type().id() == ID_array && !suffix.empty())
     {
       std::string new_value_suffix;
       if(has_prefix(suffix, "[]"))
@@ -901,16 +1017,39 @@ void value_sett::get_value_set_rec(
       // Otherwise use a blank suffix on the assumption anything involved with
       // the new value might be interesting.
 
-      get_value_set_rec(with_expr.old(), dest, suffix, original_type, ns);
       get_value_set_rec(
-        with_expr.new_value(), dest, new_value_suffix, original_type, ns);
+        with_expr.old(),
+        dest,
+        includes_nondet_pointer,
+        suffix,
+        original_type,
+        ns);
+      get_value_set_rec(
+        with_expr.new_value(),
+        dest,
+        includes_nondet_pointer,
+        new_value_suffix,
+        original_type,
+        ns);
     }
     else
     {
       // Something else-- the suffixes used here are a rough guess at best,
       // so this is imprecise.
-      get_value_set_rec(with_expr.old(), dest, suffix, original_type, ns);
-      get_value_set_rec(with_expr.new_value(), dest, "", original_type, ns);
+      get_value_set_rec(
+        with_expr.old(),
+        dest,
+        includes_nondet_pointer,
+        suffix,
+        original_type,
+        ns);
+      get_value_set_rec(
+        with_expr.new_value(),
+        dest,
+        includes_nondet_pointer,
+        "",
+        original_type,
+        ns);
     }
   }
   else if(expr.id()==ID_array)
@@ -922,8 +1061,11 @@ void value_sett::get_value_set_rec(
     // Otherwise we're probably reinterpreting some other type -- try persisting
     // with the current suffix for want of a better idea.
 
-    forall_operands(it, expr)
-      get_value_set_rec(*it, dest, new_suffix, original_type, ns);
+    for(const auto &op : expr.operands())
+    {
+      get_value_set_rec(
+        op, dest, includes_nondet_pointer, new_suffix, original_type, ns);
+    }
   }
   else if(expr.id()==ID_array_of)
   {
@@ -935,7 +1077,12 @@ void value_sett::get_value_set_rec(
     // with the current suffix for want of a better idea.
 
     get_value_set_rec(
-      to_array_of_expr(expr).what(), dest, new_suffix, original_type, ns);
+      to_array_of_expr(expr).what(),
+      dest,
+      includes_nondet_pointer,
+      new_suffix,
+      original_type,
+      ns);
   }
   else if(expr.id()==ID_dynamic_object)
   {
@@ -968,8 +1115,9 @@ void value_sett::get_value_set_rec(
 
     bool found=false;
 
-    const typet &op_type = ns.follow(byte_extract_expr.op().type());
-    if(op_type.id() == ID_struct)
+    if(
+      byte_extract_expr.op().type().id() == ID_struct ||
+      byte_extract_expr.op().type().id() == ID_struct_tag)
     {
       exprt offset = byte_extract_expr.offset();
       if(eval_pointer_offset(offset, ns))
@@ -978,7 +1126,10 @@ void value_sett::get_value_set_rec(
       const auto offset_int = numeric_cast<mp_integer>(offset);
       const auto type_size = pointer_offset_size(expr.type(), ns);
 
-      const struct_typet &struct_type = to_struct_type(op_type);
+      const struct_typet &struct_type =
+        byte_extract_expr.op().type().id() == ID_struct_tag
+          ? ns.follow_tag(to_struct_tag_type(byte_extract_expr.op().type()))
+          : to_struct_type(byte_extract_expr.op().type());
 
       for(const auto &c : struct_type.components())
       {
@@ -1008,25 +1159,39 @@ void value_sett::get_value_set_rec(
         found=true;
 
         member_exprt member(byte_extract_expr.op(), c);
-        get_value_set_rec(member, dest, suffix, original_type, ns);
+        get_value_set_rec(
+          member, dest, includes_nondet_pointer, suffix, original_type, ns);
       }
     }
 
-    if(op_type.id() == ID_union)
+    if(
+      byte_extract_expr.op().type().id() == ID_union ||
+      byte_extract_expr.op().type().id() == ID_union_tag)
     {
       // just collect them all
-      for(const auto &c : to_union_type(op_type).components())
+      const auto &components =
+        byte_extract_expr.op().type().id() == ID_union_tag
+          ? ns.follow_tag(to_union_tag_type(byte_extract_expr.op().type()))
+              .components()
+          : to_union_type(byte_extract_expr.op().type()).components();
+      for(const auto &c : components)
       {
         const irep_idt &name = c.get_name();
         member_exprt member(byte_extract_expr.op(), name, c.type());
-        get_value_set_rec(member, dest, suffix, original_type, ns);
+        get_value_set_rec(
+          member, dest, includes_nondet_pointer, suffix, original_type, ns);
       }
     }
 
     if(!found)
       // we just pass through
       get_value_set_rec(
-        byte_extract_expr.op(), dest, suffix, original_type, ns);
+        byte_extract_expr.op(),
+        dest,
+        includes_nondet_pointer,
+        suffix,
+        original_type,
+        ns);
   }
   else if(expr.id()==ID_byte_update_little_endian ||
           expr.id()==ID_byte_update_big_endian)
@@ -1034,9 +1199,20 @@ void value_sett::get_value_set_rec(
     const auto &byte_update_expr = to_byte_update_expr(expr);
 
     // we just pass through
-    get_value_set_rec(byte_update_expr.op(), dest, suffix, original_type, ns);
     get_value_set_rec(
-      byte_update_expr.value(), dest, suffix, original_type, ns);
+      byte_update_expr.op(),
+      dest,
+      includes_nondet_pointer,
+      suffix,
+      original_type,
+      ns);
+    get_value_set_rec(
+      byte_update_expr.value(),
+      dest,
+      includes_nondet_pointer,
+      suffix,
+      original_type,
+      ns);
 
     // we could have checked object size to be more precise
   }
@@ -1050,12 +1226,23 @@ void value_sett::get_value_set_rec(
       let_expr.symbol(), let_expr.value(), ns, false, false);
 
     value_set_with_local_definition.get_value_set_rec(
-      let_expr.where(), dest, suffix, original_type, ns);
+      let_expr.where(),
+      dest,
+      includes_nondet_pointer,
+      suffix,
+      original_type,
+      ns);
   }
   else if(auto eb = expr_try_dynamic_cast<extractbits_exprt>(expr))
   {
     object_mapt pointer_expr_set;
-    get_value_set_rec(eb->src(), pointer_expr_set, "", eb->src().type(), ns);
+    get_value_set_rec(
+      eb->src(),
+      pointer_expr_set,
+      includes_nondet_pointer,
+      "",
+      eb->src().type(),
+      ns);
 
     for(const auto &object_map_entry : pointer_expr_set.read())
     {
@@ -1071,7 +1258,10 @@ void value_sett::get_value_set_rec(
   {
     object_mapt pointer_expr_set;
     for(const auto &op : expr.operands())
-      get_value_set_rec(op, pointer_expr_set, "", original_type, ns);
+    {
+      get_value_set_rec(
+        op, pointer_expr_set, includes_nondet_pointer, "", original_type, ns);
+    }
 
     for(const auto &object_map_entry : pointer_expr_set.read())
     {
@@ -1105,7 +1295,7 @@ void value_sett::dereference_rec(
   // remove pointer typecasts
   if(src.id()==ID_typecast)
   {
-    assert(src.type().id()==ID_pointer);
+    PRECONDITION(src.type().id() == ID_pointer);
 
     dereference_rec(to_typecast_expr(src).op(), dest);
   }
@@ -1156,7 +1346,9 @@ void value_sett::get_reference_set_rec(
   {
     const auto &pointer = to_dereference_expr(expr).pointer();
 
-    get_value_set_rec(pointer, dest, "", pointer.type(), ns);
+    bool includes_nondet_pointer = false;
+    get_value_set_rec(
+      pointer, dest, includes_nondet_pointer, "", pointer.type(), ns);
 
 #ifdef DEBUG
     for(const auto &map_entry : dest.read())
@@ -1258,13 +1450,13 @@ void value_sett::get_reference_set_rec(
         // We cannot introduce a cast from scalar to non-scalar,
         // thus, we can only adjust the types of structs and unions.
 
-        const typet &final_object_type = ns.follow(object.type());
-
-        if(final_object_type.id()==ID_struct ||
-           final_object_type.id()==ID_union)
+        if(
+          object.type().id() == ID_struct ||
+          object.type().id() == ID_struct_tag ||
+          object.type().id() == ID_union || object.type().id() == ID_union_tag)
         {
           // adjust type?
-          if(ns.follow(struct_op.type())!=final_object_type)
+          if(struct_op.type() != object.type())
           {
             member_expr.compound() =
               typecast_exprt(member_expr.compound(), struct_op.type());
@@ -1307,11 +1499,14 @@ void value_sett::assign(
   output(std::cout);
 #endif
 
-  const typet &type=ns.follow(lhs.type());
-
-  if(type.id() == ID_struct)
+  if(lhs.type().id() == ID_struct || lhs.type().id() == ID_struct_tag)
   {
-    for(const auto &c : to_struct_type(type).components())
+    const auto &components =
+      lhs.type().id() == ID_struct_tag
+        ? ns.follow_tag(to_struct_tag_type(lhs.type())).components()
+        : to_struct_type(lhs.type()).components();
+
+    for(const auto &c : components)
     {
       const typet &subtype = c.type();
       const irep_idt &name = c.get_name();
@@ -1342,12 +1537,20 @@ void value_sett::assign(
           "rhs.type():\n" +
             rhs.type().pretty() + "\n" + "lhs.type():\n" + lhs.type().pretty());
 
-        const typet &followed = ns.follow(rhs.type());
-
-        if(followed.id() == ID_struct || followed.id() == ID_union)
+        if(rhs.type().id() == ID_struct_tag || rhs.type().id() == ID_union_tag)
         {
           const struct_union_typet &rhs_struct_union_type =
-            to_struct_union_type(followed);
+            ns.follow_tag(to_struct_or_union_tag_type(rhs.type()));
+
+          const typet &rhs_subtype = rhs_struct_union_type.component_type(name);
+          rhs_member = simplify_expr(member_exprt{rhs, name, rhs_subtype}, ns);
+
+          assign(lhs_member, rhs_member, ns, true, add_to_sets);
+        }
+        else if(rhs.type().id() == ID_struct || rhs.type().id() == ID_union)
+        {
+          const struct_union_typet &rhs_struct_union_type =
+            to_struct_union_type(rhs.type());
 
           const typet &rhs_subtype = rhs_struct_union_type.component_type(name);
           rhs_member = simplify_expr(member_exprt{rhs, name, rhs_subtype}, ns);
@@ -1357,19 +1560,19 @@ void value_sett::assign(
       }
     }
   }
-  else if(type.id()==ID_array)
+  else if(lhs.type().id() == ID_array)
   {
     const index_exprt lhs_index(
       lhs,
       exprt(ID_unknown, c_index_type()),
-      to_array_type(type).element_type());
+      to_array_type(lhs.type()).element_type());
 
     if(rhs.id()==ID_unknown ||
        rhs.id()==ID_invalid)
     {
       assign(
         lhs_index,
-        exprt(rhs.id(), to_array_type(type).element_type()),
+        exprt(rhs.id(), to_array_type(lhs.type()).element_type()),
         ns,
         is_simplified,
         add_to_sets);
@@ -1377,10 +1580,10 @@ void value_sett::assign(
     else
     {
       DATA_INVARIANT(
-        rhs.type() == type,
+        rhs.type() == lhs.type(),
         "value_sett::assign types should match, got: "
         "rhs.type():\n" +
-          rhs.type().pretty() + "\n" + "type:\n" + type.pretty());
+          rhs.type().pretty() + "\n" + "type:\n" + lhs.type().pretty());
 
       if(rhs.id()==ID_array_of)
       {
@@ -1391,12 +1594,11 @@ void value_sett::assign(
           is_simplified,
           add_to_sets);
       }
-      else if(rhs.id()==ID_array ||
-              rhs.id()==ID_constant)
+      else if(rhs.id() == ID_array || rhs.is_constant())
       {
-        forall_operands(o_it, rhs)
+        for(const auto &op : rhs.operands())
         {
-          assign(lhs_index, *o_it, ns, is_simplified, add_to_sets);
+          assign(lhs_index, op, ns, is_simplified, add_to_sets);
           add_to_sets=true;
         }
       }
@@ -1405,7 +1607,7 @@ void value_sett::assign(
         const index_exprt op0_index(
           to_with_expr(rhs).old(),
           exprt(ID_unknown, c_index_type()),
-          to_array_type(type).element_type());
+          to_array_type(lhs.type()).element_type());
 
         assign(lhs_index, op0_index, ns, is_simplified, add_to_sets);
         assign(
@@ -1416,7 +1618,7 @@ void value_sett::assign(
         const index_exprt rhs_index(
           rhs,
           exprt(ID_unknown, c_index_type()),
-          to_array_type(type).element_type());
+          to_array_type(lhs.type()).element_type());
         assign(lhs_index, rhs_index, ns, is_simplified, true);
       }
     }
@@ -1513,15 +1715,17 @@ void value_sett::assign_rec(
   {
     const auto &lhs_member_expr = to_member_expr(lhs);
     const auto &component_name = lhs_member_expr.get_component_name();
-
-    const typet &type = ns.follow(lhs_member_expr.compound().type());
+    const exprt &compound = lhs_member_expr.compound();
 
     DATA_INVARIANT(
-      type.id() == ID_struct || type.id() == ID_union,
+      compound.type().id() == ID_struct ||
+        compound.type().id() == ID_struct_tag ||
+        compound.type().id() == ID_union ||
+        compound.type().id() == ID_union_tag,
       "operand 0 of member expression must be struct or union");
 
     assign_rec(
-      lhs_member_expr.compound(),
+      compound,
       values_rhs,
       "." + id2string(component_name) + suffix,
       ns,
@@ -1630,8 +1834,8 @@ void value_sett::apply_code_rec(
 
   if(statement==ID_block)
   {
-    forall_operands(it, code)
-      apply_code_rec(to_code(*it), ns);
+    for(const auto &op : code.operands())
+      apply_code_rec(to_code(op), ns);
   }
   else if(statement==ID_function_call)
   {
@@ -1753,8 +1957,8 @@ void value_sett::guard(
 {
   if(expr.id()==ID_and)
   {
-    forall_operands(it, expr)
-      guard(*it, ns);
+    for(const auto &op : expr.operands())
+      guard(op, ns);
   }
   else if(expr.id()==ID_equal)
   {

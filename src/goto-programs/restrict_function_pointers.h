@@ -22,7 +22,6 @@ Author: Diffblue Ltd.
 
 #include <util/exception_utils.h>
 #include <util/irep.h>
-#include <util/optional.h>
 
 #include "goto_program.h"
 
@@ -47,24 +46,20 @@ class optionst;
   "(" RESTRICT_FUNCTION_POINTER_BY_NAME_OPT "):"
 
 #define HELP_RESTRICT_FUNCTION_POINTER                                         \
-  " --" RESTRICT_FUNCTION_POINTER_OPT                                          \
-  " <pointer_name>/<target[,targets]*>\n"                                      \
-  "                              restrict a function pointer to a set of "     \
-  "possible targets\n"                                                         \
-  "                              targets must all exist in the symbol table"   \
-  " with a matching type\n"                                                    \
-  "                              works for globals and function parameters"    \
-  " right now\n"                                                               \
-  " --" RESTRICT_FUNCTION_POINTER_FROM_FILE_OPT                                \
-  " <file_name>\n"                                                             \
-  "                              add function pointer restrictions from "      \
-  "file\n"                                                                     \
-  " --" RESTRICT_FUNCTION_POINTER_BY_NAME_OPT                                  \
-  " <symbol_name>/target[targets]*>\n"                                         \
-  "                              restrict a function pointer where "           \
-  " <symbol_name>\n"                                                           \
-  "                              is the unmangled name, before labelling "     \
-  "function pointers\n"
+  " {y--" RESTRICT_FUNCTION_POINTER_OPT                                        \
+  "} "                                                                         \
+  "{upointer_name}/{utarget[,targets]*} \t "                                   \
+  "restrict a function pointer to a set of possible targets; targets must "    \
+  "all exist in the symbol table with a matching type; works for globals "     \
+  "and function parameters right now\n"                                        \
+  " {y--" RESTRICT_FUNCTION_POINTER_FROM_FILE_OPT                              \
+  "} {ufile_name} \t "                                                         \
+  "add function pointer restrictions from file {ufile_name}\n"                 \
+  " {y--" RESTRICT_FUNCTION_POINTER_BY_NAME_OPT                                \
+  "} "                                                                         \
+  "{usymbol_name}/{utarget[targets]*} \t "                                     \
+  "restrict a function pointer where {usymbol_name} is the unmangled "         \
+  "name, before labelling function pointers\n"
 
 void parse_function_pointer_restriction_options_from_cmdline(
   const cmdlinet &cmdline,
@@ -136,7 +131,7 @@ protected:
     const std::string &option,
     const goto_modelt &goto_model);
 
-  static optionalt<restrictiont> get_by_name_restriction(
+  static std::optional<restrictiont> get_by_name_restriction(
     const goto_functiont &goto_function,
     const function_pointer_restrictionst::restrictionst &by_name_restrictions,
     const goto_programt::const_targett &location);

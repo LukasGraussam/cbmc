@@ -13,17 +13,17 @@ Author: Malte Mues <mail.mues@gmail.com>
 #ifndef CPROVER_MEMORY_ANALYZER_ANALYZE_SYMBOL_H
 #define CPROVER_MEMORY_ANALYZER_ANALYZE_SYMBOL_H
 
-#include <map>
-#include <string>
-
-#include "gdb_api.h"
-
 #include <ansi-c/expr2c_class.h>
 
 #include <util/namespace.h>
 #include <util/symbol_table.h>
 
-#include <goto-programs/allocate_objects.h>
+#include <ansi-c/allocate_objects.h>
+
+#include "gdb_api.h"
+
+#include <map>
+#include <string>
 
 class pointer_typet;
 class source_locationt;
@@ -185,7 +185,7 @@ private:
   /// \param point: potentially dynamically allocated memory address
   /// \param member_size: size of each allocated element
   /// \return pointee as a string if we have a record of the allocation
-  optionalt<std::string>
+  std::optional<std::string>
   get_malloc_pointee(const memory_addresst &point, mp_integer member_size);
 
   /// Wrapper for call get_offset_pointer_bits

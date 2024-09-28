@@ -97,28 +97,36 @@ public:
   const operandst &operands() const
   { return (const operandst &)get_sub(); }
 
-  /// Add the source location from \p other, if it has any.
-  template <typename T>
-  T &with_source_location(const exprt &other) &
+  /// Add the source location from \p location, if it is non-nil.
+  exprt &with_source_location(source_locationt location) &
   {
-    static_assert(
-      std::is_base_of<exprt, T>::value,
-      "The template argument T must be derived from exprt.");
-    if(other.source_location().is_not_nil())
-      add_source_location() = other.source_location();
-    return *static_cast<T *>(this);
+    if(location.is_not_nil())
+      add_source_location() = std::move(location);
+    return *this;
+  }
+
+  /// Add the source location from \p location, if it is non-nil.
+  exprt &&with_source_location(source_locationt location) &&
+  {
+    if(location.is_not_nil())
+      add_source_location() = std::move(location);
+    return std::move(*this);
   }
 
   /// Add the source location from \p other, if it has any.
-  template <typename T>
-  T &&with_source_location(const exprt &other) &&
+  exprt &with_source_location(const exprt &other) &
   {
-    static_assert(
-      std::is_base_of<exprt, T>::value,
-      "The template argument T must be derived from exprt.");
     if(other.source_location().is_not_nil())
       add_source_location() = other.source_location();
-    return std::move(*static_cast<T *>(this));
+    return *this;
+  }
+
+  /// Add the source location from \p other, if it has any.
+  exprt &&with_source_location(const exprt &other) &&
+  {
+    if(other.source_location().is_not_nil())
+      add_source_location() = other.source_location();
+    return std::move(*this);
   }
 
 protected:
@@ -199,12 +207,24 @@ public:
     op.push_back(std::move(e3));
   }
 
-  bool is_constant() const;
+  /// Return whether the expression is a constant.
+  /// \return True if is a constant, false otherwise
+  bool is_constant() const
+  {
+    return id() == ID_constant;
+  }
+
   bool is_true() const;
   bool is_false() const;
   bool is_zero() const;
   bool is_one() const;
-  bool is_boolean() const;
+
+  /// Return whether the expression represents a Boolean.
+  /// \return True if is a Boolean, false otherwise.
+  bool is_boolean() const
+  {
+    return type().id() == ID_bool;
+  }
 
   const source_locationt &find_source_location() const;
 

@@ -19,11 +19,8 @@ Author: Daniel Kroening, dkr@amazon.com
 #include <util/parse_options.h>
 #include <util/signal_catcher.h>
 #include <util/ui_message.h>
+#include <util/unicode.h>
 #include <util/version.h>
-
-#ifdef _WIN32
-#  include <util/unicode.h>
-#endif
 
 #include <goto-programs/adjust_float_expressions.h>
 #include <goto-programs/goto_inline.h>
@@ -62,7 +59,7 @@ static void show_goto_functions(const goto_modelt &goto_model)
       std::cout << "^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\n";
 
       std::cout << symbol.display_name() << " /* " << symbol.name << " */\n";
-      fun->second.body.output(ns, symbol.name, std::cout);
+      fun->second.body.output(std::cout);
     }
   }
 }
@@ -137,6 +134,11 @@ int cprover_parse_optionst::main()
 
     console_message_handlert message_handler;
     null_message_handlert null_message_handler;
+
+    if(cmdline.isset("verbose"))
+      message_handler.set_verbosity(messaget::M_PROGRESS);
+    else
+      message_handler.set_verbosity(messaget::M_STATUS);
 
     optionst options;
     auto goto_model =
@@ -218,17 +220,15 @@ int cprover_parse_optionst::main()
       return CPROVER_EXIT_SUCCESS;
     }
 
-// gcc produces a spurious warning on optionalt<irep_idt>.
-// This will likely go away once we use std::optional<irep_idt>.
-// To make clang ignore the pragma, we need to guard it with an ifdef.
-#pragma GCC diagnostic push
-#ifndef __clang__
-#  pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-#endif
-    optionalt<irep_idt> contract = cmdline.isset("contract")
-                                     ? irep_idt(cmdline.get_value("contract"))
-                                     : optionalt<irep_idt>{};
-#pragma GCC diagnostic pop
+    // gcc produces a spurious warning for std::optional<irep_idt> if
+    // initialised with ternary operator. Initialising with an immediately
+    // invoked lambda avoids this.
+    const auto contract = [&]() -> std::optional<irep_idt> {
+      if(cmdline.isset("contract"))
+        return {cmdline.get_value("contract")};
+      else
+        return {};
+    }();
 
     if(cmdline.isset("smt2") || cmdline.isset("text") || variable_encoding)
     {
@@ -238,11 +238,8 @@ int cprover_parse_optionst::main()
       if(cmdline.isset("outfile"))
       {
         auto file_name = cmdline.get_value("outfile");
-#ifdef _WIN32
-        std::ofstream out(widen(file_name));
-#else
-        std::ofstream out(file_name);
-#endif
+        std::ofstream out(widen_if_needed(file_name));
+
         if(!out)
         {
           std::cerr << "failed to open " << file_name << '\n';
@@ -315,7 +312,6 @@ void cprover_parse_optionst::help()
             << banner_string("CPROVER", CBMC_VERSION) << '\n'
             << align_center_with_border("Copyright 2022") << '\n';
 
-  // clang-format off
   std::cout << help_formatter(
     "\n"
     "Usage:                     \tPurpose:\n"

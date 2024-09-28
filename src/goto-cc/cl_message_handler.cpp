@@ -8,9 +8,7 @@ Author: Michael Tautschnig
 
 #include "cl_message_handler.h"
 
-#ifdef _MSC_VER
-#  include <util/unicode.h>
-#endif
+#include <util/unicode.h>
 
 #include <fstream>
 
@@ -27,6 +25,9 @@ void cl_message_handlert::print(
 
   std::ostringstream formatted_message;
 
+  if(level == messaget::M_WARNING && warnings_are_errors)
+    formatted_message << "error: warning treated as error\n";
+
   const irep_idt file = location.get_file();
   const std::string &line = id2string(location.get_line());
   formatted_message << file << '(' << line << "): ";
@@ -42,11 +43,8 @@ void cl_message_handlert::print(
 
   if(full_path.has_value() && !line.empty())
   {
-#ifdef _MSC_VER
-    std::ifstream in(widen(full_path.value()));
-#else
-    std::ifstream in(full_path.value());
-#endif
+    std::ifstream in(widen_if_needed(full_path.value()));
+
     if(in)
     {
       const auto line_number = std::stoull(line);

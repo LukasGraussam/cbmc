@@ -24,8 +24,8 @@ SCENARIO("multiply interval domain", "[core][analyses][interval][multiply]")
 
     WHEN("Single element multiplication")
     {
-      constant_interval_exprt a(CEV(5));
-      constant_interval_exprt b(CEV(10));
+      constant_interval_exprt a = constant_interval_exprt::singleton(CEV(5));
+      constant_interval_exprt b = constant_interval_exprt::singleton(CEV(10));
       const auto a_times_b = a.multiply(b);
       REQUIRE(a_times_b == constant_interval_exprt(CEV(50), CEV(50)));
     }
@@ -105,7 +105,7 @@ SCENARIO("multiply interval domain", "[core][analyses][interval][multiply]")
     WHEN("One domain is infinite and other crosses zero [-2,5]*[7,INF]")
     {
       constant_interval_exprt a(CEV(-2), CEV(5));
-      constant_interval_exprt b(CEV(7), max_exprt(signedbv_typet(32)));
+      constant_interval_exprt b(CEV(7), max_value_exprt(signedbv_typet(32)));
 
       constant_interval_exprt result = constant_interval_exprt::multiply(a, b);
 
@@ -130,7 +130,7 @@ SCENARIO("multiply interval domain", "[core][analyses][interval][multiply]")
     WHEN("One domain is infinite and other is positive [2,5]*[7,INF]")
     {
       constant_interval_exprt a(CEV(2), CEV(5));
-      constant_interval_exprt b(CEV(7), max_exprt(signedbv_typet(32)));
+      constant_interval_exprt b(CEV(7), max_value_exprt(signedbv_typet(32)));
       constant_interval_exprt result = constant_interval_exprt::multiply(a, b);
 
       THEN("Domain is consistent")

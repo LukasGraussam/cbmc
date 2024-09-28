@@ -332,7 +332,7 @@ bool polynomial_acceleratort::fit_polynomial_sliced(
   }
 
   std::size_t width=to_bitvector_type(var.type()).get_width();
-  assert(width>0);
+  CHECK_RETURN(width > 0);
 
   for(std::vector<expr_listt>::iterator it=parameters.begin();
       it!=parameters.end();
@@ -497,7 +497,7 @@ void polynomial_acceleratort::assert_for_values(
   overflow_instrumentert &overflow)
 {
   // First figure out what the appropriate type for this expression is.
-  optionalt<typet> expr_type;
+  std::optional<typet> expr_type;
 
   for(std::map<exprt, int>::iterator it=values.begin();
       it!=values.end();

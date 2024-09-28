@@ -215,14 +215,15 @@ goto_symext::cache_dereference(exprt &dereference_result, statet &state)
     return *cached;
   }
 
-  auto const &cache_symbol = get_fresh_aux_symbol(
-    cache_key.type(),
-    "symex",
-    "dereference_cache",
-    dereference_result.source_location(),
-    language_mode,
-    ns,
-    state.symbol_table);
+  auto cache_symbol_expr = get_fresh_aux_symbol(
+                             cache_key.type(),
+                             "symex",
+                             "dereference_cache",
+                             dereference_result.source_location(),
+                             language_mode,
+                             ns,
+                             state.symbol_table)
+                             .symbol_expr();
 
   // we need to lift possible lets
   // (come from the value set to avoid repeating complex pointer comparisons)
@@ -230,9 +231,13 @@ goto_symext::cache_dereference(exprt &dereference_result, statet &state)
   lift_lets(state, cache_value);
 
   auto assign = symex_assignt{
-    state, symex_targett::assignment_typet::STATE, ns, symex_config, target};
+    shadow_memory,
+    state,
+    symex_targett::assignment_typet::STATE,
+    ns,
+    symex_config,
+    target};
 
-  auto cache_symbol_expr = cache_symbol.symbol_expr();
   assign.assign_symbol(
     to_ssa_expr(state.rename<L1>(cache_symbol_expr, ns).get()),
     expr_skeletont{},
@@ -324,7 +329,7 @@ void goto_symext::dereference_rec(
       symex_dereference_state,
       language_mode,
       expr_is_not_null,
-      log);
+      log.get_message_handler());
 
     // std::cout << "**** " << format(tmp1) << '\n';
     exprt tmp2 =

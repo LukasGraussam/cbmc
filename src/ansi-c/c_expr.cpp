@@ -9,10 +9,13 @@ Author: Daniel Kroening, kroening@kroening.com
 #include "c_expr.h"
 
 #include <util/arith_tools.h>
+#include <util/c_types.h>
+#include <util/namespace.h>
+#include <util/simplify_expr.h>
 
 shuffle_vector_exprt::shuffle_vector_exprt(
   exprt vector1,
-  optionalt<exprt> vector2,
+  std::optional<exprt> vector2,
   exprt::operandst indices)
   : multi_ary_exprt(
       ID_shuffle_vector,
@@ -63,4 +66,25 @@ vector_exprt shuffle_vector_exprt::lower() const
   }
 
   return vector_exprt{std::move(operands), type()};
+}
+
+exprt enum_is_in_range_exprt::lower(const namespacet &ns) const
+{
+  const auto &enum_type = to_c_enum_tag_type(op().type());
+  const c_enum_typet &c_enum_type = ns.follow_tag(enum_type);
+  const c_enum_typet::memberst enum_values = c_enum_type.members();
+
+  exprt::operandst disjuncts;
+  for(const auto &enum_value : enum_values)
+  {
+    constant_exprt val{enum_value.get_value(), enum_type};
+    disjuncts.push_back(equal_exprt(op(), std::move(val)));
+  }
+
+  return simplify_expr(disjunction(disjuncts), ns);
+}
+
+byte_extract_exprt bit_cast_exprt::lower() const
+{
+  return make_byte_extract(op(), from_integer(0, c_index_type()), type());
 }

@@ -22,13 +22,12 @@ Author: Remi Delmas, delmasrd@amazon.com
 #include <util/std_expr.h>
 #include <util/std_types.h>
 
-#include <goto-programs/goto_convert_functions.h>
+#include <ansi-c/goto-conversion/goto_convert_functions.h>
 
 #include "dfcc_contract_handler.h"
 #include "dfcc_instrument.h"
 #include "dfcc_library.h"
 #include "dfcc_spec_functions.h"
-#include "dfcc_utils.h"
 
 #include <map>
 #include <set>
@@ -38,7 +37,6 @@ class messaget;
 class message_handlert;
 class symbolt;
 class conditional_target_group_exprt;
-class cfg_infot;
 
 class dfcc_swap_and_wrapt
 {
@@ -46,13 +44,13 @@ public:
   dfcc_swap_and_wrapt(
     goto_modelt &goto_model,
     message_handlert &message_handler,
-    dfcc_utilst &utils,
     dfcc_libraryt &library,
     dfcc_instrumentt &instrument,
     dfcc_spec_functionst &spec_functions,
     dfcc_contract_handlert &contract_handler);
 
   void swap_and_wrap_check(
+    const loop_contract_configt &loop_contract_config,
     const irep_idt &function_id,
     const irep_idt &contract_id,
     std::set<irep_idt> &function_pointer_contracts,
@@ -60,6 +58,7 @@ public:
   {
     swap_and_wrap(
       dfcc_contract_modet::CHECK,
+      loop_contract_config,
       function_id,
       contract_id,
       function_pointer_contracts,
@@ -73,6 +72,7 @@ public:
   {
     swap_and_wrap(
       dfcc_contract_modet::REPLACE,
+      loop_contract_configt{false},
       function_id,
       contract_id,
       function_pointer_contracts,
@@ -86,7 +86,6 @@ protected:
   goto_modelt &goto_model;
   message_handlert &message_handler;
   messaget log;
-  dfcc_utilst &utils;
   dfcc_libraryt &library;
   dfcc_instrumentt &instrument;
   dfcc_spec_functionst &spec_functions;
@@ -94,10 +93,14 @@ protected:
   namespacet ns;
 
   /// remember all functions that were swapped/wrapped and in which mode
-  static std::map<irep_idt, std::pair<irep_idt, dfcc_contract_modet>> cache;
+  static std::map<
+    irep_idt,
+    std::pair<irep_idt, std::pair<dfcc_contract_modet, loop_contract_configt>>>
+    cache;
 
   void swap_and_wrap(
     const dfcc_contract_modet contract_mode,
+    const loop_contract_configt &loop_contract_config,
     const irep_idt &function_id,
     const irep_idt &contract_id,
     std::set<irep_idt> &function_pointer_contracts,
@@ -106,6 +109,7 @@ protected:
   /// Swaps-and-wraps the given `function_id` in a wrapper function that
   /// checks the given `contract_id`.
   void check_contract(
+    const loop_contract_configt &loop_contract_config,
     const irep_idt &function_id,
     const irep_idt &contract_id,
     std::set<irep_idt> &function_pointer_contracts,

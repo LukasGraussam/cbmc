@@ -21,7 +21,6 @@ Author: Michael Tautschnig
 
 #include <util/cmdline.h>
 #include <util/config.h>
-#include <util/file_util.h>
 #include <util/get_base_name.h>
 #include <util/run.h>
 #include <util/tempdir.h>
@@ -31,6 +30,7 @@ Author: Michael Tautschnig
 #include "goto_cc_cmdline.h"
 #include "hybrid_binary.h"
 
+#include <filesystem>
 #include <fstream> // IWYU pragma: keep
 #include <iostream>
 
@@ -110,6 +110,7 @@ int as_modet::doit()
     messaget::M_WARNING : messaget::M_ERROR;
   messaget::eval_verbosity(
     cmdline.get_value("verbosity"), default_verbosity, message_handler);
+  message_handler.print_warnings_as_errors(cmdline.isset("fatal-warnings"));
 
   if(act_as_as86)
   {
@@ -201,7 +202,7 @@ int as_modet::doit()
       {
         if(outputs>0)
         {
-          assert(!dest.empty());
+          PRECONDITION(!dest.empty());
           compiler.add_input_file(dest);
           os.close();
         }
@@ -230,7 +231,7 @@ int as_modet::doit()
 
     if(outputs>0)
     {
-      assert(!dest.empty());
+      PRECONDITION(!dest.empty());
       compiler.add_input_file(dest);
     }
     else
@@ -260,7 +261,7 @@ int as_modet::doit()
 /// run as or as86 with original command line
 int as_modet::run_as()
 {
-  assert(!cmdline.parsed_argv.empty());
+  PRECONDITION(!cmdline.parsed_argv.empty());
 
   // build new argv
   std::vector<std::string> new_argv;
@@ -303,9 +304,9 @@ int as_modet::as_hybrid_binary(const compilet &compiler)
   std::string saved = output_file + ".goto-cc-saved";
   try
   {
-    file_rename(output_file, saved);
+    std::filesystem::rename(output_file, saved);
   }
-  catch(const cprover_exception_baset &e)
+  catch(const std::filesystem::filesystem_error &e)
   {
     log.error() << "Rename failed: " << e.what() << messaget::eom;
     return 1;

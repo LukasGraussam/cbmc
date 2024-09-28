@@ -1,5 +1,5 @@
-CORE new-smt-backend
-main.c
+CORE
+main.i
 -winx64
 ^EXIT=0$
 ^SIGNAL=0$

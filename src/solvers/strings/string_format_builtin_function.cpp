@@ -49,7 +49,7 @@ string_format_builtin_functiont::string_format_builtin_functiont(
 
   // format_string is only initialized if the expression is constant
   if(
-    array_pool.get_or_create_length(format_string_expr).id() == ID_constant &&
+    array_pool.get_or_create_length(format_string_expr).is_constant() &&
     format_string_expr.content().id() == ID_array)
   {
     const auto length = numeric_cast_v<std::size_t>(
@@ -232,7 +232,8 @@ add_axioms_for_format_specifier(
   }
   }
 
-  INVARIANT(false, "format specifier must belong to [bBhHsScCdoxXeEfgGaAtT%n]");
+  UNREACHABLE_BECAUSE(
+    "format specifier must belong to [bBhHsScCdoxXeEfgGaAtT%n]");
 }
 
 /// Deserialize an argument for format from \p string.
@@ -515,7 +516,7 @@ static std::vector<mp_integer> eval_format_specifier(
   INVARIANT(false, "format specifier must belong to [bBhHsScCdoxXeEfgGaAtT%n]");
 }
 
-optionalt<exprt> string_format_builtin_functiont::eval(
+std::optional<exprt> string_format_builtin_functiont::eval(
   const std::function<exprt(const exprt &)> &get_value) const
 {
   if(!format_string.has_value())

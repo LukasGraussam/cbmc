@@ -57,7 +57,6 @@ lazy_goto_modelt::lazy_goto_modelt(
       driver_program_generate_function_body),
     message_handler(message_handler)
 {
-  language_files.set_message_handler(message_handler);
 }
 
 lazy_goto_modelt::lazy_goto_modelt(lazy_goto_modelt &&other)
@@ -142,19 +141,19 @@ void lazy_goto_modelt::initialize(
     CHECK_RETURN(lf.language != nullptr);
 
     languaget &language = *lf.language;
-    language.set_message_handler(message_handler);
-    language.set_language_options(options);
+    language.set_language_options(options, message_handler);
 
     msg.status() << "Parsing ..." << messaget::eom;
 
-    if(dynamic_cast<java_bytecode_languaget &>(language).parse())
+    std::istringstream unused;
+    if(language.parse(unused, "", message_handler))
     {
       throw invalid_input_exceptiont("PARSING ERROR");
     }
 
     msg.status() << "Converting" << messaget::eom;
 
-    if(language_files.typecheck(symbol_table))
+    if(language_files.typecheck(symbol_table, message_handler))
     {
       throw invalid_input_exceptiont("CONVERSION ERROR");
     }
@@ -171,7 +170,7 @@ void lazy_goto_modelt::initialize(
   set_up_custom_entry_point(
     language_files,
     symbol_table,
-    [this](const irep_idt &id) { goto_functions.unload(id); },
+    [this](const irep_idt &id) { return goto_functions.unload(id); },
     options,
     false,
     message_handler);

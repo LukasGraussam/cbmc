@@ -308,7 +308,10 @@ void configt::ansi_ct::set_arch_spec_arm(const irep_idt &subarch)
     break;
 
   case flavourt::VISUAL_STUDIO:
-    defines.push_back("_M_ARM");
+    if(subarch == "arm64")
+      defines.push_back("_M_ARM64");
+    else
+      defines.push_back("_M_ARM");
     break;
 
   case flavourt::CODEWARRIOR:
@@ -672,6 +675,64 @@ void configt::ansi_ct::set_arch_spec_sh4()
   }
 }
 
+void configt::ansi_ct::set_arch_spec_loongarch64()
+{
+  set_LP64();
+  endianness = endiannesst::IS_LITTLE_ENDIAN;
+  long_double_width = 16 * 8;
+  char_is_unsigned = false;
+  NULL_is_zero = true;
+
+  switch(mode)
+  {
+  case flavourt::GCC:
+    defines.push_back("__loongarch__");
+    break;
+
+  case flavourt::VISUAL_STUDIO:
+    UNREACHABLE; // not supported by Visual Studio
+    break;
+
+  case flavourt::CODEWARRIOR:
+  case flavourt::CLANG:
+  case flavourt::ARM:
+  case flavourt::ANSI:
+    break;
+
+  case flavourt::NONE:
+    UNREACHABLE;
+  }
+}
+
+void configt::ansi_ct::set_arch_spec_emscripten()
+{
+  set_ILP32();
+  endianness = endiannesst::IS_LITTLE_ENDIAN;
+  long_double_width = 16 * 8;
+  char_is_unsigned = false;
+  NULL_is_zero = true;
+
+  switch(mode)
+  {
+  case flavourt::CLANG:
+    defines.push_back("__EMSCRIPTEN__");
+    break;
+
+  case flavourt::VISUAL_STUDIO:
+    UNREACHABLE; // not supported by Visual Studio
+    break;
+
+  case flavourt::GCC:
+  case flavourt::CODEWARRIOR:
+  case flavourt::ARM:
+  case flavourt::ANSI:
+    break;
+
+  case flavourt::NONE:
+    UNREACHABLE;
+  }
+}
+
 configt::ansi_ct::c_standardt configt::ansi_ct::default_c_standard()
 {
 #if defined(__APPLE__)
@@ -756,6 +817,10 @@ void configt::set_arch(const irep_idt &arch)
     ansi_c.set_arch_spec_x86_64();
   else if(arch=="i386")
     ansi_c.set_arch_spec_i386();
+  else if(arch == "loongarch64")
+    ansi_c.set_arch_spec_loongarch64();
+  else if(arch == "emscripten")
+    ansi_c.set_arch_spec_emscripten();
   else
   {
     // We run on something new and unknown.
@@ -804,6 +869,10 @@ bool configt::set(const cmdlinet &cmdline)
   ansi_c.single_precision_constant=false;
   ansi_c.for_has_scope=true; // C99 or later
   ansi_c.ts_18661_3_Floatn_types=false;
+  ansi_c.__float128_is_keyword = false;
+  ansi_c.float16_type = false;
+  ansi_c.bf16_type = false;
+  ansi_c.fp16_type = false;
   ansi_c.c_standard=ansi_ct::default_c_standard();
   ansi_c.endianness=ansi_ct::endiannesst::NO_ENDIANNESS;
   ansi_c.os=ansi_ct::ost::NO_OS;
@@ -934,13 +1003,13 @@ bool configt::set(const cmdlinet &cmdline)
       #ifdef _WIN32
       ansi_c.preprocessor=ansi_ct::preprocessort::VISUAL_STUDIO;
       ansi_c.mode=ansi_ct::flavourt::VISUAL_STUDIO;
-      #elif __FreeBSD__
+#elif defined(__FreeBSD__) || defined(__OpenBSD__)
       ansi_c.preprocessor=ansi_ct::preprocessort::CLANG;
       ansi_c.mode=ansi_ct::flavourt::VISUAL_STUDIO;
-      #else
+#else
       ansi_c.preprocessor=ansi_ct::preprocessort::GCC;
       ansi_c.mode=ansi_ct::flavourt::VISUAL_STUDIO;
-      #endif
+#endif
 
       cpp.cpp_standard = cppt::cpp_standardt::CPP14;
     }
@@ -951,20 +1020,34 @@ bool configt::set(const cmdlinet &cmdline)
     ansi_c.os=configt::ansi_ct::ost::OS_MACOS;
     ansi_c.mode = ansi_ct::flavourt::CLANG;
     ansi_c.preprocessor=ansi_ct::preprocessort::CLANG;
+    // configure_gcc sets these with additional version-of-clang level of
+    // detail, but the below are reasonable defaults for modern clang
+    // installations
+    ansi_c.__float128_is_keyword = true;
+    ansi_c.float16_type = true;
+    ansi_c.bf16_type = true;
+    ansi_c.fp16_type = true;
   }
-  else if(os=="linux" || os=="solaris")
+  else if(os == "linux" || os == "solaris" || os == "netbsd" || os == "hurd")
   {
     ansi_c.lib=configt::ansi_ct::libt::LIB_FULL;
     ansi_c.os=configt::ansi_ct::ost::OS_LINUX;
     ansi_c.mode=ansi_ct::flavourt::GCC;
     ansi_c.preprocessor=ansi_ct::preprocessort::GCC;
   }
-  else if(os=="freebsd")
+  else if(os == "freebsd" || os == "openbsd")
   {
     ansi_c.lib=configt::ansi_ct::libt::LIB_FULL;
     ansi_c.os=configt::ansi_ct::ost::OS_LINUX;
     ansi_c.mode=ansi_ct::flavourt::CLANG;
     ansi_c.preprocessor=ansi_ct::preprocessort::CLANG;
+    // configure_gcc sets these with additional version-of-clang level of
+    // detail, but the below are reasonable defaults for modern clang
+    // installations
+    ansi_c.__float128_is_keyword = true;
+    ansi_c.float16_type = true;
+    ansi_c.bf16_type = true;
+    ansi_c.fp16_type = true;
   }
   else
   {
@@ -1126,7 +1209,15 @@ bool configt::set(const cmdlinet &cmdline)
   if(cmdline.isset("malloc-fail-assert"))
     ansi_c.malloc_failure_mode = ansi_c.malloc_failure_mode_assert_then_assume;
 
-  ansi_c.malloc_may_fail = cmdline.isset("malloc-may-fail");
+  if(cmdline.isset("malloc-may-fail"))
+  {
+    ansi_c.malloc_may_fail = true;
+  }
+  if(cmdline.isset("no-malloc-may-fail"))
+  {
+    ansi_c.malloc_may_fail = false;
+    ansi_c.malloc_failure_mode = ansi_ct::malloc_failure_mode_none;
+  }
 
   if(cmdline.isset("c89"))
     ansi_c.set_c89();
@@ -1156,15 +1247,17 @@ bool configt::set(const cmdlinet &cmdline)
   else
   {
     // For other systems assume argc is no larger than the what would make argv
-    // consume all available memory space:
-    // 2^pointer_width / (pointer_width / char_width) is the maximum number of
-    // argv elements sysconf(ARG_MAX) is likely much lower than this, but we
-    // don't know that value for the verification target platform.
+    // the largest representable array (when using signed integers to represent
+    // array sizes):
+    // 2^(pointer_width - 1) / (pointer_width / char_width) is the maximum
+    // number of argv elements sysconf(ARG_MAX) is likely much lower than this,
+    // but we don't know that value for the verification target platform.
     const auto pointer_bits_2log =
       address_bits(ansi_c.pointer_width / ansi_c.char_width);
-    if(ansi_c.pointer_width - pointer_bits_2log <= ansi_c.int_width)
+    if(ansi_c.pointer_width - pointer_bits_2log - 1 <= ansi_c.int_width)
     {
-      ansi_c.max_argc = power(2, config.ansi_c.int_width - pointer_bits_2log);
+      ansi_c.max_argc =
+        power(2, config.ansi_c.int_width - pointer_bits_2log - 1);
     }
     // otherwise we leave argc unconstrained
   }
@@ -1236,7 +1329,7 @@ static unsigned unsigned_from_ns(
   simplify(tmp, ns);
 
   INVARIANT(
-    tmp.id() == ID_constant,
+    tmp.is_constant(),
     "symbol table configuration entry '" + id2string(id) +
       "' must be a constant");
 
@@ -1285,8 +1378,8 @@ void configt::set_from_symbol_table(const symbol_table_baset &symbol_table)
   ansi_c.char_is_unsigned=unsigned_from_ns(ns, "char_is_unsigned")!=0;
   ansi_c.wchar_t_is_unsigned=unsigned_from_ns(ns, "wchar_t_is_unsigned")!=0;
   // for_has_scope, single_precision_constant, rounding_mode,
-  // ts_18661_3_Floatn_types are not architectural features,
-  // and thus not stored in namespace
+  // ts_18661_3_Floatn_types, __float128_is_keyword, float16_type, bf16_type,
+  // fp16_type are not architectural features, and thus not stored in namespace
 
   ansi_c.alignment=unsigned_from_ns(ns, "alignment");
 
@@ -1364,7 +1457,7 @@ irep_idt configt::this_architecture()
     #else
     this_arch = "arm";
     #endif
-  #elif defined(__mipsel__)
+  #elif defined(_MIPSEL)
     #if _MIPS_SIM==_ABIO32
     this_arch = "mipsel";
     #elif _MIPS_SIM==_ABIN32
@@ -1421,6 +1514,10 @@ irep_idt configt::this_architecture()
     this_arch = "hppa";
   #elif defined(__sh__)
     this_arch = "sh4";
+  #elif defined(__loongarch__)
+    this_arch = "loongarch64";
+  #elif defined(__EMSCRIPTEN__)
+    this_arch = "emscripten";
   #else
     // something new and unknown!
     this_arch = "unknown";
@@ -1456,13 +1553,46 @@ irep_idt configt::this_operating_system()
   this_os="macos";
   #elif __FreeBSD__
   this_os="freebsd";
-  #elif __linux__
+#elif __OpenBSD__
+  this_os = "openbsd";
+#elif __NetBSD__
+  this_os = "netbsd";
+#elif __linux__
   this_os="linux";
-  #elif __SVR4
+#elif __SVR4
   this_os="solaris";
-  #else
+#elif __gnu_hurd__
+  this_os = "hurd";
+#elif __EMSCRIPTEN__
+  this_os = "emscripten";
+#else
   this_os="unknown";
-  #endif
+#endif
 
   return this_os;
+}
+
+/// The maximum allocation size is determined by the number of bits that
+/// are left in the pointer of width `ansi_c.pointer_width`.
+///
+/// The allocation size cannot exceed the number represented by the (signed)
+/// offset, otherwise it would not be possible to store a pointer into a
+/// valid bit of memory. Therefore, the max allocation size is
+/// 2^(offset_bits - 1), where the offset bits is the number of bits left in the
+/// pointer after the object bits.
+///
+/// The offset must be signed, as a pointer can point to the end of the memory
+/// block, and needs to be able to point back to the start.
+/// \return The size in bytes of the maximum allocation supported.
+mp_integer configt::max_malloc_size() const
+{
+  PRECONDITION(ansi_c.pointer_width >= 1);
+  PRECONDITION(bv_encoding.object_bits < ansi_c.pointer_width);
+  PRECONDITION(bv_encoding.object_bits >= 1);
+  const auto offset_bits = ansi_c.pointer_width - bv_encoding.object_bits;
+  // We require the offset to be able to express upto allocation_size - 1,
+  // but also down to -allocation_size, therefore the size is allowable
+  // is number of bits, less the signed bit.
+  const auto bits_for_positive_offset = offset_bits - 1;
+  return ((mp_integer)1) << (mp_integer)bits_for_positive_offset;
 }

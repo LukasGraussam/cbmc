@@ -29,7 +29,6 @@ target_link_libraries(cbmc-lib
 )
 
 add_if_library(cbmc-lib bv_refinement)
-add_if_library(cbmc-lib jsil)
 
 # Executable
 add_executable(cbmc cbmc_main.cpp)
@@ -58,15 +57,16 @@ endif()
 
 # bash completion
 if(NOT WIN32)
-  add_custom_command(OUTPUT "${CMAKE_SOURCE_DIR}/scripts/bash-autocomplete/cbmc.sh"
-    COMMAND "${CMAKE_SOURCE_DIR}/scripts/bash-autocomplete/extract_switches.sh"
+  find_program(BASH_PROGRAM bash REQUIRED)
+  add_custom_command(OUTPUT "${CBMC_ROOT_DIR}/scripts/bash-autocomplete/cbmc.sh"
+    COMMAND "${BASH_PROGRAM}" "${CBMC_ROOT_DIR}/scripts/bash-autocomplete/extract_switches.sh" "${CMAKE_CXX_COMPILER}"
     DEPENDS $<TARGET_FILE:cbmc>
   )
   add_custom_target(cbmc.sh ALL
-    DEPENDS "${CMAKE_SOURCE_DIR}/scripts/bash-autocomplete/cbmc.sh"
+    DEPENDS "${CBMC_ROOT_DIR}/scripts/bash-autocomplete/cbmc.sh"
   )
   install(
-    FILES ${CMAKE_SOURCE_DIR}/scripts/bash-autocomplete/cbmc.sh
+    FILES ${CBMC_ROOT_DIR}/scripts/bash-autocomplete/cbmc.sh
     DESTINATION etc/bash_completion.d
     RENAME cbmc
   )

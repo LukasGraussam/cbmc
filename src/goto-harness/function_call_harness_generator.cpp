@@ -11,23 +11,24 @@ Author: Diffblue Ltd.
 #include <util/arith_tools.h>
 #include <util/c_types.h>
 #include <util/exception_utils.h>
-#include <util/make_unique.h>
 #include <util/prefix.h>
 #include <util/std_code.h>
 #include <util/string_utils.h>
 #include <util/ui_message.h>
 
-#include <goto-programs/allocate_objects.h>
-#include <goto-programs/goto_convert_functions.h>
 #include <goto-programs/goto_model.h>
 
-#include <algorithm>
-#include <iterator>
-#include <set>
+#include <ansi-c/allocate_objects.h>
+#include <ansi-c/goto-conversion/goto_convert_functions.h>
 
 #include "function_harness_generator_options.h"
 #include "goto_harness_generator_factory.h"
 #include "recursive_initialization.h"
+
+#include <algorithm>
+#include <iterator>
+#include <set>
+#include <utility>
 
 /// This contains implementation details of
 /// function call harness generator to avoid
@@ -94,7 +95,7 @@ struct function_call_harness_generatort::implt
 
 function_call_harness_generatort::function_call_harness_generatort(
   ui_message_handlert &message_handler)
-  : goto_harness_generatort{}, p_impl(util_make_unique<implt>())
+  : goto_harness_generatort{}, p_impl(std::make_unique<implt>())
 {
   p_impl->message_handler = &message_handler;
 }
@@ -136,7 +137,8 @@ void function_call_harness_generatort::handle_option(
         {
           equal_param_set.insert(param_id);
         }
-        p_impl->function_parameters_to_treat_equal.push_back(equal_param_set);
+        p_impl->function_parameters_to_treat_equal.push_back(
+          std::move(equal_param_set));
       }
     }
   }
@@ -252,7 +254,7 @@ void function_call_harness_generatort::implt::generate(
     map_function_parameters_to_function_argument_names();
   recursive_initialization_config.pointers_to_treat_as_cstrings =
     function_arguments_to_treat_as_cstrings;
-  recursive_initialization = util_make_unique<recursive_initializationt>(
+  recursive_initialization = std::make_unique<recursive_initializationt>(
     recursive_initialization_config, goto_model);
 
   generate_nondet_globals(function_body);
@@ -389,8 +391,7 @@ void function_call_harness_generatort::validate_options(
         "--" COMMON_HARNESS_GENERATOR_FUNCTION_POINTER_CAN_BE_NULL_OPT};
     }
 
-    const auto &function_pointer_type =
-      ns.follow(function_pointer_symbol_pointer->type);
+    const auto &function_pointer_type = function_pointer_symbol_pointer->type;
 
     if(!can_cast_type<pointer_typet>(function_pointer_type))
     {
@@ -527,7 +528,8 @@ function_call_harness_generatort::implt::declare_arguments(
       cluster_argument_names.insert(
         parameter_name_to_argument_name[parameter_name]);
     }
-    function_arguments_to_treat_equal.push_back(cluster_argument_names);
+    function_arguments_to_treat_equal.push_back(
+      std::move(cluster_argument_names));
   }
 
   allocate_objects.declare_created_symbols(function_body);

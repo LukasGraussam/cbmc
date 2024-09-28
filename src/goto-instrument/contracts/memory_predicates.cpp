@@ -16,14 +16,13 @@ Date: July 2021
 #include <util/arith_tools.h>
 #include <util/c_types.h>
 #include <util/config.h>
+#include <util/fresh_symbol.h>
 #include <util/prefix.h>
 
-#include <goto-programs/goto_convert_functions.h>
-
 #include <ansi-c/ansi_c_language.h>
+#include <ansi-c/goto-conversion/goto_convert_functions.h>
 #include <linking/static_lifetime_init.h>
 
-#include "contracts.h"
 #include "instrument_spec_assigns.h"
 #include "utils.h"
 
@@ -34,6 +33,8 @@ std::set<irep_idt> &functions_in_scope_visitort::function_calls()
 
 void functions_in_scope_visitort::operator()(const goto_programt &prog)
 {
+  messaget log{message_handler};
+
   forall_goto_program_instructions(ins, prog)
   {
     if(ins->is_function_call())
@@ -77,7 +78,8 @@ void functions_in_scope_visitort::operator()(const goto_programt &prog)
   }
 }
 
-std::set<goto_programt::targett> &find_is_fresh_calls_visitort::is_fresh_calls()
+std::set<goto_programt::targett, goto_programt::target_less_than> &
+find_is_fresh_calls_visitort::is_fresh_calls()
 {
   return function_set;
 }
@@ -108,10 +110,10 @@ void find_is_fresh_calls_visitort::operator()(goto_programt &prog)
   }
 }
 
-void is_fresh_baset::update_requires(goto_programt &requires)
+void is_fresh_baset::update_requires(goto_programt &requires_)
 {
   find_is_fresh_calls_visitort requires_visitor;
-  requires_visitor(requires);
+  requires_visitor(requires_);
   for(auto it : requires_visitor.is_fresh_calls())
   {
     create_requires_fn_call(it);
@@ -163,28 +165,29 @@ void is_fresh_baset::add_memory_map_dead(goto_programt &program)
 
 void is_fresh_baset::add_declarations(const std::string &decl_string)
 {
+  messaget log{message_handler};
   log.debug() << "Creating declarations: \n" << decl_string << "\n";
 
   std::istringstream iss(decl_string);
 
   ansi_c_languaget ansi_c_language;
-  ansi_c_language.set_message_handler(log.get_message_handler());
   configt::ansi_ct::preprocessort pp = config.ansi_c.preprocessor;
   config.ansi_c.preprocessor = configt::ansi_ct::preprocessort::NONE;
-  ansi_c_language.parse(iss, "");
+  ansi_c_language.parse(iss, "", log.get_message_handler());
   config.ansi_c.preprocessor = pp;
 
   symbol_tablet tmp_symbol_table;
-  ansi_c_language.typecheck(tmp_symbol_table, "<built-in-library>");
+  ansi_c_language.typecheck(
+    tmp_symbol_table, "<built-in-library>", log.get_message_handler());
   exprt value = nil_exprt();
 
   goto_functionst tmp_functions;
 
   // Add the new functions into the goto functions table.
-  parent.get_goto_functions().function_map[ensures_fn_name].copy_from(
+  goto_model.goto_functions.function_map[ensures_fn_name].copy_from(
     tmp_functions.function_map[ensures_fn_name]);
 
-  parent.get_goto_functions().function_map[requires_fn_name].copy_from(
+  goto_model.goto_functions.function_map[requires_fn_name].copy_from(
     tmp_functions.function_map[requires_fn_name]);
 
   for(const auto &symbol_pair : tmp_symbol_table.symbols)
@@ -194,7 +197,7 @@ void is_fresh_baset::add_declarations(const std::string &decl_string)
       symbol_pair.first == ensures_fn_name ||
       symbol_pair.first == requires_fn_name || symbol_pair.first == "malloc")
     {
-      this->parent.get_symbol_table().insert(symbol_pair.second);
+      goto_model.symbol_table.insert(symbol_pair.second);
     }
     // Parameters are stored as scoped names in the symbol table.
     else if(
@@ -202,24 +205,14 @@ void is_fresh_baset::add_declarations(const std::string &decl_string)
          id2string(symbol_pair.first), id2string(ensures_fn_name) + "::") ||
        has_prefix(
          id2string(symbol_pair.first), id2string(requires_fn_name) + "::")) &&
-      parent.get_symbol_table().add(symbol_pair.second))
+      goto_model.symbol_table.add(symbol_pair.second))
     {
       UNREACHABLE;
     }
   }
 
-  if(parent.get_goto_functions().function_map.erase(INITIALIZE_FUNCTION) != 0)
-  {
-    static_lifetime_init(
-      parent.get_symbol_table(),
-      parent.get_symbol_table().lookup_ref(INITIALIZE_FUNCTION).location);
-    goto_convert(
-      INITIALIZE_FUNCTION,
-      parent.get_symbol_table(),
-      parent.get_goto_functions(),
-      log.get_message_handler());
-    parent.get_goto_functions().update();
-  }
+  if(goto_model.can_produce_function(INITIALIZE_FUNCTION))
+    recreate_initialize_function(goto_model, message_handler);
 }
 
 void is_fresh_baset::update_fn_call(
@@ -247,10 +240,10 @@ void is_fresh_baset::update_fn_call(
 /* Declarations for contract enforcement */
 
 is_fresh_enforcet::is_fresh_enforcet(
-  code_contractst &_parent,
-  messaget _log,
-  irep_idt _fun_id)
-  : is_fresh_baset(_parent, _log, _fun_id)
+  goto_modelt &goto_model,
+  message_handlert &message_handler,
+  const irep_idt &_fun_id)
+  : is_fresh_baset(goto_model, message_handler, _fun_id)
 {
   std::stringstream ssreq, ssensure, ssmemmap;
   ssreq << CPROVER_PREFIX "enforce_requires_is_fresh";
@@ -262,20 +255,20 @@ is_fresh_enforcet::is_fresh_enforcet(
   ssmemmap << CPROVER_PREFIX "is_fresh_memory_map_" << fun_id;
   this->memmap_name = ssmemmap.str();
 
-  const auto &mode = parent.get_symbol_table().lookup_ref(_fun_id).mode;
-  this->memmap_symbol = new_tmp_symbol(
+  const auto &mode = goto_model.symbol_table.lookup_ref(_fun_id).mode;
+  this->memmap_symbol = get_fresh_aux_symbol(
     get_memmap_type(),
+    "",
+    this->memmap_name,
     source_locationt(),
     mode,
-    parent.get_symbol_table(),
-    this->memmap_name,
-    true);
+    goto_model.symbol_table);
 }
 
 void is_fresh_enforcet::create_declarations()
 {
   // Check if symbols are already declared
-  if(parent.get_symbol_table().lookup(requires_fn_name) != nullptr)
+  if(goto_model.symbol_table.has_symbol(requires_fn_name))
     return;
 
   std::ostringstream oss;
@@ -326,10 +319,10 @@ void is_fresh_enforcet::create_ensures_fn_call(goto_programt::targett &ins)
 }
 
 is_fresh_replacet::is_fresh_replacet(
-  code_contractst &_parent,
-  messaget _log,
-  irep_idt _fun_id)
-  : is_fresh_baset(_parent, _log, _fun_id)
+  goto_modelt &goto_model,
+  message_handlert &message_handler,
+  const irep_idt &_fun_id)
+  : is_fresh_baset(goto_model, message_handler, _fun_id)
 {
   std::stringstream ssreq, ssensure, ssmemmap;
   ssreq << CPROVER_PREFIX "replace_requires_is_fresh";
@@ -341,21 +334,22 @@ is_fresh_replacet::is_fresh_replacet(
   ssmemmap << CPROVER_PREFIX "is_fresh_memory_map_" << fun_id;
   this->memmap_name = ssmemmap.str();
 
-  const auto &mode = parent.get_symbol_table().lookup_ref(_fun_id).mode;
-  this->memmap_symbol = new_tmp_symbol(
+  const auto &mode = goto_model.symbol_table.lookup_ref(_fun_id).mode;
+  this->memmap_symbol = get_fresh_aux_symbol(
     get_memmap_type(),
+    "",
+    this->memmap_name,
     source_locationt(),
     mode,
-    parent.get_symbol_table(),
-    this->memmap_name,
-    true);
+    goto_model.symbol_table);
 }
 
 void is_fresh_replacet::create_declarations()
 {
   // Check if symbols are already declared
-  if(parent.get_symbol_table().lookup(requires_fn_name) != nullptr)
+  if(goto_model.symbol_table.has_symbol(requires_fn_name))
     return;
+
   std::ostringstream oss;
   std::string cprover_prefix(CPROVER_PREFIX);
   oss << "static _Bool " << requires_fn_name

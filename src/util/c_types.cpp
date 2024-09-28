@@ -19,11 +19,6 @@ bitvector_typet c_index_type()
   return signed_size_type();
 }
 
-bitvector_typet index_type()
-{
-  return c_index_type();
-}
-
 signedbv_typet signed_int_type()
 {
   signedbv_typet result(config.ansi_c.int_width);
@@ -301,12 +296,12 @@ std::string c_type_as_string(const irep_idt &c_type)
     return "";
 }
 
-optionalt<std::pair<struct_union_typet::componentt, mp_integer>>
+std::optional<std::pair<struct_union_typet::componentt, mp_integer>>
 union_typet::find_widest_union_component(const namespacet &ns) const
 {
   const union_typet::componentst &comps = components();
 
-  optionalt<mp_integer> max_width;
+  std::optional<mp_integer> max_width;
   typet max_comp_type;
   irep_idt max_comp_name;
 

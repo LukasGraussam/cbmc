@@ -47,17 +47,14 @@ static symbolt add_or_get_symbol(
   ns.lookup(name, psymbol);
   if(psymbol != nullptr)
     return *psymbol;
-  symbolt new_symbol;
-  new_symbol.name = name;
+  symbolt new_symbol{name, type, ID_java};
   new_symbol.pretty_name = name;
   new_symbol.base_name = base_name;
-  new_symbol.type = type;
   new_symbol.value = value;
   new_symbol.is_lvalue = true;
   new_symbol.is_state_var = true;
   new_symbol.is_static_lifetime = is_static_lifetime;
   new_symbol.is_thread_local = is_thread_local;
-  new_symbol.mode = ID_java;
   symbol_table.add(new_symbol);
   return new_symbol;
 }
@@ -412,9 +409,8 @@ static void instrument_get_monitor_count(
   PRECONDITION(f_code.arguments().size() == 1);
 
   const namespacet ns(symbol_table);
-  const auto &followed_type =
-    ns.follow(to_pointer_type(f_code.arguments()[0].type()).base_type());
-  const auto &object_type = to_struct_type(followed_type);
+  const auto &object_type = ns.follow_tag(to_struct_tag_type(
+    to_pointer_type(f_code.arguments()[0].type()).base_type()));
   code_assignt code_assign(
     f_code.lhs(),
     member_exprt(
@@ -608,9 +604,9 @@ void convert_synchronized_methods(
   message_handlert &message_handler)
 {
   namespacet ns(symbol_table);
-  for(const auto &entry : symbol_table)
+  for(auto s_it = symbol_table.begin(); s_it != symbol_table.end(); ++s_it)
   {
-    const symbolt &symbol = entry.second;
+    const symbolt &symbol = s_it->second;
 
     if(symbol.type.id() != ID_code)
       continue;
@@ -622,11 +618,10 @@ void convert_synchronized_methods(
     if(symbol.type.get_bool(ID_is_static))
     {
       messaget message(message_handler);
-      message.warning() << "Java method '" << entry.first
+      message.warning() << "Java method '" << s_it->first
                         << "' is static and synchronized."
                         << " This is unsupported, the synchronized keyword"
-                        << " will be ignored."
-                        << messaget::eom;
+                        << " will be ignored." << messaget::eom;
       continue;
     }
 
@@ -641,7 +636,7 @@ void convert_synchronized_methods(
       continue;
 
     // get writeable reference and instrument the method
-    symbolt &w_symbol = symbol_table.get_writeable_ref(entry.first);
+    symbolt &w_symbol = s_it.get_writeable_symbol();
     instrument_synchronized_code(
       symbol_table, w_symbol, it->second.symbol_expr());
   }

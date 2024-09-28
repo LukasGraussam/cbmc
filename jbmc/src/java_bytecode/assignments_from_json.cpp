@@ -16,9 +16,10 @@ Author: Diffblue Ltd.
 #include <util/symbol_table_base.h>
 #include <util/unicode.h>
 
-#include <goto-programs/allocate_objects.h>
 #include <goto-programs/class_identifier.h>
 #include <goto-programs/goto_instruction_code.h>
+
+#include <ansi-c/allocate_objects.h>
 
 #include "ci_lazy_methods_needed.h"
 #include "code_with_references.h"
@@ -44,7 +45,7 @@ struct object_creation_infot
 
   /// Where runtime types differ from compile-time types, we need to mark the
   /// runtime types as needed by lazy methods.
-  optionalt<ci_lazy_methods_neededt> &needed_lazy_methods;
+  std::optional<ci_lazy_methods_neededt> &needed_lazy_methods;
 
   /// Map to keep track of reference-equal objects. Each entry has an ID (such
   /// that any two reference-equal objects have the same ID) and the expression
@@ -67,9 +68,8 @@ static java_class_typet
 followed_class_type(const exprt &expr, const symbol_table_baset &symbol_table)
 {
   const pointer_typet &pointer_type = to_pointer_type(expr.type());
-  const java_class_typet &java_class_type = to_java_class_type(
-    namespacet{symbol_table}.follow(pointer_type.base_type()));
-  return java_class_type;
+  return to_java_class_type(namespacet{symbol_table}.follow_tag(
+    to_struct_tag_type(pointer_type.base_type())));
 }
 
 static bool
@@ -117,7 +117,7 @@ static bool is_enum_with_type_equal_to_declaring_type(
 /// A runtime type that is different from the objects compile-time type should
 /// be specified in `json` in this way.
 /// Type values are of the format "my.package.name.ClassName".
-static optionalt<std::string> get_type(const jsont &json)
+static std::optional<std::string> get_type(const jsont &json)
 {
   if(!json.is_object())
     return {};
@@ -267,9 +267,9 @@ static jsont get_untyped_string(const jsont &json)
 /// \param symbol_table: used to look up the type given its name.
 /// \return runtime type of the object, if specified by at least one of the
 ///   parameters.
-static optionalt<java_class_typet> runtime_type(
+static std::optional<java_class_typet> runtime_type(
   const jsont &json,
-  const optionalt<std::string> &type_from_array,
+  const std::optional<std::string> &type_from_array,
   const symbol_table_baset &symbol_table)
 {
   const auto type_from_json = get_type(json);
@@ -304,9 +304,9 @@ static optionalt<java_class_typet> runtime_type(
 ///   field, this takes priority over \p type_from_array.
 /// \param type_from_array: may contain a type name from a containing array.
 /// \return if the type of an array was given, the type of its elements.
-static optionalt<std::string> element_type_from_array_type(
+static std::optional<std::string> element_type_from_array_type(
   const jsont &json,
-  const optionalt<std::string> &type_from_array)
+  const std::optional<std::string> &type_from_array)
 {
   if(const auto json_array_type = get_type(json))
   {
@@ -332,7 +332,7 @@ static optionalt<std::string> element_type_from_array_type(
 code_with_references_listt assign_from_json_rec(
   const exprt &expr,
   const jsont &json,
-  const optionalt<std::string> &type_from_array,
+  const std::optional<std::string> &type_from_array,
   object_creation_infot &info);
 
 /// One of the base cases (primitive case) of the recursion.
@@ -392,7 +392,7 @@ static code_frontend_assignt assign_null(const exprt &expr)
 static code_with_references_listt assign_array_data_component_from_json(
   const exprt &expr,
   const jsont &json,
-  const optionalt<std::string> &type_from_array,
+  const std::optional<std::string> &type_from_array,
   object_creation_infot &info)
 {
   const auto &java_class_type = followed_class_type(expr, info.symbol_table);
@@ -411,7 +411,7 @@ static code_with_references_listt assign_array_data_component_from_json(
     code_frontend_assignt{array_init_data, data_member_expr, info.loc});
 
   size_t index = 0;
-  const optionalt<std::string> inferred_element_type =
+  const std::optional<std::string> inferred_element_type =
     element_type_from_array_type(json, type_from_array);
   const json_arrayt json_array = get_untyped_array(json, element_type);
   for(auto it = json_array.begin(); it < json_array.end(); it++, index++)
@@ -457,7 +457,7 @@ static std::pair<code_with_references_listt, exprt>
 assign_det_length_array_from_json(
   const exprt &expr,
   const jsont &json,
-  const optionalt<std::string> &type_from_array,
+  const std::optional<std::string> &type_from_array,
   object_creation_infot &info)
 {
   PRECONDITION(is_java_array_type(expr.type()));
@@ -486,7 +486,7 @@ static code_with_references_listt assign_nondet_length_array_from_json(
   const exprt &array,
   const jsont &json,
   const exprt &given_length_expr,
-  const optionalt<std::string> &type_from_array,
+  const std::optional<std::string> &type_from_array,
   object_creation_infot &info)
 {
   PRECONDITION(is_java_array_type(array.type()));
@@ -530,8 +530,8 @@ static code_with_references_listt assign_struct_components_from_json(
   const jsont &json,
   object_creation_infot &info)
 {
-  const java_class_typet &java_class_type =
-    to_java_class_type(namespacet{info.symbol_table}.follow(expr.type()));
+  const java_class_typet &java_class_type = to_java_class_type(
+    namespacet{info.symbol_table}.follow_tag(to_struct_tag_type(expr.type())));
   code_with_references_listt result;
   for(const auto &component : java_class_type.components())
   {
@@ -576,7 +576,7 @@ static code_with_references_listt assign_struct_from_json(
 {
   const namespacet ns{info.symbol_table};
   const java_class_typet &java_class_type =
-    to_java_class_type(ns.follow(expr.type()));
+    to_java_class_type(ns.follow_tag(to_struct_tag_type(expr.type())));
   code_with_references_listt result;
   if(is_java_string_type(java_class_type))
   {
@@ -641,8 +641,9 @@ static code_with_references_listt assign_enum_from_json(
 
   dereference_exprt values_struct{
     info.symbol_table.lookup_ref(values_name).symbol_expr()};
+  const namespacet ns{info.symbol_table};
   const auto &values_struct_type =
-    to_struct_type(namespacet{info.symbol_table}.follow(values_struct.type()));
+    ns.follow_tag(to_struct_tag_type(values_struct.type()));
   PRECONDITION(is_valid_java_array(values_struct_type));
   const member_exprt values_data = member_exprt{
     values_struct, "data", values_struct_type.components()[2].type()};
@@ -793,7 +794,7 @@ static get_or_create_reference_resultt get_or_create_reference(
 static code_with_references_listt assign_reference_from_json(
   const exprt &expr,
   const jsont &json,
-  const optionalt<std::string> &type_from_array,
+  const std::optional<std::string> &type_from_array,
   object_creation_infot &info)
 {
   const std::string &id = has_enum_type(expr, info.symbol_table)
@@ -849,7 +850,7 @@ static code_with_references_listt assign_reference_from_json(
 code_with_references_listt assign_from_json_rec(
   const exprt &expr,
   const jsont &json,
-  const optionalt<std::string> &type_from_array,
+  const std::optional<std::string> &type_from_array,
   object_creation_infot &info)
 {
   code_with_references_listt result;
@@ -915,7 +916,7 @@ code_with_references_listt assign_from_json(
   const jsont &json,
   const irep_idt &function_id,
   symbol_table_baset &symbol_table,
-  optionalt<ci_lazy_methods_neededt> &needed_lazy_methods,
+  std::optional<ci_lazy_methods_neededt> &needed_lazy_methods,
   size_t max_user_array_length,
   std::unordered_map<std::string, object_creation_referencet> &references)
 {

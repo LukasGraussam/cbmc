@@ -6,7 +6,6 @@
 #include <util/irep.h>
 
 #include <solvers/smt2_incremental/response_or_error.h>
-#include <solvers/smt2_incremental/type_traits.h>
 
 #include "smt_index.h"
 #include "smt_sorts.h"
@@ -22,7 +21,7 @@ class smt_termt : protected irept, private smt_sortt::storert<smt_termt>
 {
 public:
   // smt_termt does not support the notion of an empty / null state. Use
-  // optionalt<smt_termt> instead if an empty term is required.
+  // std::optional<smt_termt> instead if an empty term is required.
   smt_termt() = delete;
 
   using irept::pretty;
@@ -150,32 +149,19 @@ private:
   template <class functiont>
   struct has_indicest<
     functiont,
-    void_t<decltype(std::declval<functiont>().indices())>> : std::true_type
+    std::void_t<decltype(std::declval<functiont>().indices())>> : std::true_type
   {
   };
 
-  /// Overload for when \p functiont does not have indices.
-  template <class functiont>
-  static std::vector<smt_indext>
-  indices(const functiont &function, const std::false_type &has_indices)
-  {
-    return {};
-  }
-
-  /// Overload for when \p functiont has indices member function.
-  template <class functiont>
-  static std::vector<smt_indext>
-  indices(const functiont &function, const std::true_type &has_indices)
-  {
-    return function.indices();
-  }
-
-  /// Returns `function.indices` if `functiont` has an `indices` member function
-  /// or returns an empty collection otherwise.
+  /// Returns `function.indices()` if `functiont` has an `indices` member
+  /// function or returns an empty collection otherwise.
   template <class functiont>
   static std::vector<smt_indext> indices(const functiont &function)
   {
-    return indices(function, has_indicest<functiont>{});
+    if constexpr(has_indicest<functiont>::value)
+      return function.indices();
+    else
+      return {};
   }
 
 public:

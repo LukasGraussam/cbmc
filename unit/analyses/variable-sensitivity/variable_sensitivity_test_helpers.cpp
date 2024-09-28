@@ -112,7 +112,8 @@ std::shared_ptr<const value_set_abstract_objectt> make_bottom_value_set()
 
 std::shared_ptr<const value_set_abstract_objectt> make_top_value_set()
 {
-  return std::make_shared<const value_set_abstract_objectt>(integer_typet());
+  return std::make_shared<const value_set_abstract_objectt>(
+    integer_typet(), true, false);
 }
 
 abstract_object_pointert make_bottom_object()
@@ -176,9 +177,9 @@ std::string expr_to_str(const exprt &expr)
 {
   if(expr.id() == ID_constant_interval)
     return interval_to_str(to_constant_interval_expr(expr));
-  if(expr.id() == ID_max)
+  if(expr.id() == ID_max_value)
     return "max";
-  if(expr.id() == ID_min)
+  if(expr.id() == ID_min_value)
     return "min";
 
   auto st = symbol_tablet{};
@@ -589,7 +590,7 @@ std::shared_ptr<const value_set_abstract_objectt> add_as_value_set(
 
 void THEN_PREDICATE(const abstract_object_pointert &obj, const std::string &out)
 {
-  const auto x_name = symbol_exprt(dstringt("x"), obj->type());
+  const auto x_name = symbol_exprt("x", obj->type());
   auto pred = obj->to_predicate(x_name);
   THEN("predicate is " + out)
   {

@@ -57,7 +57,7 @@ public:
 
   /// Represents the offset into an object: either a unique integer offset,
   /// or an unknown value, represented by `!offset`.
-  typedef optionalt<mp_integer> offsett;
+  typedef std::optional<mp_integer> offsett;
   bool offset_is_zero(const offsett &offset) const
   {
     return offset && offset->is_zero();
@@ -191,19 +191,11 @@ public:
 
   typedef std::unordered_set<unsigned int> dynamic_object_id_sett;
 
-  #ifdef USE_DSTRING
   typedef std::map<idt, entryt> valuest;
   typedef std::set<idt> flatten_seent;
   typedef std::unordered_set<idt> gvs_recursion_sett;
   typedef std::unordered_set<idt> recfind_recursion_sett;
   typedef std::unordered_set<idt> assign_recursion_sett;
-  #else
-  typedef std::unordered_map<idt, entryt, string_hash> valuest;
-  typedef std::unordered_set<idt, string_hash> flatten_seent;
-  typedef std::unordered_set<idt, string_hash> gvs_recursion_sett;
-  typedef std::unordered_set<idt, string_hash> recfind_recursion_sett;
-  typedef std::unordered_set<idt, string_hash> assign_recursion_sett;
-  #endif
 
   std::vector<exprt>
   get_value_set(const exprt &expr, const namespacet &ns) const;
@@ -302,11 +294,11 @@ protected:
   void get_value_set_rec(
     const exprt &expr,
     object_mapt &dest,
+    bool &includes_nondet_pointer,
     const std::string &suffix,
     const typet &original_type,
     const namespacet &ns,
     gvs_recursion_sett &recursion_set) const;
-
 
   void get_value_set(
     const exprt &expr,

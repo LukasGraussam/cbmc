@@ -13,12 +13,6 @@
 
 #include "abstract_object_statistics.h"
 
-abstract_pointer_objectt::abstract_pointer_objectt(const typet &t)
-  : abstract_objectt(t)
-{
-  PRECONDITION(t.id() == ID_pointer);
-}
-
 abstract_pointer_objectt::abstract_pointer_objectt(
   const typet &type,
   bool top,
@@ -105,7 +99,7 @@ abstract_object_pointert abstract_pointer_objectt::eval_ptr_diff(
   const namespacet &ns) const
 {
   if(is_top() || operands[1]->is_top())
-    return environment.eval(nil_exprt(), ns);
+    return environment.abstract_object_factory(expr.type(), ns, true, false);
 
   return ptr_diff(expr, operands, environment, ns);
 }

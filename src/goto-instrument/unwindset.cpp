@@ -13,13 +13,11 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <util/string2int.h>
 #include <util/string_utils.h>
 #include <util/symbol_table.h>
-
-#ifdef _MSC_VER
-#  include <util/unicode.h>
-#endif
+#include <util/unicode.h>
 
 #include <goto-programs/abstract_goto_model.h>
 
+#include <algorithm>
 #include <fstream>
 
 void unwindsett::parse_unwind(const std::string &unwind)
@@ -35,7 +33,7 @@ void unwindsett::parse_unwindset_one_loop(
   if(val.empty())
     return;
 
-  optionalt<unsigned> thread_nr;
+  std::optional<unsigned> thread_nr;
   if(isdigit(val[0]))
   {
     auto c_pos = val.find(':');
@@ -118,8 +116,8 @@ void unwindsett::parse_unwindset_one_loop(
       }
       else
       {
-        optionalt<unsigned> nr;
-        optionalt<source_locationt> location;
+        std::optional<unsigned> nr;
+        std::optional<source_locationt> location;
         for(const auto &instruction : goto_function.body.instructions)
         {
           if(
@@ -163,7 +161,7 @@ void unwindsett::parse_unwindset_one_loop(
     std::string uw_string = val.substr(last_c_pos + 1);
 
     // the below initialisation makes g++-5 happy
-    optionalt<unsigned> uw(0);
+    std::optional<unsigned> uw(0);
 
     if(uw_string.empty())
       uw = {};
@@ -171,9 +169,13 @@ void unwindsett::parse_unwindset_one_loop(
       uw = unsafe_string2unsigned(uw_string);
 
     if(thread_nr.has_value())
+    {
       thread_loop_map[std::pair<irep_idt, unsigned>(id, *thread_nr)] = uw;
+    }
     else
+    {
       loop_map[id] = uw;
+    }
   }
 }
 
@@ -185,7 +187,7 @@ void unwindsett::parse_unwindset(
     parse_unwindset_one_loop(element, message_handler);
 }
 
-optionalt<unsigned>
+std::optional<unsigned>
 unwindsett::get_limit(const irep_idt &loop_id, unsigned thread_nr) const
 {
   // We use the most specific limit we have
@@ -211,11 +213,7 @@ void unwindsett::parse_unwindset_file(
   const std::string &file_name,
   message_handlert &message_handler)
 {
-  #ifdef _MSC_VER
-  std::ifstream file(widen(file_name));
-  #else
-  std::ifstream file(file_name);
-  #endif
+  std::ifstream file(widen_if_needed(file_name));
 
   if(!file)
     throw "cannot open file "+file_name;

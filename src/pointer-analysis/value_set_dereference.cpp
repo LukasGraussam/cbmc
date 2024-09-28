@@ -17,6 +17,7 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include <util/arith_tools.h>
 #include <util/byte_operators.h>
+#include <util/c_types.h>
 #include <util/config.h>
 #include <util/cprover_prefix.h>
 #include <util/expr_iterator.h>
@@ -102,8 +103,8 @@ static json_objectt value_set_dereference_stats_to_json(
 
 /// If `expr` is of the form (c1 ? e1[o1] : c2 ? e2[o2] : c3 ? ...)
 /// then return `c1 ? e1[o1 + offset] : e2[o2 + offset] : c3 ? ...`
-/// otherwise return an empty optionalt.
-static optionalt<exprt>
+/// otherwise return an empty std::optional.
+static std::optional<exprt>
 try_add_offset_to_indices(const exprt &expr, const exprt &offset_elements)
 {
   if(const auto *index_expr = expr_try_dynamic_cast<index_exprt>(expr))
@@ -235,7 +236,7 @@ exprt value_set_dereferencet::handle_dereference_base_case(
       pointer.type(),
       "derefd_pointer",
       "derefd_pointer",
-      source_locationt(),
+      pointer.find_source_location(),
       language_mode,
       new_symbol_table);
 
@@ -281,6 +282,7 @@ exprt value_set_dereferencet::handle_dereference_base_case(
 
   if(display_points_to_sets)
   {
+    messaget log{message_handler};
     log.status() << value_set_dereference_stats_to_json(
       pointer, points_to_set, retained_values, result_value);
   }
@@ -370,9 +372,12 @@ bool value_set_dereferencet::dereference_type_compare(
     return true; // ok, they just match
 
   // check for struct prefixes
-
-  const typet ot_base=ns.follow(object_type),
-              dt_base=ns.follow(dereference_type);
+  const typet &ot_base = object_type.id() == ID_struct_tag
+                           ? ns.follow_tag(to_struct_tag_type(object_type))
+                           : object_type;
+  const typet &dt_base = dereference_type.id() == ID_struct_tag
+                           ? ns.follow_tag(to_struct_tag_type(dereference_type))
+                           : dereference_type;
 
   if(ot_base.id()==ID_struct &&
      dt_base.id()==ID_struct)
@@ -517,7 +522,9 @@ value_set_dereferencet::valuet value_set_dereferencet::build_reference_to(
 
       const index_exprt index_expr(
         symbol_expr,
-        pointer_offset(pointer_expr),
+        typecast_exprt::conditional_cast(
+          pointer_offset(pointer_expr),
+          to_array_type(memory_symbol.type).index_type()),
         to_array_type(memory_symbol.type).element_type());
 
       valuet result;
@@ -532,7 +539,9 @@ value_set_dereferencet::valuet value_set_dereferencet::build_reference_to(
     {
       const index_exprt index_expr(
         symbol_expr,
-        pointer_offset(pointer_expr),
+        typecast_exprt::conditional_cast(
+          pointer_offset(pointer_expr),
+          to_array_type(memory_symbol.type).index_type()),
         to_array_type(memory_symbol.type).element_type());
 
       valuet result;
@@ -657,8 +666,21 @@ value_set_dereferencet::valuet value_set_dereferencet::build_reference_to(
     result.pointer = typecast_exprt::conditional_cast(
       address_of_exprt{skip_typecast(o.root_object())}, pointer_type);
 
-    if(!memory_model(result.value, dereference_type, offset, ns))
+    if(memory_model(result.value, dereference_type, offset, ns))
+    {
+      // set pointer correctly
+      result.pointer = typecast_exprt::conditional_cast(
+        plus_exprt(
+          typecast_exprt(
+            result.pointer,
+            pointer_typet(char_type(), pointer_type.get_width())),
+          offset),
+        pointer_type);
+    }
+    else
+    {
       return {}; // give up, no way that this is ok
+    }
 
     return result;
   }
@@ -755,7 +777,7 @@ bool value_set_dereferencet::memory_model_bytes(
   auto from_type_element_type_size =
     from_type.id() == ID_array
       ? pointer_offset_size(to_array_type(from_type).element_type(), ns)
-      : optionalt<mp_integer>{};
+      : std::optional<mp_integer>{};
 
   auto to_type_size = pointer_offset_size(to_type, ns);
 
@@ -768,7 +790,11 @@ bool value_set_dereferencet::memory_model_bytes(
   {
     // yes, can use 'index', but possibly need to convert
     result = typecast_exprt::conditional_cast(
-      index_exprt(value, offset, to_array_type(from_type).element_type()),
+      index_exprt(
+        value,
+        typecast_exprt::conditional_cast(
+          offset, to_array_type(from_type).index_type()),
+        to_array_type(from_type).element_type()),
       to_type);
   }
   else

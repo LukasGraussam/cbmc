@@ -68,8 +68,11 @@ class dep_graph_domaint:public ai_domain_baset
 public:
   typedef grapht<dep_nodet>::node_indext node_indext;
 
-  explicit dep_graph_domaint(node_indext id)
-    : has_values(false), node_id(id), has_changed(false)
+  dep_graph_domaint(node_indext id, message_handlert &message_handler)
+    : has_values(false),
+      node_id(id),
+      has_changed(false),
+      message_handler(message_handler)
   {
   }
 
@@ -160,7 +163,7 @@ public:
 
   node_indext get_node_id() const
   {
-    assert(node_id!=std::numeric_limits<node_indext>::max());
+    PRECONDITION(node_id != std::numeric_limits<node_indext>::max());
     return node_id;
   }
 
@@ -172,7 +175,9 @@ private:
   node_indext node_id;
   bool has_changed;
 
-  typedef std::set<goto_programt::const_targett> depst;
+  typedef std::
+    set<goto_programt::const_targett, goto_programt::target_less_than>
+      depst;
 
   // Set of locations with control instructions on which the instruction at this
   // location has a control dependency on
@@ -186,6 +191,8 @@ private:
   // Set of locations with instructions on which the instruction at this
   // location has a data dependency on
   depst data_deps;
+
+  message_handlert &message_handler;
 
   friend const depst &
     dependence_graph_test_get_control_deps(const dep_graph_domaint &);
@@ -218,7 +225,7 @@ public:
 
   typedef std::map<irep_idt, cfg_post_dominatorst> post_dominators_mapt;
 
-  explicit dependence_grapht(const namespacet &_ns);
+  dependence_grapht(const namespacet &_ns, message_handlert &);
 
   void initialize(const goto_functionst &goto_functions)
   {

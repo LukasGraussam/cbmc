@@ -11,7 +11,6 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <stack>
 
 #include <util/invariant.h>
-#include <util/make_unique.h>
 #include <util/threeval.h>
 
 #include <core/Solver.h>
@@ -28,6 +27,17 @@ void convert(const bvt &bv, Glucose::vec<Glucose::Lit> &dest)
   for(const auto &literal : bv)
   {
     if(!literal.is_false())
+      dest.push(Glucose::mkLit(literal.var_no(), literal.sign()));
+  }
+}
+
+void convert_assumptions(const bvt &bv, Glucose::vec<Glucose::Lit> &dest)
+{
+  dest.capacity(bv.size());
+
+  for(const auto &literal : bv)
+  {
+    if(!literal.is_true())
       dest.push(Glucose::mkLit(literal.var_no(), literal.sign()));
   }
 }
@@ -153,7 +163,7 @@ void satcheck_glucose_baset<T>::lcnf(const bvt &bv)
 }
 
 template <typename T>
-propt::resultt satcheck_glucose_baset<T>::do_prop_solve()
+propt::resultt satcheck_glucose_baset<T>::do_prop_solve(const bvt &assumptions)
 {
   PRECONDITION(status != statust::ERROR);
 
@@ -189,7 +199,7 @@ propt::resultt satcheck_glucose_baset<T>::do_prop_solve()
       else
       {
         Glucose::vec<Glucose::Lit> solver_assumptions;
-        convert(assumptions, solver_assumptions);
+        convert_assumptions(assumptions, solver_assumptions);
 
         if(solver->solve(solver_assumptions))
         {
@@ -243,7 +253,7 @@ void satcheck_glucose_baset<T>::set_assignment(literalt a, bool value)
 template <typename T>
 satcheck_glucose_baset<T>::satcheck_glucose_baset(
   message_handlert &message_handler)
-  : cnf_solvert(message_handler), solver(util_make_unique<T>())
+  : cnf_solvert(message_handler), solver(std::make_unique<T>())
 {
 }
 
@@ -260,18 +270,6 @@ bool satcheck_glucose_baset<T>::is_in_conflict(literalt a) const
       return true;
 
   return false;
-}
-
-template<typename T>
-void satcheck_glucose_baset<T>::set_assumptions(const bvt &bv)
-{
-  assumptions=bv;
-
-  for(const auto &literal : assumptions)
-  {
-    INVARIANT(
-      !literal.is_constant(), "assumption literals must not be constant");
-  }
 }
 
 template class satcheck_glucose_baset<Glucose::Solver>;

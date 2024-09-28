@@ -8,10 +8,10 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include "source_location.h"
 
-#include <ostream>
-
-#include "file_util.h"
 #include "prefix.h"
+
+#include <filesystem>
+#include <ostream>
 
 bool source_locationt::is_built_in(const std::string &s)
 {
@@ -37,8 +37,11 @@ std::string source_locationt::as_string(bool print_cwd) const
       dest+=' ';
     dest+="file ";
     if(print_cwd)
-      dest+=
-        concat_dir_file(id2string(get_working_directory()), id2string(file));
+    {
+      dest += std::filesystem::path(id2string(get_working_directory()))
+                .append(id2string(file))
+                .string();
+    }
     else
       dest+=id2string(file);
   }
@@ -82,14 +85,16 @@ void source_locationt::merge(const source_locationt &from)
 /// Get a path to the file, including working directory.
 /// \return Full path unless the file name is empty or refers
 ///   to a built-in, in which case {} is returned.
-optionalt<std::string> source_locationt::full_path() const
+std::optional<std::string> source_locationt::full_path() const
 {
   const auto file = id2string(get_file());
 
   if(file.empty() || is_built_in(file))
     return {};
 
-  return concat_dir_file(id2string(get_working_directory()), file);
+  return std::filesystem::path(id2string(get_working_directory()))
+    .append(file)
+    .string();
 }
 
 std::ostream &operator << (

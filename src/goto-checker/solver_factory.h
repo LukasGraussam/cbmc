@@ -12,7 +12,7 @@ Author: Daniel Kroening, Peter Schrammel
 #ifndef CPROVER_GOTO_CHECKER_SOLVER_FACTORY_H
 #define CPROVER_GOTO_CHECKER_SOLVER_FACTORY_H
 
-#include <solvers/prop/prop.h>
+#include <solvers/flattening/boolbv.h>
 #include <solvers/smt2/smt2_dec.h>
 
 #include <memory>
@@ -21,7 +21,7 @@ class cmdlinet;
 class message_handlert;
 class namespacet;
 class optionst;
-class stack_decision_proceduret;
+class solver_resource_limitst;
 
 class solver_factoryt final
 {
@@ -38,25 +38,24 @@ public:
   class solvert final
   {
   public:
-    solvert() = default;
-    explicit solvert(std::unique_ptr<decision_proceduret> p);
-    solvert(std::unique_ptr<decision_proceduret> p1, std::unique_ptr<propt> p2);
+    explicit solvert(std::unique_ptr<stack_decision_proceduret> p);
     solvert(
-      std::unique_ptr<decision_proceduret> p1,
+      std::unique_ptr<stack_decision_proceduret> p1,
+      std::unique_ptr<propt> p2);
+    solvert(
+      std::unique_ptr<stack_decision_proceduret> p1,
       std::unique_ptr<std::ofstream> p2);
+    solvert(std::unique_ptr<boolbvt> p1, std::unique_ptr<propt> p2);
 
-    decision_proceduret &decision_procedure() const;
-    stack_decision_proceduret &stack_decision_procedure() const;
-    propt &prop() const;
+    stack_decision_proceduret &decision_procedure() const;
+    boolbvt &boolbv_decision_procedure() const;
 
-    void set_decision_procedure(std::unique_ptr<decision_proceduret> p);
-    void set_prop(std::unique_ptr<propt> p);
-    void set_ofstream(std::unique_ptr<std::ofstream> p);
-
+  private:
     // the objects are deleted in the opposite order they appear below
     std::unique_ptr<std::ofstream> ofstream_ptr;
     std::unique_ptr<propt> prop_ptr;
-    std::unique_ptr<decision_proceduret> decision_procedure_ptr;
+    std::unique_ptr<stack_decision_proceduret> decision_procedure_ptr;
+    std::unique_ptr<boolbvt> decision_procedure_is_boolbvt_ptr;
   };
 
   /// Returns a solvert object
@@ -84,8 +83,8 @@ protected:
   /// Sets the timeout of \p decision_procedure if the `solver-time-limit`
   /// option has a positive value (in seconds).
   /// \note Most solvers silently ignore the time limit at the moment.
-  void
-  set_decision_procedure_time_limit(decision_proceduret &decision_procedure);
+  void set_decision_procedure_time_limit(
+    solver_resource_limitst &decision_procedure);
 
   // consistency checks during solver creation
   void no_beautification();
@@ -101,10 +100,11 @@ void parse_solver_options(const cmdlinet &cmdline, optionst &options);
   "(smt2)"                                                                     \
   "(fpa)"                                                                      \
   "(cvc3)"                                                                     \
-  "(cvc4)(boolector)(yices)(z3)"                                               \
+  "(cvc4)(cvc5)(bitwuzla)(boolector)(yices)(z3)"                               \
   "(mathsat)"                                                                  \
   "(cprover-smt2)"                                                             \
   "(incremental-smt2-solver):"                                                 \
+  "(sat-solver):"                                                              \
   "(external-sat-solver):"                                                     \
   "(no-sat-preprocessor)"                                                      \
   "(beautify)"                                                                 \
@@ -115,35 +115,40 @@ void parse_solver_options(const cmdlinet &cmdline, optionst &options);
   "(refine-arrays)"                                                            \
   "(refine-arithmetic)"                                                        \
   "(outfile):"                                                                 \
+  "(dump-smt-formula):"                                                        \
   "(write-solver-stats-to):"
 
 #define HELP_SOLVER                                                            \
-  " --external-sat-solver cmd    command to invoke SAT solver process\n"       \
-  " --no-sat-preprocessor        disable the SAT solver's simplifier\n"        \
-  " --dimacs                     generate CNF in DIMACS format\n"              \
-  " --wcnf                       generate WCNF format for fault localization\n"\
-  " --beautify                   beautify the counterexample\n"                \
-  "                              (greedy heuristic)\n"                         \
-  " --smt1                       use default SMT1 solver (obsolete)\n"         \
-  " --smt2                       use default SMT2 solver (Z3)\n"               \
-  " --boolector                  use Boolector\n"                              \
-  " --cprover-smt2               use CPROVER SMT2 solver\n"                    \
-  " --cvc3                       use CVC3\n"                                   \
-  " --cvc4                       use CVC4\n"                                   \
-  " --mathsat                    use MathSAT\n"                                \
-  " --yices                      use Yices\n"                                  \
-  " --z3                         use Z3\n"                                     \
-  " --fpa                        use theory of floating-point arithmetic\n"    \
-  " --refine                     use refinement procedure (experimental)\n"    \
-  " --refine-arrays              use refinement for arrays only\n"             \
-  " --refine-arithmetic          refinement of arithmetic expressions only\n"  \
-  " --max-node-refinement        maximum refinement iterations for\n"          \
-  "                              arithmetic expressions\n"                     \
-  " --incremental-smt2-solver cmd\n"                                           \
-  "                              command to invoke external SMT solver for\n"  \
-  "                              incremental solving (experimental)\n"         \
-  " --outfile filename           output formula to given file\n"               \
-  " --write-solver-stats-to json-file\n"                                       \
-  "                              collect the solver query complexity\n"
+  " {y--sat-solver} {usolver} \t use specified SAT solver\n"                   \
+  " {y--external-sat-solver} {ucmd} \t command to invoke SAT solver process\n" \
+  " {y--no-sat-preprocessor} \t disable the SAT solver's simplifier\n"         \
+  " {y--dimacs} \t generate CNF in DIMACS format\n"                            \
+  " {y--wcnf} \t generate WCNF format for fault localization\n"                \
+  " {y--beautify} \t beautify the counterexample (greedy heuristic)\n"         \
+  " {y--smt1} \t use default SMT1 solver (obsolete)\n"                         \
+  " {y--smt2} \t use default SMT2 solver (Z3)\n"                               \
+  " {y--bitwuzla} \t use Bitwuzla\n"                                           \
+  " {y--boolector} \t use Boolector\n"                                         \
+  " {y--cprover-smt2} \t use CPROVER SMT2 solver\n"                            \
+  " {y--cvc3} \t use CVC3\n"                                                   \
+  " {y--cvc4} \t use CVC4\n"                                                   \
+  " {y--cvc5} \t use CVC5\n"                                                   \
+  " {y--mathsat} \t use MathSAT\n"                                             \
+  " {y--yices} \t use Yices\n"                                                 \
+  " {y--z3} \t use Z3\n"                                                       \
+  " {y--fpa} \t use theory of floating-point arithmetic\n"                     \
+  " {y--refine} \t use refinement procedure (experimental)\n"                  \
+  " {y--refine-arrays} \t use refinement for arrays only\n"                    \
+  " {y--refine-arithmetic} \t refinement of arithmetic expressions only\n"     \
+  " {y--max-node-refinement} \t "                                              \
+  "maximum refinement iterations for arithmetic expressions\n"                 \
+  " {y--incremental-smt2-solver} {ucmd} \t "                                   \
+  "command to invoke external SMT solver for incremental solving "             \
+  "(experimental)\n"                                                           \
+  " {y--outfile} {ufilename} \t output formula to given file\n"                \
+  " {y--dump-smt-formula} {ufilename} \t "                                     \
+  "output smt incremental formula to the given file\n"                         \
+  " {y--write-solver-stats-to} {ujson-file} \t "                               \
+  "collect the solver query complexity\n"
 
 #endif // CPROVER_GOTO_CHECKER_SOLVER_FACTORY_H

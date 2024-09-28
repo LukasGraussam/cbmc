@@ -22,7 +22,7 @@ public:
   explicit c_bit_field_typet(typet _subtype, std::size_t width)
     : bitvector_typet(ID_c_bit_field, width)
   {
-    subtype().swap(_subtype);
+    add_subtype() = std::move(_subtype);
   }
 
   // These have a sub-type. The preferred way to access it
@@ -35,6 +35,28 @@ public:
   typet &underlying_type()
   {
     return subtype();
+  }
+
+  // Use .underlying_type() instead -- this method will be removed
+  const typet &subtype() const
+  {
+    // The existence of get_sub() front is enforced by check(...)
+    return static_cast<const typet &>(get_sub().front());
+  }
+
+  // Use .underlying_type() instead -- this method will be removed
+  typet &subtype()
+  {
+    // The existence of get_sub() front is enforced by check(...)
+    return static_cast<typet &>(get_sub().front());
+  }
+
+  static void check(
+    const typet &type,
+    const validation_modet vm = validation_modet::INVARIANT)
+  {
+    bitvector_typet::check(type, vm);
+    type_with_subtypet::check(type, vm);
   }
 };
 
@@ -58,7 +80,7 @@ inline bool can_cast_type<c_bit_field_typet>(const typet &type)
 inline const c_bit_field_typet &to_c_bit_field_type(const typet &type)
 {
   PRECONDITION(can_cast_type<c_bit_field_typet>(type));
-  type_with_subtypet::check(type);
+  c_bit_field_typet::check(type);
   return static_cast<const c_bit_field_typet &>(type);
 }
 
@@ -138,7 +160,7 @@ public:
   /// \param ns: Namespace to resolve tag types.
   /// \return Pair of a componentt pointing to the maximum fixed bit-width
   ///   member of the union type and the bit width of that member.
-  optionalt<std::pair<struct_union_typet::componentt, mp_integer>>
+  std::optional<std::pair<struct_union_typet::componentt, mp_integer>>
   find_widest_union_component(const namespacet &ns) const;
 };
 
@@ -173,11 +195,11 @@ inline union_typet &to_union_type(typet &type)
 }
 
 /// A union tag type, i.e., \ref union_typet with an identifier
-class union_tag_typet : public tag_typet
+class union_tag_typet : public struct_or_union_tag_typet
 {
 public:
   explicit union_tag_typet(const irep_idt &identifier)
-    : tag_typet(ID_union_tag, identifier)
+    : struct_or_union_tag_typet(ID_union_tag, identifier)
   {
   }
 };
@@ -251,6 +273,17 @@ public:
   };
 
   typedef std::vector<c_enum_membert> memberst;
+
+  c_enum_typet(typet _subtype, memberst enum_members)
+    : c_enum_typet(std::move(_subtype))
+  {
+    members() = std::move(enum_members);
+  }
+
+  memberst &members()
+  {
+    return reinterpret_cast<memberst &>(add(ID_body).get_sub());
+  }
 
   const memberst &members() const
   {
@@ -368,46 +401,46 @@ public:
 
   bool has_contract() const
   {
-    return !ensures().empty() || !requires().empty() || !assigns().empty() ||
-           !frees().empty();
+    return !c_ensures().empty() || !c_requires().empty() ||
+           !c_assigns().empty() || !c_frees().empty();
   }
 
-  const exprt::operandst &assigns() const
+  const exprt::operandst &c_assigns() const
   {
     return static_cast<const exprt &>(find(ID_C_spec_assigns)).operands();
   }
 
-  exprt::operandst &assigns()
+  exprt::operandst &c_assigns()
   {
     return static_cast<exprt &>(add(ID_C_spec_assigns)).operands();
   }
 
-  const exprt::operandst &frees() const
+  const exprt::operandst &c_frees() const
   {
     return static_cast<const exprt &>(find(ID_C_spec_frees)).operands();
   }
 
-  exprt::operandst &frees()
+  exprt::operandst &c_frees()
   {
     return static_cast<exprt &>(add(ID_C_spec_frees)).operands();
   }
 
-  const exprt::operandst &requires() const
+  const exprt::operandst &c_requires() const
   {
     return static_cast<const exprt &>(find(ID_C_spec_requires)).operands();
   }
 
-  exprt::operandst &requires()
+  exprt::operandst &c_requires()
   {
     return static_cast<exprt &>(add(ID_C_spec_requires)).operands();
   }
 
-  const exprt::operandst &ensures() const
+  const exprt::operandst &c_ensures() const
   {
     return static_cast<const exprt &>(find(ID_C_spec_ensures)).operands();
   }
 
-  exprt::operandst &ensures()
+  exprt::operandst &c_ensures()
   {
     return static_cast<exprt &>(add(ID_C_spec_ensures)).operands();
   }
@@ -445,10 +478,6 @@ inline code_with_contract_typet &to_code_with_contract_type(typet &type)
   code_with_contract_typet::check(type);
   return static_cast<code_with_contract_typet &>(type);
 }
-
-DEPRECATED(
-  SINCE(2022, 1, 13, "use c_index_type() or array_typet::index_type() instead"))
-bitvector_typet index_type();
 
 bitvector_typet c_index_type();
 signedbv_typet signed_int_type();

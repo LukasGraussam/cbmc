@@ -1,6 +1,9 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -e
+
+CXX=$1
+shift
 
 # if a command-line argument is provided, use it as a path to built binaries
 # (CMake-style build); otherwise assume we use Makefile-based in-tree build
@@ -33,10 +36,10 @@ for t in  \
   tool_name=$(basename $t)
   opt_name=$(echo $tool_name | tr 'a-z-' 'A-Z_')
 	echo "Extracting the raw list of parameters from $tool_name"
-  g++ -E -dM -std=c++11 -I../src -I../jbmc/src $t/*_parse_options.cpp -o macros.c
+  $CXX -E -dM -std=c++17 -I../src -I../jbmc/src $t/*_parse_options.cpp -o macros.c
   # goto-analyzer partly uses the spelling "analyser" within the code base
   echo ${opt_name}_OPTIONS | sed 's/GOTO_ANALYZER/GOTO_ANALYSER/' >> macros.c
-  rawstring="`gcc -E -P -w macros.c` \"?h(help)\""
+  rawstring="`$CXX -E -P -w macros.c` \"?h(help)\""
   rm macros.c
 
   # now the main bit, convert from raw format to a proper list of switches
@@ -58,8 +61,8 @@ for t in  \
   fi
 
   if [ ! -x $tool_bin ] ; then
-    echo "$tool_bin is not an executable"
-    exit 1
+    echo "$tool_bin is not an executable, cannot check help completeness"
+    continue
   fi
   $tool_bin --help > help_string
   grep '^\\fB\\-' ../doc/man/$tool_name.1 > man_page_opts
@@ -83,10 +86,30 @@ for t in  \
         echo "$undoc" | sed 's/^/\\fB/;s/-/\\-/g;s/$/\\fR/' >> man_page_opts
       done
       ;;
+    # We also need ignore the negative default checks for goto-instrument given
+    # that it's not processing them (but still ends up importing them by using
+    # the macro PARSE_OPTIONS_GOTO_CHECK). The rationale for ignoring them is
+    # similar to the goto-diff entry below.
     goto-instrument)
       for undoc in \
         -document-claims-html -document-claims-latex -show-claims \
-        -no-simplify ; do
+        -no-simplify -no-pointer-check -no-bounds-check -no-undefined-shift-check \
+        -no-pointer-primitive-check -no-div-by-zero-check -no-signed-overflow-check ; do
+        echo "$undoc" >> help_string
+        echo "$undoc" | sed 's/^/\\fB/;s/-/\\-/g;s/$/\\fR/' >> man_page_opts
+      done
+      ;;
+    # goto-diff is a bit of a peculiar situation in that it initialises some
+    # of its options using the PARSE_OPTIONS_GOTO_CHECK macro which initialises
+    # the negative checks (being the mirror image of the default checks), which
+    # this tool doesn't make use of - but there's also no good way to remove
+    # given our current architecture. Thus, we just don't document them (and
+    # ignore them if someone falls on them by accident).
+    goto-diff)
+      for undoc in \
+        -no-pointer-check -no-bounds-check -no-undefined-shift-check \
+        -no-pointer-primitive-check -no-div-by-zero-check \
+        -no-signed-overflow-check ; do
         echo "$undoc" >> help_string
         echo "$undoc" | sed 's/^/\\fB/;s/-/\\-/g;s/$/\\fR/' >> man_page_opts
       done

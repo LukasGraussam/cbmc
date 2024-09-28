@@ -13,6 +13,7 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include <util/config.h>
 #include <util/exit_codes.h>
+#include <util/help_formatter.h>
 #include <util/options.h>
 #include <util/version.h>
 
@@ -275,7 +276,7 @@ ai_baset *janalyzer_parse_optionst::build_analyzer(
     }
     else if(options.get_bool_option("dependence-graph"))
     {
-      domain = new dependence_grapht(ns);
+      domain = new dependence_grapht(ns, ui_message_handler);
     }
     else if(options.get_bool_option("intervals"))
     {
@@ -375,18 +376,18 @@ int janalyzer_parse_optionst::doit()
   {
     std::unique_ptr<languaget> language = get_language_from_mode(ID_java);
     CHECK_RETURN(language != nullptr);
-    language->set_language_options(options);
-    language->set_message_handler(ui_message_handler);
+    language->set_language_options(options, ui_message_handler);
 
     log.status() << "Parsing ..." << messaget::eom;
 
-    if(static_cast<java_bytecode_languaget *>(language.get())->parse())
+    std::istringstream unused;
+    if(language.get()->parse(unused, "", ui_message_handler))
     {
       log.error() << "PARSING ERROR" << messaget::eom;
       return CPROVER_EXIT_PARSE_ERROR;
     }
 
-    language->show_parse(std::cout);
+    language->show_parse(std::cout, ui_message_handler);
     return CPROVER_EXIT_SUCCESS;
   }
 
@@ -395,18 +396,18 @@ int janalyzer_parse_optionst::doit()
   lazy_goto_model.initialize(cmdline.args, options);
 
   class_hierarchy =
-    util_make_unique<class_hierarchyt>(lazy_goto_model.symbol_table);
+    std::make_unique<class_hierarchyt>(lazy_goto_model.symbol_table);
 
   log.status() << "Generating GOTO Program" << messaget::eom;
   lazy_goto_model.load_all_functions();
 
-  std::unique_ptr<abstract_goto_modelt> goto_model_ptr =
+  std::unique_ptr<goto_modelt> goto_model_ptr =
     lazy_goto_modelt::process_whole_model_and_freeze(
       std::move(lazy_goto_model));
   if(goto_model_ptr == nullptr)
     return CPROVER_EXIT_INTERNAL_ERROR;
 
-  goto_modelt &goto_model = dynamic_cast<goto_modelt &>(*goto_model_ptr);
+  goto_modelt &goto_model = *goto_model_ptr;
 
   // show it?
   if(cmdline.isset("show-symbol-table"))
@@ -444,7 +445,7 @@ int janalyzer_parse_optionst::perform_analysis(
     }
     else
     {
-      optionalt<std::string> json_file;
+      std::optional<std::string> json_file;
       if(cmdline.isset("json"))
         json_file = cmdline.get_value("json");
       bool result = taint_analysis(
@@ -720,61 +721,59 @@ void janalyzer_parse_optionst::help()
   std::cout << '\n' << banner_string("JANALYZER", CBMC_VERSION) << '\n'
             << align_center_with_border("Copyright (C) 2016-2018") << '\n'
             << align_center_with_border("Daniel Kroening, Diffblue") << '\n'
-            << align_center_with_border("kroening@kroening.com") << '\n'
-            <<
+            << align_center_with_border("kroening@kroening.com") << '\n';
+
+  std::cout << help_formatter(
     "\n"
-    "Usage:                       Purpose:\n"
+    "Usage:                     \tPurpose:\n"
     "\n"
-    " janalyzer [-?] [-h] [--help] show help\n"
-    " janalyzer\n"
+    " {bjanalyzer} [{y-?}] [{y-h}] [{y--help}] \t show this help\n"
+    " {bjanalyzer}\n"
     HELP_JAVA_METHOD_NAME
-    " janalyzer\n"
+    " {bjanalyzer}\n"
     HELP_JAVA_CLASS_NAME
-    " janalyzer\n"
+    " {bjanalyzer}\n"
     HELP_JAVA_JAR
-    " janalyzer\n"
+    " {bjanalyzer}\n"
     HELP_JAVA_GOTO_BINARY
     "\n"
     HELP_JAVA_CLASSPATH
     HELP_FUNCTIONS
     "\n"
     "Task options:\n"
-    " --show                       display the abstract domains\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --verify                     use the abstract domains to check assertions\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --simplify file_name         use the abstract domains to simplify the program\n"
-    " --no-simplify-slicing        do not remove instructions from which no\n"
-    "                              property can be reached (use with --simplify)\n" // NOLINT(*)
-    " --unreachable-instructions   list dead code\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --unreachable-functions      list functions unreachable from the entry point\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --reachable-functions        list functions reachable from the entry point\n"
+    " {y--show} \t display the abstract domains\n"
+    " {y--verify} \t use the abstract domains to check assertions\n"
+    " {y--simplify} {ufile_name} \t use the abstract domains to simplify the"
+    " program\n"
+    " {y--no-simplify-slicing} \t do not remove instructions from which no"
+    " property can be reached (use with {y--simplify})\n"
+    " {y--unreachable-instructions} \t list dead code\n"
+    " {y--unreachable-functions} \t list functions unreachable from the entry"
+    " point"
+    " {y--reachable-functions} \t list functions reachable from the entry point"
     "\n"
     "Abstract interpreter options:\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --location-sensitive         use location-sensitive abstract interpreter\n"
-    " --concurrent                 use concurrency-aware abstract interpreter\n"
+    " {y--location-sensitive} \t use location-sensitive abstract interpreter"
+    " {y--concurrent} \t use concurrency-aware abstract interpreter\n"
     "\n"
     "Domain options:\n"
-    " --constants                  constant domain\n"
-    " --intervals                  interval domain\n"
-    " --non-null                   non-null domain\n"
-    " --dependence-graph           data and control dependencies between instructions\n" // NOLINT(*)
+    " {y--constants} \t constant domain\n"
+    " {y--intervals} \t interval domain\n"
+    " {y--non-null} \t non-null domain\n"
+    " {y--dependence-graph} \t data and control dependencies between"
+    " instructions"
     "\n"
     "Output options:\n"
-    " --text file_name             output results in plain text to given file\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --json file_name             output results in JSON format to given file\n"
-    " --xml file_name              output results in XML format to given file\n"
-    " --dot file_name              output results in DOT format to given file\n"
+    " {y--text} {ufile_name} \t output results in plain text to given file\n"
+    " {y--json} {ufile_name} \t output results in JSON format to given file\n"
+    " {y--xml} {ufile_name} \t output results in XML format to given file\n"
+    " {y--dot} {ufile_name} \t output results in DOT format to given file\n"
     "\n"
     "Specific analyses:\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --taint file_name            perform taint analysis using rules in given file\n"
-    " --show-taint                 print taint analysis results on stdout\n"
-    " --show-local-may-alias       perform procedure-local may alias analysis\n"
+    " {y--taint} {ufile_name} \t perform taint analysis using rules in given"
+    " file\n"
+    " {y--show-taint} \t print taint analysis results on stdout\n"
+    " {y--show-local-may-alias} \t perform procedure-local may alias analysis\n"
     "\n"
     "Java Bytecode frontend options:\n"
     JAVA_BYTECODE_LANGUAGE_OPTIONS_HELP
@@ -783,20 +782,20 @@ void janalyzer_parse_optionst::help()
     HELP_CONFIG_PLATFORM
     "\n"
     "Program representations:\n"
-    " --show-parse-tree            show parse tree\n"
-    " --show-symbol-table          show loaded symbol table\n"
+    " {y--show-parse-tree} \t show parse tree\n"
+    " {y--show-symbol-table} \t show loaded symbol table\n"
     HELP_SHOW_GOTO_FUNCTIONS
     HELP_SHOW_PROPERTIES
     "\n"
     "Program instrumentation options:\n"
-    " --no-assertions              ignore user assertions\n"
-    " --no-assumptions             ignore user assumptions\n"
-    " --property id                enable selected properties only\n"
+    " {y--no-assertions} \t ignore user assertions\n"
+    " {y--no-assumptions} \t ignore user assumptions\n"
+    " {y--property} {uid} \t enable selected properties only\n"
     "\n"
     "Other options:\n"
-    " --version                    show version and exit\n"
-    " --verbosity #                verbosity level\n"
+    " {y--version} \t show version and exit\n"
+    " {y--verbosity} {u#} \t verbosity level\n"
     HELP_TIMESTAMP
-    "\n";
+    "\n");
   // clang-format on
 }

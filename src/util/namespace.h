@@ -10,6 +10,7 @@ Author: Daniel Kroening, kroening@kroening.com
 #ifndef CPROVER_UTIL_NAMESPACE_H
 #define CPROVER_UTIL_NAMESPACE_H
 
+#include "deprecate.h"
 #include "invariant.h"
 #include "irep.h"
 
@@ -20,9 +21,11 @@ class symbol_exprt;
 class tag_typet;
 class union_typet;
 class struct_typet;
+class struct_union_typet;
 class c_enum_typet;
 class union_tag_typet;
 class struct_tag_typet;
+class struct_or_union_tag_typet;
 class c_enum_tag_typet;
 class symbol_table_baset;
 
@@ -58,13 +61,13 @@ public:
   virtual ~namespace_baset();
 
   void follow_macros(exprt &) const;
+  DEPRECATED(SINCE(2024, 2, 19, "use follow_tag(...) instead"))
   const typet &follow(const typet &) const;
 
-  // These produce union_typet, struct_typet, c_enum_typet or
-  // the incomplete version.
   const union_typet &follow_tag(const union_tag_typet &) const;
   const struct_typet &follow_tag(const struct_tag_typet &) const;
   const c_enum_typet &follow_tag(const c_enum_tag_typet &) const;
+  const struct_union_typet &follow_tag(const struct_or_union_tag_typet &) const;
 
   /// Returns the minimal integer n such that there is no symbol (in any of the
   /// symbol tables) whose name is of the form "An" where A is \p prefix.

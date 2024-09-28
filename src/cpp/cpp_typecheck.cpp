@@ -16,10 +16,62 @@ Author: Daniel Kroening, kroening@cs.cmu.edu
 #include <util/symbol_table.h>
 
 #include <ansi-c/builtin_factory.h>
+#include <ansi-c/gcc_version.h>
 
 #include "cpp_declarator.h"
 #include "cpp_util.h"
 #include "expr2cpp.h"
+
+cpp_typecheckt::cpp_typecheckt(
+  cpp_parse_treet &_cpp_parse_tree,
+  symbol_table_baset &_symbol_table,
+  const std::string &_module,
+  message_handlert &message_handler)
+  : c_typecheck_baset(_symbol_table, _module, message_handler),
+    cpp_parse_tree(_cpp_parse_tree),
+    template_counter(0),
+    anon_counter(0),
+    disable_access_control(false),
+    support_float16_type(false)
+{
+  if(config.ansi_c.preprocessor == configt::ansi_ct::preprocessort::GCC)
+  {
+    gcc_versiont gcc_version;
+    gcc_version.get("gcc");
+    if(
+      gcc_version.flavor == gcc_versiont::flavort::GCC &&
+      gcc_version.is_at_least(13u))
+    {
+      support_float16_type = true;
+    }
+  }
+}
+
+cpp_typecheckt::cpp_typecheckt(
+  cpp_parse_treet &_cpp_parse_tree,
+  symbol_table_baset &_symbol_table1,
+  const symbol_table_baset &_symbol_table2,
+  const std::string &_module,
+  message_handlert &message_handler)
+  : c_typecheck_baset(_symbol_table1, _symbol_table2, _module, message_handler),
+    cpp_parse_tree(_cpp_parse_tree),
+    template_counter(0),
+    anon_counter(0),
+    disable_access_control(false),
+    support_float16_type(false)
+{
+  if(config.ansi_c.preprocessor == configt::ansi_ct::preprocessort::GCC)
+  {
+    gcc_versiont gcc_version;
+    gcc_version.get("gcc");
+    if(
+      gcc_version.flavor == gcc_versiont::flavort::GCC &&
+      gcc_version.is_at_least(13u))
+    {
+      support_float16_type = true;
+    }
+  }
+}
 
 void cpp_typecheckt::convert(cpp_itemt &item)
 {
@@ -64,12 +116,12 @@ const struct_typet &cpp_typecheckt::this_struct_type()
   const exprt &this_expr=
     cpp_scopes.current_scope().this_expr;
 
-  assert(this_expr.is_not_nil());
-  assert(this_expr.type().id()==ID_pointer);
+  CHECK_RETURN(this_expr.is_not_nil());
+  CHECK_RETURN(this_expr.type().id() == ID_pointer);
 
-  const typet &t = follow(to_pointer_type(this_expr.type()).base_type());
-  assert(t.id()==ID_struct);
-  return to_struct_type(t);
+  const typet &t = to_pointer_type(this_expr.type()).base_type();
+  CHECK_RETURN(t.id() == ID_struct_tag);
+  return follow_tag(to_struct_tag_type(t));
 }
 
 std::string cpp_typecheckt::to_string(const exprt &expr)
@@ -158,7 +210,7 @@ void cpp_typecheckt::static_and_dynamic_initialization()
 
   for(const irep_idt &d_it : dynamic_initializations)
   {
-    const symbolt &symbol = symbol_table.lookup_ref(d_it);
+    symbolt &symbol = symbol_table.get_writeable_ref(d_it);
 
     if(symbol.is_extern)
       continue;
@@ -167,9 +219,9 @@ void cpp_typecheckt::static_and_dynamic_initialization()
     if(cpp_is_pod(symbol.type))
       continue;
 
-    assert(symbol.is_static_lifetime);
-    assert(!symbol.is_type);
-    assert(symbol.type.id()!=ID_code);
+    DATA_INVARIANT(symbol.is_static_lifetime, "should be static");
+    DATA_INVARIANT(!symbol.is_type, "should not be a type");
+    DATA_INVARIANT(symbol.type.id() != ID_code, "should not be code");
 
     exprt symbol_expr=cpp_symbol_expr(symbol);
 
@@ -182,7 +234,7 @@ void cpp_typecheckt::static_and_dynamic_initialization()
 
       // Make it nil to get zero initialization by
       // __CPROVER_initialize
-      symbol_table.get_writeable_ref(d_it).value.make_nil();
+      symbol.value.make_nil();
     }
     else
     {
@@ -199,16 +251,13 @@ void cpp_typecheckt::static_and_dynamic_initialization()
   dynamic_initializations.clear();
 
   // Create the dynamic initialization procedure
-  symbolt init_symbol;
-
-  init_symbol.name="#cpp_dynamic_initialization#"+id2string(module);
+  symbolt init_symbol{
+    "#cpp_dynamic_initialization#" + id2string(module),
+    code_typet({}, typet(ID_constructor)),
+    ID_cpp};
   init_symbol.base_name="#cpp_dynamic_initialization#"+id2string(module);
   init_symbol.value.swap(init_block);
-  init_symbol.mode=ID_cpp;
   init_symbol.module=module;
-  init_symbol.type = code_typet({}, typet(ID_constructor));
-  init_symbol.is_type=false;
-  init_symbol.is_macro=false;
 
   symbol_table.insert(std::move(init_symbol));
 
@@ -223,15 +272,15 @@ void cpp_typecheckt::do_not_typechecked()
   {
     cont = false;
 
-    for(const auto &named_symbol : symbol_table.symbols)
+    for(auto it = symbol_table.begin(); it != symbol_table.end(); ++it)
     {
-      const symbolt &symbol=named_symbol.second;
+      const symbolt &symbol = it->second;
 
       if(
         symbol.value.id() == ID_cpp_not_typechecked &&
         symbol.value.get_bool(ID_is_used))
       {
-        assert(symbol.type.id()==ID_code);
+        DATA_INVARIANT(symbol.type.id() == ID_code, "must be code");
         exprt value = symbol.value;
 
         if(symbol.base_name=="operator=")
@@ -251,8 +300,7 @@ void cpp_typecheckt::do_not_typechecked()
         else
           UNREACHABLE; // Don't know what to do!
 
-        symbolt &writable_symbol =
-          symbol_table.get_writeable_ref(named_symbol.first);
+        symbolt &writable_symbol = it.get_writeable_symbol();
         writable_symbol.value.swap(value);
         convert_function(writable_symbol);
       }
@@ -260,21 +308,20 @@ void cpp_typecheckt::do_not_typechecked()
   }
   while(cont);
 
-  for(const auto &named_symbol : symbol_table.symbols)
+  for(auto it = symbol_table.begin(); it != symbol_table.end(); ++it)
   {
-    if(named_symbol.second.value.id() == ID_cpp_not_typechecked)
-      symbol_table.get_writeable_ref(named_symbol.first).value.make_nil();
+    if(it->second.value.id() == ID_cpp_not_typechecked)
+      it.get_writeable_symbol().value.make_nil();
   }
 }
 
 void cpp_typecheckt::clean_up()
 {
-  symbol_table_baset::symbolst::const_iterator it =
-    symbol_table.symbols.begin();
+  auto it = symbol_table.begin();
 
-  while(it!=symbol_table.symbols.end())
+  while(it != symbol_table.end())
   {
-    symbol_table_baset::symbolst::const_iterator cur_it = it;
+    auto cur_it = it;
     it++;
 
     const symbolt &symbol=cur_it->second;
@@ -291,8 +338,8 @@ void cpp_typecheckt::clean_up()
             symbol.type.id()==ID_union)
     {
       // remove methods from 'components'
-      struct_union_typet &struct_union_type=to_struct_union_type(
-        symbol_table.get_writeable_ref(cur_it->first).type);
+      struct_union_typet &struct_union_type =
+        to_struct_union_type(cur_it.get_writeable_symbol().type);
 
       const struct_union_typet::componentst &components=
         struct_union_type.components();
@@ -330,7 +377,8 @@ void cpp_typecheckt::clean_up()
 
 bool cpp_typecheckt::builtin_factory(const irep_idt &identifier)
 {
-  return ::builtin_factory(identifier, symbol_table, get_message_handler());
+  return ::builtin_factory(
+    identifier, support_float16_type, symbol_table, get_message_handler());
 }
 
 bool cpp_typecheckt::contains_cpp_name(const exprt &expr)

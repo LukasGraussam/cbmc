@@ -12,8 +12,8 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include "deprecate.h"
 #include "irep.h"
-#include "optional.h"
 
+#include <optional>
 #include <string>
 
 class source_locationt:public irept
@@ -96,6 +96,11 @@ public:
     return find(ID_basic_block_source_lines);
   }
 
+  bool property_fatal() const
+  {
+    return get_bool(ID_property_fatal);
+  }
+
   void set_file(const irep_idt &file)
   {
     set(ID_file, file);
@@ -163,6 +168,14 @@ public:
     add(ID_basic_block_source_lines, std::move(source_lines));
   }
 
+  void property_fatal(bool _property_fatal)
+  {
+    if(_property_fatal)
+      set(ID_property_fatal, true);
+    else
+      remove(ID_property_fatal);
+  }
+
   void set_hide()
   {
     set(ID_hide, true);
@@ -189,7 +202,7 @@ public:
     return static_cast<const source_locationt &>(get_nil_irep());
   }
 
-  optionalt<std::string> full_path() const;
+  std::optional<std::string> full_path() const;
 
   void add_pragma(const irep_idt &pragma)
   {

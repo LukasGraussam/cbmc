@@ -13,22 +13,22 @@ Date: April 2016
 
 #include "model_argc_argv.h"
 
-#include <sstream>
-
+#include <util/config.h>
 #include <util/cprover_prefix.h>
 #include <util/invariant.h>
 #include <util/message.h>
 #include <util/namespace.h>
-#include <util/config.h>
+#include <util/prefix.h>
 #include <util/replace_symbol.h>
 #include <util/symbol_table.h>
-#include <util/prefix.h>
 
-#include <ansi-c/ansi_c_language.h>
-
-#include <goto-programs/goto_convert.h>
 #include <goto-programs/goto_model.h>
 #include <goto-programs/remove_skip.h>
+
+#include <ansi-c/ansi_c_language.h>
+#include <ansi-c/goto-conversion/goto_convert.h>
+
+#include <sstream>
 
 /// Set up argv with up to max_argc pointers into an array of 4096 bytes.
 /// \param goto_model: Contains the input program's symbol table and
@@ -85,34 +85,36 @@ bool model_argc_argv(
   std::ostringstream oss;
   oss << "int ARGC;\n"
       << "char *ARGV[1];\n"
+      << "extern char " CPROVER_PREFIX "arg_string[4096];\n"
       << "void " << goto_model.goto_functions.entry_point() << "()\n"
       << "{\n"
       << "  unsigned next=0u;\n"
       << "  " CPROVER_PREFIX "assume(ARGC>=1);\n"
       << "  " CPROVER_PREFIX "assume(ARGC<=" << max_argc << ");\n"
-      << "  char arg_string[4096];\n"
-      << "  " CPROVER_PREFIX "input(\"arg_string\", &arg_string[0]);\n"
+      << "  " CPROVER_PREFIX "input(\"arg_string\", \n"
+      << "    &" CPROVER_PREFIX "arg_string[0]);\n"
       << "  for(int i=0; i<ARGC && i<" << max_argc << "; ++i)\n"
       << "  {\n"
       << "    unsigned len;\n"
       << "    " CPROVER_PREFIX "assume(len<4096);\n"
       << "    " CPROVER_PREFIX "assume(next+len<4096);\n"
-      << "    " CPROVER_PREFIX "assume(arg_string[next+len]==0);\n"
-      << "    ARGV[i]=&(arg_string[next]);\n"
+      << "    " CPROVER_PREFIX "assume(\n"
+      << "       " CPROVER_PREFIX "arg_string[next+len]==0);\n"
+      << "    ARGV[i]=&(" CPROVER_PREFIX "arg_string[next]);\n"
       << "    next+=len+1;\n"
       << "  }\n"
       << "}";
   std::istringstream iss(oss.str());
 
   ansi_c_languaget ansi_c_language;
-  ansi_c_language.set_message_handler(message_handler);
   configt::ansi_ct::preprocessort pp=config.ansi_c.preprocessor;
   config.ansi_c.preprocessor=configt::ansi_ct::preprocessort::NONE;
-  ansi_c_language.parse(iss, "");
+  ansi_c_language.parse(iss, "", message_handler);
   config.ansi_c.preprocessor=pp;
 
   symbol_tablet tmp_symbol_table;
-  ansi_c_language.typecheck(tmp_symbol_table, "<built-in-library>");
+  ansi_c_language.typecheck(
+    tmp_symbol_table, "<built-in-library>", message_handler);
 
   goto_programt init_instructions;
   exprt value=nil_exprt();
@@ -124,8 +126,11 @@ bool model_argc_argv(
     // add __CPROVER_assume if necessary (it might exist already)
     if(
       symbol_pair.first == CPROVER_PREFIX "assume" ||
-      symbol_pair.first == CPROVER_PREFIX "input")
+      symbol_pair.first == CPROVER_PREFIX "input" ||
+      symbol_pair.first == CPROVER_PREFIX "arg_string")
+    {
       goto_model.symbol_table.add(symbol_pair.second);
+    }
     else if(symbol_pair.first == goto_model.goto_functions.entry_point())
     {
       value = symbol_pair.second.value;

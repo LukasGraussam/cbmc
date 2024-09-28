@@ -9,15 +9,15 @@ Author: Daniel Kroening, kroening@cs.cmu.edu
 /// \file
 /// C++ Language Type Checking
 
-#include "cpp_typecheck.h"
-
 #include <util/arith_tools.h>
 #include <util/bitvector_expr.h>
+#include <util/c_types.h>
 #include <util/pointer_expr.h>
 #include <util/source_location.h>
 
 #include "cpp_declarator_converter.h"
 #include "cpp_exception_id.h"
+#include "cpp_typecheck.h"
 #include "cpp_typecheck_fargs.h"
 #include "cpp_util.h"
 
@@ -124,7 +124,7 @@ void cpp_typecheckt::typecheck_try_catch(codet &code)
           code_frontend_declt &decl = to_code_frontend_decl(statements.front());
           cpp_declarationt &cpp_declaration = to_cpp_declaration(decl.symbol());
 
-          assert(cpp_declaration.declarators().size()==1);
+          PRECONDITION(cpp_declaration.declarators().size() == 1);
           cpp_declaratort &declarator=cpp_declaration.declarators().front();
 
           if(is_reference(declarator.type()))
@@ -197,8 +197,8 @@ void cpp_typecheckt::typecheck_switch(codet &code)
     codet decl = to_code(value);
     typecheck_decl(decl);
 
-    assert(decl.get_statement()==ID_decl_block);
-    assert(decl.operands().size()==1);
+    CHECK_RETURN(decl.get_statement() == ID_decl_block);
+    CHECK_RETURN(decl.operands().size() == 1);
 
     // replace declaration by its symbol
     value = to_code_frontend_decl(to_code(to_unary_expr(decl).op())).symbol();
@@ -245,7 +245,8 @@ void cpp_typecheckt::typecheck_member_initializer(codet &code)
   {
     const code_typet &code_type=to_code_type(symbol_expr.type());
 
-    assert(code_type.parameters().size()>=1);
+    DATA_INVARIANT(
+      code_type.parameters().size() >= 1, "at least one parameter");
 
     // It's a parent. Call the constructor that we got.
     side_effect_expr_function_callt function_call(
@@ -254,16 +255,15 @@ void cpp_typecheckt::typecheck_member_initializer(codet &code)
 
     // we have to add 'this'
     exprt this_expr = cpp_scopes.current_scope().this_expr;
-    assert(this_expr.is_not_nil());
+    PRECONDITION(this_expr.is_not_nil());
 
     make_ptr_typecast(
-      this_expr,
-      code_type.parameters().front().type());
+      this_expr, to_pointer_type(code_type.parameters().front().type()));
 
     function_call.arguments().push_back(this_expr);
 
-    forall_operands(it, code)
-      function_call.arguments().push_back(*it);
+    for(const auto &op : as_const(code).operands())
+      function_call.arguments().push_back(op);
 
     // done building the expression, check the argument types
     typecheck_function_call_arguments(function_call);
@@ -278,10 +278,10 @@ void cpp_typecheckt::typecheck_member_initializer(codet &code)
       if(access == ID_private || access == ID_noaccess)
       {
         #if 0
-        error().source_location=code.source_location());
-        str << "error: constructor of '"
-            << to_string(symbol_expr)
-            << "' is not accessible";
+        error().source_location=code.find_source_location();
+        error() << "constructor of '"
+                << to_string(symbol_expr)
+                << "' is not accessible" << eom;
         throw 0;
         #endif
       }
@@ -353,7 +353,8 @@ void cpp_typecheckt::typecheck_member_initializer(codet &code)
           throw 0;
         }
 
-        reference_initializer(code.op0(), symbol_expr.type());
+        reference_initializer(
+          code.op0(), to_reference_type(symbol_expr.type()));
 
         // assign the pointers
         symbol_expr.type().remove(ID_C_reference);
@@ -406,7 +407,7 @@ void cpp_typecheckt::typecheck_decl(codet &code)
     throw 0;
   }
 
-  assert(code.op0().id()==ID_cpp_declaration);
+  PRECONDITION(code.op0().id() == ID_cpp_declaration);
 
   cpp_declarationt &declaration=
     to_cpp_declaration(code.op0());
@@ -418,10 +419,15 @@ void cpp_typecheckt::typecheck_decl(codet &code)
   if(declaration.declarators().empty() || !has_auto(type))
     typecheck_type(type);
 
-  assert(type.is_not_nil());
+  CHECK_RETURN(type.is_not_nil());
 
-  if(declaration.declarators().empty() &&
-     follow(type).get_bool(ID_C_is_anonymous))
+  if(
+    declaration.declarators().empty() &&
+    ((type.id() == ID_struct_tag &&
+      follow_tag(to_struct_tag_type(type)).get_bool(ID_C_is_anonymous)) ||
+     (type.id() == ID_union_tag &&
+      follow_tag(to_union_tag_type(type)).get_bool(ID_C_is_anonymous)) ||
+     type.get_bool(ID_C_is_anonymous)))
   {
     if(type.id() != ID_union_tag)
     {
@@ -469,8 +475,7 @@ void cpp_typecheckt::typecheck_decl(codet &code)
     {
       decl_statement.copy_to_operands(symbol.value);
       DATA_INVARIANT(
-        has_auto(symbol.type) ||
-          follow(decl_statement.op1().type()) == follow(symbol.type),
+        has_auto(symbol.type) || decl_statement.op1().type() == symbol.type,
         "declarator type should match symbol type");
     }
 

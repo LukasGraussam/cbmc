@@ -10,13 +10,11 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include "arith_tools.h"
 #include "c_types.h"
-#include "config.h"
 #include "expr_util.h"
 #include "namespace.h"
 #include "pointer_expr.h"
 #include "pointer_offset_size.h"
 #include "pointer_predicates.h"
-#include "prefix.h"
 #include "std_expr.h"
 #include "string_constant.h"
 
@@ -40,7 +38,7 @@ static bool is_dereference_integer_object(
     {
       const constant_exprt &constant = to_constant_expr(pointer);
 
-      if(is_null_pointer(constant))
+      if(constant.is_null_pointer())
       {
         address=0;
         return true;
@@ -51,6 +49,32 @@ static bool is_dereference_integer_object(
   }
 
   return false;
+}
+
+simplify_exprt::resultt<>
+simplify_exprt::simplify_unary_pointer_predicate_preorder(
+  const unary_exprt &expr)
+{
+  const exprt &pointer = expr.op();
+  PRECONDITION(pointer.type().id() == ID_pointer);
+
+  if(pointer.id() == ID_if)
+  {
+    if_exprt if_expr = lift_if(expr, 0);
+    return changed(simplify_if_preorder(if_expr));
+  }
+  else
+  {
+    auto r_it = simplify_rec(pointer); // recursive call
+    if(r_it.has_changed())
+    {
+      auto tmp = expr;
+      tmp.op() = r_it.expr;
+      return tmp;
+    }
+  }
+
+  return unchanged(expr);
 }
 
 simplify_exprt::resultt<>
@@ -124,9 +148,9 @@ simplify_exprt::simplify_address_of_arg(const exprt &expr)
       no_change = false;
     }
 
-    const typet &op_type = ns.follow(new_member_expr.struct_op().type());
+    const typet &op_type = new_member_expr.struct_op().type();
 
-    if(op_type.id() == ID_struct)
+    if(op_type.id() == ID_struct || op_type.id() == ID_struct_tag)
     {
       // rewrite NULL -> member by
       // pushing the member inside
@@ -134,8 +158,12 @@ simplify_exprt::simplify_address_of_arg(const exprt &expr)
       mp_integer address;
       if(is_dereference_integer_object(new_member_expr.struct_op(), address))
       {
+        const struct_typet &struct_type =
+          op_type.id() == ID_struct_tag
+            ? ns.follow_tag(to_struct_tag_type(op_type))
+            : to_struct_type(op_type);
         const irep_idt &member = to_member_expr(expr).get_component_name();
-        auto offset = member_offset(to_struct_type(op_type), member, ns);
+        auto offset = member_offset(struct_type, member, ns);
         if(offset.has_value())
         {
           pointer_typet pointer_type = to_pointer_type(
@@ -248,16 +276,6 @@ simplify_exprt::resultt<>
 simplify_exprt::simplify_pointer_offset(const pointer_offset_exprt &expr)
 {
   const exprt &ptr = expr.pointer();
-
-  if(ptr.id()==ID_if && ptr.operands().size()==3)
-  {
-    if_exprt if_expr=lift_if(expr, 0);
-    if_expr.true_case() =
-      simplify_pointer_offset(to_pointer_offset_expr(if_expr.true_case()));
-    if_expr.false_case() =
-      simplify_pointer_offset(to_pointer_offset_expr(if_expr.false_case()));
-    return changed(simplify_if(if_expr));
-  }
 
   if(ptr.type().id()!=ID_pointer)
     return unchanged(expr);
@@ -376,30 +394,13 @@ simplify_exprt::simplify_pointer_offset(const pointer_offset_exprt &expr)
 
     return changed(simplify_plus(new_expr));
   }
-  else if(ptr.id()==ID_constant)
+  else if(ptr.is_constant())
   {
     const constant_exprt &c_ptr = to_constant_expr(ptr);
 
-    if(is_null_pointer(c_ptr))
+    if(c_ptr.is_null_pointer())
     {
       return from_integer(0, expr.type());
-    }
-    else
-    {
-      // this is a pointer, we can't use to_integer
-      const auto width = to_pointer_type(ptr.type()).get_width();
-      mp_integer number = bvrep2integer(c_ptr.get_value(), width, false);
-      // a null pointer would have been caught above, return value 0
-      // will indicate that conversion failed
-      if(number==0)
-        return unchanged(expr);
-
-      // The constant address consists of OBJECT-ID || OFFSET.
-      mp_integer offset_bits =
-        *pointer_offset_bits(ptr.type(), ns) - config.bv_encoding.object_bits;
-      number%=power(2, offset_bits);
-
-      return from_integer(number, expr.type());
     }
   }
 
@@ -481,13 +482,13 @@ simplify_exprt::resultt<> simplify_exprt::simplify_inequality_pointer_object(
   const binary_relation_exprt &expr)
 {
   PRECONDITION(expr.id() == ID_equal || expr.id() == ID_notequal);
-  PRECONDITION(expr.type().id() == ID_bool);
+  PRECONDITION(expr.is_boolean());
 
   exprt::operandst new_inequality_ops;
-  forall_operands(it, expr)
+  for(const auto &operand : expr.operands())
   {
-    PRECONDITION(it->id() == ID_pointer_object);
-    const exprt &op = to_pointer_object_expr(*it).pointer();
+    PRECONDITION(operand.id() == ID_pointer_object);
+    const exprt &op = to_pointer_object_expr(operand).pointer();
 
     if(op.id()==ID_address_of)
     {
@@ -499,7 +500,7 @@ simplify_exprt::resultt<> simplify_exprt::simplify_inequality_pointer_object(
         return unchanged(expr);
       }
     }
-    else if(op.id() != ID_constant || !op.is_zero())
+    else if(!op.is_constant() || !op.is_zero())
     {
       return unchanged(expr);
     }
@@ -559,16 +560,6 @@ simplify_exprt::simplify_is_dynamic_object(const unary_exprt &expr)
   auto new_expr = expr;
   exprt &op = new_expr.op();
 
-  if(op.id()==ID_if && op.operands().size()==3)
-  {
-    if_exprt if_expr=lift_if(expr, 0);
-    if_expr.true_case() =
-      simplify_is_dynamic_object(to_unary_expr(if_expr.true_case()));
-    if_expr.false_case() =
-      simplify_is_dynamic_object(to_unary_expr(if_expr.false_case()));
-    return changed(simplify_if(if_expr));
-  }
-
   bool no_change = true;
 
   auto op_result = simplify_object(op);
@@ -580,7 +571,7 @@ simplify_exprt::simplify_is_dynamic_object(const unary_exprt &expr)
   }
 
   // NULL is not dynamic
-  if(op.id() == ID_constant && is_null_pointer(to_constant_expr(op)))
+  if(op.is_constant() && to_constant_expr(op).is_null_pointer())
     return false_exprt();
 
   // &something depends on the something
@@ -594,7 +585,7 @@ simplify_exprt::simplify_is_dynamic_object(const unary_exprt &expr)
 
       // this is for the benefit of symex
       return make_boolean_expr(
-        has_prefix(id2string(identifier), SYMEX_DYNAMIC_PREFIX));
+        identifier.starts_with(SYMEX_DYNAMIC_PREFIX "::"));
     }
     else if(op_object.id() == ID_string_constant)
     {
@@ -628,7 +619,7 @@ simplify_exprt::simplify_is_invalid_pointer(const unary_exprt &expr)
   }
 
   // NULL is not invalid
-  if(op.id() == ID_constant && is_null_pointer(to_constant_expr(op)))
+  if(op.is_constant() && to_constant_expr(op).is_null_pointer())
   {
     return false_exprt();
   }
@@ -683,7 +674,7 @@ simplify_exprt::simplify_object_size(const object_size_exprt &expr)
     {
       typet type=expr.type();
       return from_integer(
-        to_string_constant(op_object).get_value().size() + 1, type);
+        to_string_constant(op_object).value().size() + 1, type);
     }
   }
 
@@ -693,12 +684,22 @@ simplify_exprt::simplify_object_size(const object_size_exprt &expr)
     return std::move(new_expr);
 }
 
-simplify_exprt::resultt<>
-simplify_exprt::simplify_good_pointer(const unary_exprt &expr)
+simplify_exprt::resultt<> simplify_exprt::simplify_prophecy_r_or_w_ok(
+  const prophecy_r_or_w_ok_exprt &expr)
 {
-  // we expand the definition
-  exprt def = good_pointer_def(expr.op(), ns);
+  exprt new_expr = simplify_rec(expr.lower(ns));
+  if(!new_expr.is_constant())
+    return unchanged(expr);
+  else
+    return std::move(new_expr);
+}
 
-  // recursive call
-  return changed(simplify_rec(def));
+simplify_exprt::resultt<> simplify_exprt::simplify_prophecy_pointer_in_range(
+  const prophecy_pointer_in_range_exprt &expr)
+{
+  exprt new_expr = simplify_rec(expr.lower(ns));
+  if(!new_expr.is_constant())
+    return unchanged(expr);
+  else
+    return std::move(new_expr);
 }

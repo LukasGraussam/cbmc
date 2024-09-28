@@ -14,7 +14,6 @@ Author: Daniel Kroening, dkr@amazon.com
 #include <util/c_types.h>
 #include <util/mathematical_expr.h>
 #include <util/pointer_predicates.h>
-#include <util/prefix.h>
 #include <util/replace_symbol.h>
 #include <util/std_code.h>
 
@@ -24,7 +23,7 @@ Author: Daniel Kroening, dkr@amazon.com
 
 #define MAX_TEXT 20
 
-optionalt<code_with_contract_typet>
+std::optional<code_with_contract_typet>
 get_contract(const irep_idt &function_identifier, const namespacet &ns)
 {
   // contracts are in a separate symbol, with prefix "contract::"
@@ -191,8 +190,7 @@ is_procedure_local(const irep_idt &function_identifier, const exprt &lhs)
   else if(lhs.id() == ID_symbol)
   {
     const auto &symbol_expr = to_symbol_expr(lhs);
-    return has_prefix(
-      id2string(symbol_expr.get_identifier()),
+    return symbol_expr.get_identifier().starts_with(
       id2string(function_identifier) + "::");
   }
   else
@@ -204,7 +202,7 @@ static bool is_old(const exprt &lhs)
   if(lhs.id() == ID_symbol)
   {
     const auto &symbol_expr = to_symbol_expr(lhs);
-    return has_prefix(id2string(symbol_expr.get_identifier()), "old::");
+    return symbol_expr.get_identifier().starts_with("old::");
   }
   else
     return false;
@@ -286,11 +284,11 @@ void instrument_contract_checks(
   goto_programt add_at_beginning;
 
   // precondition?
-  if(!contract.requires().empty())
+  if(!contract.c_requires().empty())
   {
     // stick these in as assumptions, preserving the ordering
     goto_programt dest;
-    for(auto &assumption : contract.requires())
+    for(auto &assumption : contract.c_requires())
     {
       exprt assumption_instance = instantiate_contract_lambda(assumption);
       auto fixed_assumption = add_function(f.first, assumption_instance);
@@ -304,19 +302,19 @@ void instrument_contract_checks(
   const auto old_prefix = "old::" + id2string(f.first);
 
   // postcondition?
-  if(!contract.ensures().empty())
+  if(!contract.c_ensures().empty())
   {
     // Stick the postconditions in as assertions at the end
     auto last = body.instructions.end();
     if(std::prev(last)->is_end_function())
       last = std::prev(last);
 
-    for(auto &assertion : contract.ensures())
+    for(auto &assertion : contract.c_ensures())
     {
       exprt assertion_instance = instantiate_contract_lambda(assertion);
 
       std::string comment = "postcondition";
-      if(contract.ensures().size() >= 2)
+      if(contract.c_ensures().size() >= 2)
         comment += " " + expr2text(assertion_instance, ns);
 
       auto location = assertion.source_location();
@@ -338,12 +336,12 @@ void instrument_contract_checks(
 
   // do 'old' in the body
   if(
-    !contract.assigns().empty() || !contract.requires().empty() ||
-    !contract.ensures().empty())
+    !contract.c_assigns().empty() || !contract.c_requires().empty() ||
+    !contract.c_ensures().empty())
   {
     for(auto &instruction : body.instructions)
       instruction.transform(
-        [&old_prefix, &old_exprs](exprt expr) -> optionalt<exprt> {
+        [&old_prefix, &old_exprs](exprt expr) -> std::optional<exprt> {
           return replace_old(expr, old_prefix, old_exprs);
         });
   }
@@ -359,8 +357,8 @@ void instrument_contract_checks(
 
   // assigns?
   if(
-    !contract.assigns().empty() || !contract.requires().empty() ||
-    !contract.ensures().empty())
+    !contract.c_assigns().empty() || !contract.c_requires().empty() ||
+    !contract.c_ensures().empty())
   {
     for(auto it = body.instructions.begin(); it != body.instructions.end();
         it++)
@@ -378,7 +376,7 @@ void instrument_contract_checks(
 
         // maybe not ok
         auto assigns_assertion =
-          make_assigns_assertion(f.first, contract.assigns(), lhs);
+          make_assigns_assertion(f.first, contract.c_assigns(), lhs);
         auto location = it->source_location();
         location.set_property_class("assigns");
         location.set_comment("assigns clause");
@@ -449,7 +447,7 @@ void replace_function_calls_by_contracts(
         goto_programt dest;
 
         // assert the preconditions
-        for(auto &precondition : contract.requires())
+        for(auto &precondition : contract.c_requires())
         {
           auto instantiated_precondition =
             instantiate_contract_lambda(precondition);
@@ -468,7 +466,7 @@ void replace_function_calls_by_contracts(
         }
 
         // havoc the 'assigned' variables
-        for(auto &assigns_clause_lambda : contract.assigns())
+        for(auto &assigns_clause_lambda : contract.c_assigns())
         {
           auto location = it->source_location();
 
@@ -519,7 +517,7 @@ void replace_function_calls_by_contracts(
         }
 
         // assume the postconditions
-        for(auto &postcondition : contract.ensures())
+        for(auto &postcondition : contract.c_ensures())
         {
           auto &location = it->source_location();
 

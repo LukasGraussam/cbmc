@@ -86,7 +86,7 @@ mp_integer gdb_value_extractort::get_malloc_size(irep_idt name)
     return scope_it->size();
 }
 
-optionalt<std::string> gdb_value_extractort::get_malloc_pointee(
+std::optional<std::string> gdb_value_extractort::get_malloc_pointee(
   const memory_addresst &point,
   mp_integer member_size)
 {
@@ -313,7 +313,7 @@ exprt gdb_value_extractort::get_pointer_to_member_value(
       struct_symbol_expr,
       from_integer(
         member_offset / get_type_size(to_pointer_type(expr.type()).base_type()),
-        index_type())};
+        c_index_type())};
   }
   if(struct_symbol->type.id() == ID_pointer)
   {
@@ -393,9 +393,9 @@ exprt gdb_value_extractort::get_non_char_pointer_value(
 
     // Check if pointer was dynamically allocated (via malloc). If so we will
     // replace the pointee with a static array filled with values stored at the
-    // expected positions. Since the allocated size is over-approximation we may
-    // end up querying pass the allocated bounds and building larger array with
-    // meaningless values.
+    // expected positions. Since the allocated size is an over-approximation we
+    // may end up querying past the allocated bounds and building a larger array
+    // with meaningless values.
     mp_integer allocated_size = get_malloc_size(c_converter.convert(expr));
     // get the sizeof(target_type) and thus the number of elements
     const auto number_of_elements = allocated_size / get_type_size(target_type);
@@ -406,7 +406,7 @@ exprt gdb_value_extractort::get_non_char_pointer_value(
       for(size_t i = 0; i < number_of_elements; i++)
       {
         const auto sub_expr_value = get_expr_value(
-          index_exprt{expr, from_integer(i, index_type())},
+          dereference_exprt{plus_exprt{expr, from_integer(i, c_index_type())}},
           *zero_expr,
           location);
         elements.push_back(sub_expr_value);
@@ -415,7 +415,7 @@ exprt gdb_value_extractort::get_non_char_pointer_value(
 
       // knowing the number of elements we can build the type
       const typet target_array_type =
-        array_typet{target_type, from_integer(elements.size(), index_type())};
+        array_typet{target_type, from_integer(elements.size(), c_index_type())};
 
       array_exprt new_array{elements, to_array_type(target_array_type)};
 
@@ -493,7 +493,7 @@ exprt gdb_value_extractort::get_pointer_value(
   const exprt &zero_expr,
   const source_locationt &location)
 {
-  PRECONDITION(zero_expr.id() == ID_constant);
+  PRECONDITION(zero_expr.is_constant());
 
   PRECONDITION(expr.type().id() == ID_pointer);
   PRECONDITION(expr.type() == zero_expr.type());
@@ -591,7 +591,7 @@ exprt gdb_value_extractort::get_array_value(
 
   for(size_t i = 0; i < new_array.operands().size(); ++i)
   {
-    const index_exprt index_expr(expr, from_integer(i, index_type()));
+    const index_exprt index_expr(expr, from_integer(i, c_index_type()));
 
     exprt &operand = new_array.operands()[i];
 

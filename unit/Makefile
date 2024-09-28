@@ -48,9 +48,10 @@ SRC += analyses/ai/ai.cpp \
        analyses/variable-sensitivity/value_set_pointer_abstract_object/to_predicate.cpp \
        analyses/variable-sensitivity/variable_sensitivity_domain/to_predicate.cpp \
        analyses/variable-sensitivity/variable_sensitivity_test_helpers.cpp \
+       ansi-c/allocate_objects.cpp \
        ansi-c/expr2c.cpp \
-       ansi-c/max_malloc_size.cpp \
        ansi-c/type2name.cpp \
+       ansi-c/c_typecheck_base.cpp \
        big-int/big-int.cpp \
        compound_block_locations.cpp \
        get_goto_model_from_c_test.cpp \
@@ -59,13 +60,13 @@ SRC += analyses/ai/ai.cpp \
        goto-checker/report_util/is_property_less_than.cpp \
        goto-instrument/cover_instrument.cpp \
        goto-instrument/cover/cover_only.cpp \
-       goto-instrument/expr_enumerator/expr_enumerator.cpp \
-       goto-programs/allocate_objects.cpp \
+       goto-synthesizer/expr_enumerator/expr_enumerator.cpp \
        goto-programs/goto_program_assume.cpp \
        goto-programs/goto_program_dead.cpp \
        goto-programs/goto_program_declaration.cpp \
        goto-programs/goto_program_function_call.cpp \
        goto-programs/goto_program_goto_target.cpp \
+       goto-programs/goto_program_goto_program_inline.cpp \
        goto-programs/goto_program_symbol_type_table_consistency.cpp \
        goto-programs/goto_program_table_consistency.cpp \
        goto-programs/goto_program_validate.cpp \
@@ -83,6 +84,7 @@ SRC += analyses/ai/ai.cpp \
        goto-symex/goto_symex_state.cpp \
        goto-symex/ssa_equation.cpp \
        goto-symex/is_constant.cpp \
+       goto-symex/shadow_memory_util.cpp \
        goto-symex/symex_assign.cpp \
        goto-symex/symex_level0.cpp \
        goto-symex/symex_level1.cpp \
@@ -93,6 +95,7 @@ SRC += analyses/ai/ai.cpp \
        path_strategies.cpp \
        pointer-analysis/value_set.cpp \
        solvers/bdd/miniBDD/miniBDD.cpp \
+       solvers/flattening/boolbv.cpp \
        solvers/floatbv/float_utils.cpp \
        solvers/prop/bdd_expr.cpp \
        solvers/sat/external_sat.cpp \
@@ -113,6 +116,9 @@ SRC += analyses/ai/ai.cpp \
        solvers/smt2_incremental/smt_object_size.cpp \
        solvers/smt2_incremental/smt_response_validation.cpp \
        solvers/smt2_incremental/smt_to_smt2_string.cpp \
+       solvers/smt2_incremental/encoding/struct_encoding.cpp \
+       solvers/smt2_incremental/encoding/enum_encoding.cpp \
+       solvers/smt2_incremental/encoding/nondet_padding.cpp \
        solvers/smt2_incremental/theories/smt_array_theory.cpp \
        solvers/smt2_incremental/theories/smt_bit_vector_theory.cpp \
        solvers/smt2_incremental/theories/smt_core_theory.cpp \
@@ -132,14 +138,16 @@ SRC += analyses/ai/ai.cpp \
        util/dense_integer_map.cpp \
        util/edit_distance.cpp \
        util/expr_cast/expr_cast.cpp \
+       util/expr_initializer.cpp \
        util/expr.cpp \
        util/expr_iterator.cpp \
-       util/file_util.cpp \
        util/format.cpp \
        util/format_expr.cpp \
        util/format_number_range.cpp \
+       util/format_type.cpp \
        util/get_base_name.cpp \
        util/graph.cpp \
+       util/help_formatter.cpp \
        util/interval/add.cpp \
        util/interval/bitwise.cpp \
        util/interval/comparisons.cpp \
@@ -160,9 +168,9 @@ SRC += analyses/ai/ai.cpp \
        util/json_object.cpp \
        util/lazy.cpp \
        util/lower_byte_operators.cpp \
+       util/max_malloc_size.cpp \
        util/memory_info.cpp \
        util/message.cpp \
-       util/optional.cpp \
        util/optional_utils.cpp \
        util/parse_options.cpp \
        util/piped_process.cpp \
@@ -193,16 +201,17 @@ SRC += analyses/ai/ai.cpp \
        util/xml.cpp \
        # Empty last line
 
-ifeq ($(OS),Windows_NT)
-    detected_OS := Windows
-else
+ifndef WITH_MEMORY_ANALYZER
+  ifeq ($(OS),Windows_NT)
+    WITH_MEMORY_ANALYZER = 0
+  else
     detected_OS := $(shell sh -c 'uname 2>/dev/null || echo Unknown')
-endif
-
-ifeq ($(detected_OS),Linux)
-  ifneq ($(WITH_MEMORY_ANALYZER),0)
-    # only set if it wasn't explicitly unset
-    WITH_MEMORY_ANALYZER=1
+    detected_ARCH := $(shell sh -c 'uname -m 2>/dev/null || echo Unknown')
+    ifeq ($(filter-out Linux_x86_64 Linux_i386,$(detected_OS)_$(detected_ARCH)),)
+      WITH_MEMORY_ANALYZER = 1
+    else
+      WITH_MEMORY_ANALYZER = 0
+    endif
   endif
 endif
 
@@ -248,10 +257,9 @@ BMC_DEPS =../src/cbmc/c_test_input_generator$(OBJEXT) \
           ../src/goto-instrument/nondet_static$(OBJEXT) \
           ../src/goto-instrument/full_slicer$(OBJEXT) \
           ../src/goto-instrument/unwindset$(OBJEXT) \
-          ../src/goto-instrument/synthesizer/expr_enumerator$(OBJEXT) \
+          ../src/goto-synthesizer/expr_enumerator$(OBJEXT) \
           ../src/xmllang/xmllang$(LIBEXT) \
           ../src/goto-symex/goto-symex$(LIBEXT) \
-          ../src/jsil/jsil$(LIBEXT) \
           # Empty last line
 #
 CPROVER_LIBS =../src/ansi-c/ansi-c$(LIBEXT) \
@@ -299,7 +307,7 @@ memory-analyzer/test.inc: memory-analyzer/test.c
 memory-analyzer/gdb_api$(OBJEXT): memory-analyzer/input.inc memory-analyzer/test.inc
 
 CLEANFILES = $(CATCH_TEST) testing-utils/testing-utils$(LIBEXT) \
-             memory-analyzer/input.inc memory-analyzer/test.inc
+             memory-analyzer/input.inc memory-analyzer/test.inc gdb.txt
 
 # only add a dependency for libraries to avoid triggering implicit rules, which
 # would cause unnecessary rebuilds
@@ -313,7 +321,7 @@ test: $(CATCH_TEST)
 	# Include hidden tests by specifying "*,[.]" for tests to count
 	if ! ./$(CATCH_TEST) "*,[.]" -l | grep -q "^$(N_CATCH_TESTS) matching test cases" ; then \
 		./$(CATCH_TEST) "*,[.]" -l ; fi
-	./$(CATCH_TEST) ${TAGS}
+	./$(CATCH_TEST) '${TAGS}'
 
 
 ###############################################################################

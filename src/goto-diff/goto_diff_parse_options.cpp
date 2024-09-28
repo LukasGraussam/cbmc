@@ -13,11 +13,11 @@ Author: Peter Schrammel
 
 #include <util/config.h>
 #include <util/exit_codes.h>
+#include <util/help_formatter.h>
 #include <util/options.h>
 #include <util/version.h>
 
 #include <goto-programs/initialize_goto_model.h>
-#include <goto-programs/link_to_library.h>
 #include <goto-programs/loop_ids.h>
 #include <goto-programs/process_goto_program.h>
 #include <goto-programs/remove_skip.h>
@@ -26,6 +26,7 @@ Author: Peter Schrammel
 
 #include <ansi-c/cprover_library.h>
 #include <ansi-c/gcc_version.h>
+#include <ansi-c/goto-conversion/link_to_library.h>
 #include <assembler/remove_asm.h>
 #include <cpp/cprover_library.h>
 #include <goto-instrument/cover.h>
@@ -64,6 +65,7 @@ void goto_diff_parse_optionst::get_command_line_options(optionst &options)
   options.set_option("show-properties", cmdline.isset("show-properties"));
 
   // Options for process_goto_program
+  options.set_option("rewrite-rw-ok", false);
   options.set_option("rewrite-union", true);
 }
 
@@ -83,7 +85,7 @@ int goto_diff_parse_optionst::doit()
   optionst options;
   get_command_line_options(options);
   messaget::eval_verbosity(
-    cmdline.get_value("verbosity"), messaget::M_STATISTICS, ui_message_handler);
+    cmdline.get_value("verbosity"), messaget::M_STATUS, ui_message_handler);
 
   log_version_and_architecture("GOTO-DIFF");
 
@@ -145,7 +147,8 @@ int goto_diff_parse_optionst::doit()
       goto_model1,
       goto_model2,
       impact_mode,
-      cmdline.isset("compact-output"));
+      cmdline.isset("compact-output"),
+      ui_message_handler);
 
     return CPROVER_EXIT_SUCCESS;
   }
@@ -173,13 +176,21 @@ bool goto_diff_parse_optionst::process_goto_program(
 {
   // Remove inline assembler; this needs to happen before
   // adding the library.
-  remove_asm(goto_model);
+  remove_asm(goto_model, ui_message_handler);
 
   // add the library
   log.status() << "Adding CPROVER library (" << config.ansi_c.arch << ")"
                << messaget::eom;
   link_to_library(goto_model, ui_message_handler, cprover_cpp_library_factory);
   link_to_library(goto_model, ui_message_handler, cprover_c_library_factory);
+  // library functions may introduce inline assembler
+  while(has_asm(goto_model))
+  {
+    remove_asm(goto_model, ui_message_handler);
+    link_to_library(
+      goto_model, ui_message_handler, cprover_cpp_library_factory);
+    link_to_library(goto_model, ui_message_handler, cprover_c_library_factory);
+  }
 
   // Common removal of types and complex constructs
   if(::process_goto_program(goto_model, options, log))
@@ -220,35 +231,34 @@ void goto_diff_parse_optionst::help()
   std::cout << '\n' << banner_string("GOTO_DIFF", CBMC_VERSION) << '\n'
             << align_center_with_border("Copyright (C) 2016") << '\n'
             << align_center_with_border("Daniel Kroening, Peter Schrammel") << '\n' // NOLINT (*)
-            << align_center_with_border("kroening@kroening.com") << '\n'
-            <<
+            << align_center_with_border("kroening@kroening.com") << '\n';
+
+  std::cout << help_formatter(
     "\n"
-    "Usage:                       Purpose:\n"
+    "Usage:                     \tPurpose:\n"
     "\n"
-    " goto_diff [-?] [-h] [--help]      show help\n"
-    " goto_diff old new                 goto binaries to be compared\n"
+    " {bgoto-diff} [{y-?}] [{y-h}] [{y--help}] \t show this help\n"
+    " {bgoto-diff} {uold} {unew} \t compare two goto binaries\n"
     "\n"
     "Diff options:\n"
     HELP_SHOW_GOTO_FUNCTIONS
     HELP_SHOW_PROPERTIES
-    " --show-loops                 show the loops in the programs\n"
-    " -u | --unified               output unified diff\n"
-    " --change-impact | \n"
-    "  --forward-impact |\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    "  --backward-impact           output unified diff with forward&backward/forward/backward dependencies\n"
-    " --compact-output             output dependencies in compact mode\n"
+    " {y--show-loops} \t show the loops in the programs\n"
+    " {y-u}, {y--unified} \t output unified diff\n"
+    " {y--change-impact}, {y--forward-impact}, {y--backward-impact} \t output"
+    " unified diff with forward&backward/forward/backward dependencies\n"
+    " {y--compact-output} \t output dependencies in compact mode\n"
     "\n"
     "Program instrumentation options:\n"
     HELP_GOTO_CHECK
     HELP_COVER
     "\n"
     "Other options:\n"
-    " --version                    show version and exit\n"
-    " --json-ui                    use JSON-formatted output\n"
+    " {y--version} \t show version and exit\n"
+    " {y--json-ui} \t use JSON-formatted output\n"
     HELP_FLUSH
-    " --verbosity #                verbosity level\n"
+    " {y--verbosity} {u#} \t verbosity level\n"
     HELP_TIMESTAMP
-    "\n";
+    "\n");
   // clang-format on
 }

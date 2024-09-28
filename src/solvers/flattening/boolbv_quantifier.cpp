@@ -22,7 +22,7 @@ static bool expr_eq(const exprt &expr1, const exprt &expr2)
 /// To obtain the min value for the quantifier variable of the specified
 /// forall/exists operator. The min variable is in the form of "!(var_expr >
 /// constant)".
-static optionalt<constant_exprt>
+static std::optional<constant_exprt>
 get_quantifier_var_min(const exprt &var_expr, const exprt &quantifier_expr)
 {
   if(quantifier_expr.id()==ID_or)
@@ -39,8 +39,7 @@ get_quantifier_var_min(const exprt &var_expr, const exprt &quantifier_expr)
       if(y.id()!=ID_ge)
         continue;
       const auto &y_binary = to_binary_relation_expr(y);
-      if(
-        expr_eq(var_expr, y_binary.lhs()) && y_binary.rhs().id() == ID_constant)
+      if(expr_eq(var_expr, y_binary.lhs()) && y_binary.rhs().is_constant())
       {
         return to_constant_expr(y_binary.rhs());
       }
@@ -51,17 +50,16 @@ get_quantifier_var_min(const exprt &var_expr, const exprt &quantifier_expr)
   }
   else if(quantifier_expr.id() == ID_and)
   {
-    /**
-     * The min variable
-     * is in the form of "var_expr >= constant".
-     */
+    // The minimum variable can be of the form `var_expr >= constant`, or
+    // it can be of the form `var_expr == constant` (e.g. in the case where
+    // the interval that bounds the variable is a singleton interval (set
+    // with only one element)).
     for(auto &x : quantifier_expr.operands())
     {
-      if(x.id()!=ID_ge)
+      if(x.id() != ID_ge && x.id() != ID_equal)
         continue;
       const auto &x_binary = to_binary_relation_expr(x);
-      if(
-        expr_eq(var_expr, x_binary.lhs()) && x_binary.rhs().id() == ID_constant)
+      if(expr_eq(var_expr, x_binary.lhs()) && x_binary.rhs().is_constant())
       {
         return to_constant_expr(x_binary.rhs());
       }
@@ -76,7 +74,7 @@ get_quantifier_var_min(const exprt &var_expr, const exprt &quantifier_expr)
 
 /// To obtain the max value for the quantifier variable of the specified
 /// forall/exists operator.
-static optionalt<constant_exprt>
+static std::optional<constant_exprt>
 get_quantifier_var_max(const exprt &var_expr, const exprt &quantifier_expr)
 {
   if(quantifier_expr.id()==ID_or)
@@ -90,8 +88,7 @@ get_quantifier_var_max(const exprt &var_expr, const exprt &quantifier_expr)
       if(x.id()!=ID_ge)
         continue;
       const auto &x_binary = to_binary_relation_expr(x);
-      if(
-        expr_eq(var_expr, x_binary.lhs()) && x_binary.rhs().id() == ID_constant)
+      if(expr_eq(var_expr, x_binary.lhs()) && x_binary.rhs().is_constant())
       {
         const constant_exprt &over_expr = to_constant_expr(x_binary.rhs());
 
@@ -109,25 +106,42 @@ get_quantifier_var_max(const exprt &var_expr, const exprt &quantifier_expr)
   }
   else
   {
-    /**
-     * The max variable
-     * is in the form of "!(var_expr >= constant)".
-     */
+    // There are two potential forms we could come across here. The first one
+    // is `!(var_expr >= constant)` - identified by the first if branch - and
+    // the second is `var_expr == constant` - identified by the second else-if
+    // branch. The second form could be met if previous simplification has
+    // identified a singleton interval - see simplify_boolean_expr.cpp.
     for(auto &x : quantifier_expr.operands())
     {
-      if(x.id()!=ID_not)
-        continue;
-      exprt y = to_not_expr(x).op();
-      if(y.id()!=ID_ge)
-        continue;
-      const auto &y_binary = to_binary_relation_expr(y);
-      if(
-        expr_eq(var_expr, y_binary.lhs()) && y_binary.rhs().id() == ID_constant)
+      if(x.id() == ID_not)
       {
-        const constant_exprt &over_expr = to_constant_expr(y_binary.rhs());
-        mp_integer over_i = numeric_cast_v<mp_integer>(over_expr);
-        over_i-=1;
-        return from_integer(over_i, y_binary.rhs().type());
+        exprt y = to_not_expr(x).op();
+        if(y.id() != ID_ge)
+          continue;
+        const auto &y_binary = to_binary_relation_expr(y);
+        if(expr_eq(var_expr, y_binary.lhs()) && y_binary.rhs().is_constant())
+        {
+          const constant_exprt &over_expr = to_constant_expr(y_binary.rhs());
+          mp_integer over_i = numeric_cast_v<mp_integer>(over_expr);
+          over_i -= 1;
+          return from_integer(over_i, y_binary.rhs().type());
+        }
+      }
+      else if(x.id() == ID_equal)
+      {
+        const auto &y_binary = to_binary_relation_expr(x);
+        if(expr_eq(var_expr, y_binary.lhs()) && y_binary.rhs().is_constant())
+        {
+          return to_constant_expr(y_binary.rhs());
+        }
+      }
+      else
+      {
+        // If you need special handling for a particular expression type (say,
+        // after changes to the simplifier) you need to make sure that you add
+        // an `else if` branch above, otherwise the expression will get skipped
+        // and the constraints will not propagate correctly.
+        continue;
       }
     }
   }
@@ -135,7 +149,7 @@ get_quantifier_var_max(const exprt &var_expr, const exprt &quantifier_expr)
   return {};
 }
 
-static optionalt<exprt> eager_quantifier_instantiation(
+static std::optional<exprt> eager_quantifier_instantiation(
   const quantifier_exprt &expr,
   const namespacet &ns)
 {
@@ -185,9 +199,9 @@ static optionalt<exprt> eager_quantifier_instantiation(
       UNREACHABLE;
   }
 
-  const optionalt<constant_exprt> min_i =
+  const std::optional<constant_exprt> min_i =
     get_quantifier_var_min(var_expr, where_simplified);
-  const optionalt<constant_exprt> max_i =
+  const std::optional<constant_exprt> max_i =
     get_quantifier_var_max(var_expr, where_simplified);
 
   if(!min_i.has_value() || !max_i.has_value())

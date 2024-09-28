@@ -16,6 +16,8 @@ Author: Daniel Kroening, kroening@kroening.com
 #include "boolbv.h"
 #include "boolbv_type.h"
 
+#include <algorithm>
+
 exprt boolbvt::get(const exprt &expr) const
 {
   if(expr.id()==ID_symbol ||
@@ -151,31 +153,6 @@ exprt boolbvt::bv_get_rec(const exprt &expr, const bvt &bv, std::size_t offset)
         bv_get_rec(member, bv, offset),
         type);
     }
-    else if(type.id()==ID_vector)
-    {
-      const std::size_t width = boolbv_width(type);
-
-      const auto &vector_type = to_vector_type(type);
-      const typet &element_type = vector_type.element_type();
-      std::size_t element_width = boolbv_width(element_type);
-      CHECK_RETURN(element_width > 0);
-
-      if(element_width != 0 && width % element_width == 0)
-      {
-        std::size_t size = width / element_width;
-        vector_exprt value({}, vector_type);
-        value.reserve_operands(size);
-
-        for(std::size_t i=0; i<size; i++)
-        {
-          const index_exprt index{expr,
-                                  from_integer(i, vector_type.index_type())};
-          value.operands().push_back(bv_get_rec(index, bv, i * element_width));
-        }
-
-        return std::move(value);
-      }
-    }
     else if(type.id()==ID_complex)
     {
       const std::size_t width = boolbv_width(type);
@@ -278,7 +255,7 @@ exprt boolbvt::bv_get(const bvt &bv, const typet &type) const
 
 exprt boolbvt::bv_get_cache(const exprt &expr) const
 {
-  if(expr.type().id()==ID_bool) // boolean?
+  if(expr.is_boolean())
     return get(expr);
 
   // look up literals in cache
@@ -297,16 +274,11 @@ exprt boolbvt::bv_get_unbounded_array(const exprt &expr) const
   exprt size=simplify_expr(get(size_expr), ns);
 
   // get the numeric value, unless it's infinity
-  mp_integer size_mpint = 0;
+  const auto size_opt = numeric_cast<mp_integer>(size);
 
-  if(size.is_not_nil() && size.id() != ID_infinity)
-  {
-    const auto size_opt = numeric_cast<mp_integer>(size);
-    if(size_opt.has_value() && *size_opt >= 0)
-      size_mpint = *size_opt;
-  }
-
-  // search array indices
+  // search array indices, and only use those applicable to a particular model
+  // (array theory may have seen other indices, which might only be live under a
+  // different model)
 
   typedef std::map<mp_integer, exprt> valuest;
   valuest values;
@@ -317,9 +289,9 @@ exprt boolbvt::bv_get_unbounded_array(const exprt &expr) const
     // get root
     const auto number = arrays.find_number(*opt_num);
 
-    assert(number<index_map.size());
+    CHECK_RETURN(number < index_map.size());
     index_mapt::const_iterator it=index_map.find(number);
-    assert(it!=index_map.end());
+    CHECK_RETURN(it != index_map.end());
     const index_sett &index_set=it->second;
 
     for(index_sett::const_iterator it1=
@@ -336,11 +308,13 @@ exprt boolbvt::bv_get_unbounded_array(const exprt &expr) const
       {
         const auto index_mpint = numeric_cast<mp_integer>(index_value);
 
-        if(index_mpint.has_value())
+        if(
+          index_mpint.has_value() && *index_mpint >= 0 &&
+          (!size_opt.has_value() || *index_mpint < *size_opt))
         {
           if(value.is_nil())
             values[*index_mpint] =
-              exprt(ID_unknown, to_array_type(type).subtype());
+              exprt(ID_unknown, to_array_type(type).element_type());
           else
             values[*index_mpint] = value;
         }
@@ -350,7 +324,7 @@ exprt boolbvt::bv_get_unbounded_array(const exprt &expr) const
 
   exprt result;
 
-  if(values.size() != size_mpint)
+  if(!size_opt.has_value() || values.size() != *size_opt)
   {
     result = array_list_exprt({}, to_array_type(type));
 
@@ -370,7 +344,7 @@ exprt boolbvt::bv_get_unbounded_array(const exprt &expr) const
     result=exprt(ID_array, type);
 
     // allocate operands
-    std::size_t size_int = numeric_cast_v<std::size_t>(size_mpint);
+    std::size_t size_int = numeric_cast_v<std::size_t>(*size_opt);
     result.operands().resize(size_int, exprt{ID_unknown});
 
     // search uninterpreted functions
@@ -378,9 +352,10 @@ exprt boolbvt::bv_get_unbounded_array(const exprt &expr) const
     for(valuest::iterator it=values.begin();
         it!=values.end();
         it++)
-      if(it->first>=0 && it->first<size_mpint)
-        result.operands()[numeric_cast_v<std::size_t>(it->first)].swap(
-          it->second);
+    {
+      result.operands()[numeric_cast_v<std::size_t>(it->first)].swap(
+        it->second);
+    }
   }
 
   return result;
@@ -391,18 +366,20 @@ mp_integer boolbvt::get_value(
   std::size_t offset,
   std::size_t width)
 {
+  PRECONDITION(offset + width <= bv.size());
+
   mp_integer value=0;
   mp_integer weight=1;
 
   for(std::size_t bit_nr=offset; bit_nr<offset+width; bit_nr++)
   {
-    assert(bit_nr<bv.size());
     switch(prop.l_get(bv[bit_nr]).get_value())
     {
      case tvt::tv_enumt::TV_FALSE:   break;
      case tvt::tv_enumt::TV_TRUE:    value+=weight; break;
      case tvt::tv_enumt::TV_UNKNOWN: break;
-     default: assert(false);
+     default:
+       UNREACHABLE;
     }
 
     weight*=2;

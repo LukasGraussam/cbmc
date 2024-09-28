@@ -8,9 +8,8 @@ static analyses that instantiate them.
 
 \section analyses-frameworks Frameworks:
 
-There are currently three abstract interpretation frameworks provided in this
-directory. \ref analyses-ait, \ref analyses-flow-insensitive-analysis, and the
-deprecated and obsolete \ref analyses-static-analysist.
+There are currently two abstract interpretation frameworks provided in this
+directory. \ref analyses-ait and \ref analyses-flow-insensitive-analysis.
 
 \subsection analyses-ait Abstract interpreter framework (ait)
 
@@ -21,14 +20,6 @@ is provided by \ref ait. This analysis framework is currently location sensitive
 (meaning there is one abstract domain per code location) and is designed to be
 run after the function pointer removal and return removal passes. There is
 ongoing work to make this framework also support context sensitivity.
-
-\subsection analyses-static-analysist Old Abstract interpreter framework (static_analysist)
-
-The obsolete static analysis framework \ref static_analysist is only used by
-\ref value_set_analysist. This abstract interpretation framework is deprecated in
-favour of \ref analyses-ait, and should not be used as the basis for new code.
-This framework is location sensitive (one domain per code location), but is able
-to be run before function pointer removal and return removal phases.
 
 \subsection analyses-flow-insensitive-analysis Flow-insensitive analysis (flow_insensitive_analysist)
 
@@ -78,7 +69,7 @@ apply the dominator algorithm to its Java bytecode representation.
 `cfg_dominators_templatet::output` is a good place to check how to query the
 dominators it has found.
 
-\subsection analyses-constant-propagation Constant propagation (\ref constant_propagator_ait)
+\subsection analyses-constant-propagation Constant propagation (constant_propagator_ait)
 
 A simple, unsound constant propagator. Replaces RHS symbol expressions (variable
 reads) with their values when they appear to have a unique value at a particular
@@ -250,10 +241,6 @@ To be documented.
 To be documented.
 
 \section analyses-transformations Transformations (arguably in the wrong directory):
-
-\subsection analyses-goto-checkt Pointer / overflow / other check insertion (goto_checkt)
-
-To be documented.
 
 \subsection analyses-interval-analysis Integer interval analysis -- both an analysis and a transformation
 

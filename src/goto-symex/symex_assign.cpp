@@ -11,12 +11,13 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include "symex_assign.h"
 
-#include "expr_skeleton.h"
-#include "goto_symex_state.h"
 #include <util/byte_operators.h>
 #include <util/expr_util.h>
+#include <util/pointer_expr.h>
 #include <util/range.h>
 
+#include "expr_skeleton.h"
+#include "goto_symex_state.h"
 #include "symex_config.h"
 
 // We can either use with_exprt or update_exprt when building expressions that
@@ -33,6 +34,27 @@ constexpr bool use_update()
 #endif
 }
 
+/// Determine whether the RHS expression is a string constant initialization
+/// \param rhs The RHS expression
+/// \return True if the expression points to the first character of a string
+///    constant
+static bool is_string_constant_initialization(const exprt &rhs)
+{
+  if(const auto &address_of = expr_try_dynamic_cast<address_of_exprt>(rhs))
+  {
+    if(
+      const auto &index =
+        expr_try_dynamic_cast<index_exprt>(address_of->object()))
+    {
+      if(index->array().id() == ID_string_constant && index->index().is_zero())
+      {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 void symex_assignt::assign_rec(
   const exprt &lhs,
   const expr_skeletont &full_lhs,
@@ -42,6 +64,21 @@ void symex_assignt::assign_rec(
   if(is_ssa_expr(lhs))
   {
     assign_symbol(to_ssa_expr(lhs), full_lhs, rhs, guard);
+
+    // Allocate shadow memory
+    if(shadow_memory.has_value())
+    {
+      bool is_string_constant_init = is_string_constant_initialization(rhs);
+      if(is_string_constant_init)
+      {
+        shadow_memory->symex_field_static_init_string_constant(
+          state, to_ssa_expr(lhs), rhs);
+      }
+      else
+      {
+        shadow_memory->symex_field_static_init(state, to_ssa_expr(lhs));
+      }
+    }
   }
   else if(lhs.id() == ID_index)
     assign_array<use_update()>(to_index_expr(lhs), full_lhs, rhs, guard);
@@ -131,7 +168,10 @@ void symex_assignt::assign_from_struct(
   const struct_exprt &rhs,
   const exprt::operandst &guard)
 {
-  const auto &components = to_struct_type(ns.follow(lhs.type())).components();
+  const auto &components =
+    lhs.type().id() == ID_struct_tag
+      ? ns.follow_tag(to_struct_tag_type(lhs.type())).components()
+      : to_struct_type(lhs.type()).components();
   PRECONDITION(rhs.operands().size() == components.size());
 
   for(const auto &comp_rhs : make_range(components).zip(rhs.operands()))
@@ -191,7 +231,9 @@ void symex_assignt::assign_non_struct_symbol(
   state.record_events.pop();
 
   auto current_assignment_type =
-    ns.lookup(l2_lhs.get_object_name()).is_auxiliary
+    ns.lookup(l2_lhs.get_object_name()).is_auxiliary &&
+        id2string(l2_lhs.get_object_name()).find(SHADOW_MEMORY_SYMBOL_PREFIX) !=
+          std::string::npos
       ? symex_targett::assignment_typet::HIDDEN
       : assignment_type;
 
@@ -215,14 +257,6 @@ void symex_assignt::assign_non_struct_symbol(
       assignment.rhs,
       target,
       symex_config.allow_pointer_unsoundness);
-    // Erase the composite symbol from our working state. Note that we need to
-    // have it in the propagation table and the value set while doing the field
-    // assignments, thus we cannot skip putting it in there above.
-    if(state.field_sensitivity.is_divisible(l1_lhs, true))
-    {
-      state.propagation.erase_if_exists(l1_lhs.get_identifier());
-      state.value_set.erase_symbol(l1_lhs, ns);
-    }
   }
 }
 

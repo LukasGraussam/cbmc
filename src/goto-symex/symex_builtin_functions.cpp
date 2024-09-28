@@ -25,7 +25,7 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include "path_storage.h"
 
-inline static optionalt<typet> c_sizeof_type_rec(const exprt &expr)
+inline static std::optional<typet> c_sizeof_type_rec(const exprt &expr)
 {
   const irept &sizeof_type=expr.find(ID_C_c_sizeof_type);
 
@@ -35,9 +35,9 @@ inline static optionalt<typet> c_sizeof_type_rec(const exprt &expr)
   }
   else if(expr.id()==ID_mult)
   {
-    forall_operands(it, expr)
+    for(const auto &op : expr.operands())
     {
-      const auto t = c_sizeof_type_rec(*it);
+      const auto t = c_sizeof_type_rec(op);
       if(t.has_value())
         return t;
     }
@@ -56,10 +56,8 @@ void goto_symext::symex_allocate(
   if(lhs.is_nil())
     return; // ignore
 
-  dynamic_counter++;
-
   exprt size = to_binary_expr(code).op0();
-  optionalt<typet> object_type;
+  std::optional<typet> object_type;
   auto function_symbol = outer_symbol_table.lookup(state.source.function_id);
   INVARIANT(function_symbol, "function associated with allocation not found");
   const irep_idt &mode = function_symbol->mode;
@@ -137,18 +135,15 @@ void goto_symext::symex_allocate(
     {
       exprt &array_size = to_array_type(*object_type).size();
 
-      auxiliary_symbolt size_symbol;
-
-      size_symbol.base_name=
-        "dynamic_object_size"+std::to_string(dynamic_counter);
-      size_symbol.name =
-        SYMEX_DYNAMIC_PREFIX + id2string(size_symbol.base_name);
-      size_symbol.type=tmp_size.type();
-      size_symbol.mode = mode;
+      symbolt &size_symbol = get_fresh_aux_symbol(
+        tmp_size.type(),
+        SYMEX_DYNAMIC_PREFIX,
+        "dynamic_object_size",
+        code.source_location(),
+        mode,
+        state.symbol_table);
       size_symbol.type.set(ID_C_constant, true);
       size_symbol.value = array_size;
-
-      state.symbol_table.add(size_symbol);
 
       auto array_size_rhs = array_size;
       array_size = size_symbol.symbol_expr();
@@ -158,16 +153,17 @@ void goto_symext::symex_allocate(
   }
 
   // value
-  symbolt value_symbol;
-
-  value_symbol.base_name="dynamic_object"+std::to_string(dynamic_counter);
-  value_symbol.name = SYMEX_DYNAMIC_PREFIX + id2string(value_symbol.base_name);
-  value_symbol.is_lvalue=true;
-  value_symbol.type = *object_type;
+  symbolt &value_symbol = get_fresh_aux_symbol(
+    *object_type,
+    SYMEX_DYNAMIC_PREFIX,
+    "dynamic_object",
+    code.source_location(),
+    mode,
+    state.symbol_table);
+  value_symbol.is_auxiliary = false;
+  value_symbol.is_thread_local = false;
+  value_symbol.is_file_local = false;
   value_symbol.type.set(ID_C_dynamic, true);
-  value_symbol.mode = mode;
-
-  state.symbol_table.add(value_symbol);
 
   // to allow constant propagation
   exprt zero_init = state.rename(to_binary_expr(code).op1(), ns).get();
@@ -205,6 +201,8 @@ void goto_symext::symex_allocate(
     rhs=address_of_exprt(
       value_symbol.symbol_expr(), pointer_type(value_symbol.type));
   }
+  shadow_memory.symex_field_dynamic_init(
+    state, value_symbol.symbol_expr(), code);
 
   symex_assign(state, lhs, typecast_exprt::conditional_cast(rhs, lhs.type()));
 }
@@ -322,12 +320,12 @@ static irep_idt get_string_argument_rec(const exprt &src)
         index_expr.index().is_zero())
       {
         const exprt &fmt_str = index_expr.array();
-        return to_string_constant(fmt_str).get_value();
+        return to_string_constant(fmt_str).value();
       }
     }
     else if(object.id() == ID_string_constant)
     {
-      return to_string_constant(object).get_value();
+      return to_string_constant(object).value();
     }
   }
 
@@ -343,7 +341,7 @@ static irep_idt get_string_argument(const exprt &src, const namespacet &ns)
 
 /// Return an expression if \p operands fulfills all criteria that we expect of
 /// the expression to be a variable argument list.
-static optionalt<exprt> get_va_args(const exprt::operandst &operands)
+static std::optional<exprt> get_va_args(const exprt::operandst &operands)
 {
   if(operands.size() != 2)
     return {};
@@ -381,7 +379,7 @@ void goto_symext::symex_printf(
   std::list<exprt> args;
 
   // we either have any number of operands or a va_list as second operand
-  optionalt<exprt> va_args = get_va_args(operands);
+  std::optional<exprt> va_args = get_va_args(operands);
 
   if(!va_args.has_value())
   {
@@ -399,10 +397,16 @@ void goto_symext::symex_printf(
       return;
     }
 
+    // Visual Studio has va_list == char*, else we have va_list == void** and
+    // need to add dereferencing
+    const bool need_deref =
+      operands.back().type().id() == ID_pointer &&
+      to_pointer_type(operands.back().type()).base_type().id() == ID_pointer;
+
     for(const auto &op : va_args->operands())
     {
       exprt parameter = skip_typecast(op);
-      if(parameter.id() == ID_address_of)
+      if(need_deref && parameter.id() == ID_address_of)
         parameter = to_address_of_expr(parameter).object();
       clean_expr(parameter, state, false);
       parameter = state.rename(std::move(parameter), ns).get();
@@ -470,47 +474,46 @@ void goto_symext::symex_cpp_new(
   const exprt &lhs,
   const side_effect_exprt &code)
 {
-  bool do_array;
-
-  PRECONDITION(code.type().id() == ID_pointer);
-
   const auto &pointer_type = to_pointer_type(code.type());
 
-  do_array =
+  const bool do_array =
     (code.get(ID_statement) == ID_cpp_new_array ||
      code.get(ID_statement) == ID_java_new_array_data);
 
-  dynamic_counter++;
-
-  const std::string count_string(std::to_string(dynamic_counter));
-
   // value
-  symbolt symbol;
-  symbol.base_name=
-    do_array?"dynamic_"+count_string+"_array":
-             "dynamic_"+count_string+"_value";
-  symbol.name = SYMEX_DYNAMIC_PREFIX + id2string(symbol.base_name);
-  symbol.is_lvalue=true;
-  if(code.get(ID_statement)==ID_cpp_new_array ||
-     code.get(ID_statement)==ID_cpp_new)
-    symbol.mode=ID_cpp;
-  else if(code.get(ID_statement) == ID_java_new_array_data)
-    symbol.mode=ID_java;
-  else
-    INVARIANT_WITH_IREP(false, "Unexpected side effect expression", code);
-
+  std::optional<typet> type;
   if(do_array)
   {
     exprt size_arg =
       clean_expr(static_cast<const exprt &>(code.find(ID_size)), state, false);
-    symbol.type = array_typet(pointer_type.base_type(), size_arg);
+    type = array_typet(pointer_type.base_type(), size_arg);
   }
   else
-    symbol.type = pointer_type.base_type();
+    type = pointer_type.base_type();
 
+  irep_idt mode;
+  if(
+    code.get(ID_statement) == ID_cpp_new_array ||
+    code.get(ID_statement) == ID_cpp_new)
+  {
+    mode = ID_cpp;
+  }
+  else if(code.get(ID_statement) == ID_java_new_array_data)
+    mode = ID_java;
+  else
+    INVARIANT_WITH_IREP(false, "Unexpected side effect expression", code);
+
+  symbolt &symbol = get_fresh_aux_symbol(
+    *type,
+    SYMEX_DYNAMIC_PREFIX,
+    (do_array ? "dynamic_array" : "dynamic_value"),
+    code.source_location(),
+    mode,
+    state.symbol_table);
+  symbol.is_auxiliary = false;
+  symbol.is_thread_local = false;
+  symbol.is_file_local = false;
   symbol.type.set(ID_C_dynamic, true);
-
-  state.symbol_table.add(symbol);
 
   // make symbol expression
 

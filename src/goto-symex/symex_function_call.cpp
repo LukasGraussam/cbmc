@@ -24,13 +24,6 @@ Author: Daniel Kroening, kroening@kroening.com
 #include "path_storage.h"
 #include "symex_assign.h"
 
-static void locality(
-  const irep_idt &function_identifier,
-  goto_symext::statet &state,
-  path_storaget &path_storage,
-  const goto_functionst::goto_functiont &goto_function,
-  const namespacet &ns);
-
 bool goto_symext::get_unwind_recursion(const irep_idt &, unsigned, unsigned)
 {
   return false;
@@ -137,7 +130,8 @@ void goto_symext::parameter_assignments(
       rhs = clean_expr(std::move(rhs), state, false);
 
       exprt::operandst lhs_conditions;
-      symex_assignt{state, assignment_type, ns, symex_config, target}
+      symex_assignt{
+        shadow_memory, state, assignment_type, ns, symex_config, target}
         .assign_rec(lhs, expr_skeletont{}, rhs, lhs_conditions);
     }
 
@@ -213,8 +207,24 @@ void goto_symext::symex_function_call_symbol(
 
   target.location(state.guard.as_expr(), state.source);
 
-  symex_function_call_post_clean(
-    get_goto_function, state, cleaned_lhs, function, cleaned_arguments);
+  PRECONDITION(function.id() == ID_symbol);
+  const irep_idt &identifier = to_symbol_expr(function).get_identifier();
+
+  if(identifier == CPROVER_PREFIX SHADOW_MEMORY_GET_FIELD)
+  {
+    shadow_memory.symex_get_field(state, cleaned_lhs, cleaned_arguments);
+    symex_transition(state);
+  }
+  else if(identifier == CPROVER_PREFIX SHADOW_MEMORY_SET_FIELD)
+  {
+    shadow_memory.symex_set_field(state, cleaned_arguments);
+    symex_transition(state);
+  }
+  else
+  {
+    symex_function_call_post_clean(
+      get_goto_function, state, cleaned_lhs, function, cleaned_arguments);
+  }
 }
 
 void goto_symext::symex_function_call_post_clean(
@@ -245,7 +255,13 @@ void goto_symext::symex_function_call_post_clean(
   if(stop_recursing)
   {
     if(symex_config.unwinding_assertions)
-      vcc(false_exprt(), "recursion unwinding assertion", state);
+    {
+      vcc(
+        false_exprt(),
+        id2string(identifier) + ".recursion",
+        "recursion unwinding assertion",
+        state);
+    }
     if(!symex_config.partial_loops)
     {
       // Rule out this path:
@@ -272,7 +288,19 @@ void goto_symext::symex_function_call_post_clean(
 
   if(!goto_function.body_available())
   {
-    no_body(identifier);
+    // create a fatal assertion
+    if(symex_config.unwinding_assertions)
+    {
+      const auto &symbol = ns.lookup(identifier);
+      const std::string property_id =
+        id2string(state.source.pc->source_location().get_function()) +
+        ".no-body." + id2string(identifier);
+      vcc(
+        false_exprt(),
+        property_id,
+        "no body for callee " + id2string(symbol.display_name()),
+        state);
+    }
 
     // record the return
     target.function_return(
@@ -283,26 +311,6 @@ void goto_symext::symex_function_call_post_clean(
       const auto rhs = side_effect_expr_nondett(
         cleaned_lhs.type(), state.source.pc->source_location());
       symex_assign(state, cleaned_lhs, rhs);
-    }
-
-    if(symex_config.havoc_undefined_functions)
-    {
-      // assign non det to function arguments if pointers
-      // are not const
-      for(const auto &arg : cleaned_arguments)
-      {
-        if(
-          arg.type().id() == ID_pointer &&
-          !to_pointer_type(arg.type()).base_type().get_bool(ID_C_constant) &&
-          to_pointer_type(arg.type()).base_type().id() != ID_code)
-        {
-          exprt object =
-            dereference_exprt(arg, to_pointer_type(arg.type()).base_type());
-          exprt cleaned_object = clean_expr(object, state, true);
-          const guardt guard(true_exprt(), state.guard_manager);
-          havoc_rec(state, guard, cleaned_object);
-        }
-      }
     }
 
     symex_transition(state);
@@ -322,7 +330,7 @@ void goto_symext::symex_function_call_post_clean(
   }
 
   // preserve locality of local variables
-  locality(identifier, state, path_storage, goto_function, ns);
+  locality(identifier, state, goto_function);
 
   // assign actuals to formal parameters
   parameter_assignments(identifier, goto_function, state, cleaned_arguments);
@@ -451,14 +459,10 @@ void goto_symext::symex_end_of_function(statet &state)
   }
 }
 
-/// Preserves locality of parameters of a given function by applying L1
-/// renaming to them.
-static void locality(
+void goto_symext::locality(
   const irep_idt &function_identifier,
   goto_symext::statet &state,
-  path_storaget &path_storage,
-  const goto_functionst::goto_functiont &goto_function,
-  const namespacet &ns)
+  const goto_functionst::goto_functiont &goto_function)
 {
   unsigned &frame_nr=
     state.threads[state.source.thread_nr].function_frame[function_identifier];
@@ -466,11 +470,15 @@ static void locality(
 
   for(const auto &param : goto_function.parameter_identifiers)
   {
-    (void)state.add_object(
+    const ssa_exprt &renamed_param = state.add_object(
       ns.lookup(param).symbol_expr(),
-      [&path_storage, &frame_nr](const irep_idt &l0_name) {
+      [this, &frame_nr](const irep_idt &l0_name) {
         return path_storage.get_unique_l1_index(l0_name, frame_nr);
       },
       ns);
+
+    // Allocate shadow memory for parameters.
+    // They are like local variables.
+    shadow_memory.symex_field_local_init(state, renamed_param);
   }
 }

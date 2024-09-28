@@ -65,11 +65,6 @@ public:
     values.set_to_top();
   }
 
-  virtual void make_entry() final override
-  {
-    make_top();
-  }
-
   virtual bool is_bottom() const final override
   {
     return values.is_bot();
@@ -123,9 +118,9 @@ public:
 
     void set_dirty_to_top(const dirtyt &dirty, const namespacet &ns);
 
-    bool is_constant(const exprt &expr) const;
+    bool is_constant(const exprt &expr, const namespacet &ns) const;
 
-    bool is_constant(const irep_idt &id) const;
+    bool is_constant(const irep_idt &id, const namespacet &ns) const;
 
     bool is_empty() const
     {

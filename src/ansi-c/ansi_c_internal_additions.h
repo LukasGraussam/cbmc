@@ -12,7 +12,7 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include <string>
 
-void ansi_c_internal_additions(std::string &code);
+void ansi_c_internal_additions(std::string &code, bool support_float16_type);
 void ansi_c_architecture_strings(std::string &code);
 
 extern const char clang_builtin_headers[];
@@ -29,6 +29,10 @@ extern const char gcc_builtin_headers_ia32_2[];
 extern const char gcc_builtin_headers_ia32_3[];
 extern const char gcc_builtin_headers_ia32_4[];
 extern const char gcc_builtin_headers_ia32_5[];
+extern const char gcc_builtin_headers_ia32_6[];
+extern const char gcc_builtin_headers_ia32_7[];
+extern const char gcc_builtin_headers_ia32_8[];
+extern const char gcc_builtin_headers_ia32_9[];
 extern const char gcc_builtin_headers_alpha[];
 extern const char gcc_builtin_headers_arm[];
 extern const char gcc_builtin_headers_mips[];

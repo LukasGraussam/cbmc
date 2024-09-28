@@ -5,10 +5,11 @@
 #ifndef CPROVER_GOTO_CC_LINKER_SCRIPT_MERGE_H
 #define CPROVER_GOTO_CC_LINKER_SCRIPT_MERGE_H
 
-#include <functional>
-#include <map>
-
 #include <util/message.h>
+
+#include <functional>
+#include <list>
+#include <map>
 
 class cmdlinet;
 class exprt; // IWYU pragma: keep
@@ -197,8 +198,8 @@ protected:
   /// \return `1` if there is some mismatch between the list and map, `0` if
   ///   everything is OK.
   int goto_and_object_mismatch(
-      const std::list<irep_idt> &linker_defined_symbols,
-      const linker_valuest &linker_values);
+    const std::list<irep_idt> &linker_defined_symbols,
+    linker_valuest &linker_values);
 
   /// \brief Validate output of the `scripts/ls_parse.py` tool
   int linker_data_is_malformed(const jsont &data) const;

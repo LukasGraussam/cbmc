@@ -7,17 +7,20 @@ DIRS = analyses \
        cprover \
        crangler \
        goto-analyzer \
+       goto-bmc \
        goto-cc \
        goto-checker \
        goto-diff \
+       goto-inspect \
        goto-instrument \
        goto-harness \
        goto-programs \
        goto-symex \
-       jsil \
+       goto-synthesizer \
        json \
        json-symtab-language \
        langapi \
+       libcprover-cpp \
        linking \
        memory-analyzer \
        pointer-analysis \
@@ -32,22 +35,31 @@ all: cbmc.dir \
      cprover.dir \
      crangler.dir \
      goto-analyzer.dir \
+     goto-bmc.dir \
      goto-cc.dir \
      goto-diff.dir \
      goto-instrument.dir \
+     goto-inspect.dir \
      goto-harness.dir \
+     goto-synthesizer.dir \
      symtab2gb.dir \
      # Empty last line
 
-ifeq ($(OS),Windows_NT)
-  detected_OS := Windows
-else
-  detected_OS := $(shell sh -c 'uname 2>/dev/null || echo Unknown')
+ifndef WITH_MEMORY_ANALYZER
+  ifeq ($(OS),Windows_NT)
+    WITH_MEMORY_ANALYZER = 0
+  else
+    detected_OS := $(shell sh -c 'uname 2>/dev/null || echo Unknown')
+    detected_ARCH := $(shell sh -c 'uname -m 2>/dev/null || echo Unknown')
+    ifeq ($(filter-out Linux_x86_64 Linux_i386,$(detected_OS)_$(detected_ARCH)),)
+      WITH_MEMORY_ANALYZER = 1
+    else
+      WITH_MEMORY_ANALYZER = 0
+    endif
+  endif
 endif
 
-ifeq ($(detected_OS),Linux)
-  all: memory-analyzer.dir
-else ifeq ($(WITH_MEMORY_ANALYZER),1)
+ifeq ($(WITH_MEMORY_ANALYZER),1)
   all: memory-analyzer.dir
 endif
 
@@ -69,7 +81,7 @@ crangler.dir: util.dir json.dir
 
 languages: util.dir langapi.dir \
            cpp.dir ansi-c.dir xmllang.dir assembler.dir \
-           jsil.dir json.dir json-symtab-language.dir statement-list.dir
+           json.dir json-symtab-language.dir statement-list.dir
 
 solvers.dir: util.dir
 
@@ -79,6 +91,8 @@ goto-harness.dir: util.dir goto-programs.dir langapi.dir linking.dir \
 
 goto-instrument.dir: languages goto-programs.dir pointer-analysis.dir \
                      goto-symex.dir linking.dir analyses.dir solvers.dir
+
+goto-inspect.dir: util.dir goto-programs.dir languages linking.dir
 
 goto-checker.dir: solvers.dir goto-symex.dir goto-programs.dir
 
@@ -103,6 +117,14 @@ memory-analyzer.dir: util.dir goto-programs.dir langapi.dir linking.dir \
 
 symtab2gb.dir: util.dir goto-programs.dir langapi.dir linking.dir \
                json.dir json-symtab-language.dir ansi-c.dir
+
+goto-synthesizer.dir: languages util.dir goto-programs.dir langapi.dir \
+                    json.dir goto-checker.dir \
+                    goto-instrument.dir
+
+goto-bmc.dir: libcprover-cpp.dir
+
+libcprover-cpp.dir: cbmc.dir
 
 # building for a particular directory
 
@@ -164,14 +186,18 @@ glucose-download:
 	@(cd ../glucose-syrup; patch -p1 < ../scripts/glucose-syrup-patch)
 	@$(RM) $(glucose_rev).tar.gz
 
-cadical_release = rel-1.4.1
+cadical_release = rel-2.0.0
 cadical-download:
 	@echo "Downloading CaDiCaL $(cadical_release)"
 	@$(DOWNLOADER) https://github.com/arminbiere/cadical/archive/$(cadical_release).tar.gz
 	@$(TAR) xfz $(cadical_release).tar.gz
 	@rm -Rf ../cadical
 	@mv cadical-$(cadical_release) ../cadical
-	@cd ../cadical && CXX=$(CXX) ./configure -O3 -s && make -j
+	@(cd ../cadical; patch -p1 < ../scripts/cadical-2.0.0-patch)
+	@(cd ../cadical && ./configure CXX="$(CXX)")
+	# Need to rename VERSION so that it isn't picked up by `#include<version>` on
+	# macOS which is case insensitive
+	@(cd ../cadical && mv VERSION VERSION.txt)
 	@$(RM) $(cadical_release).tar.gz
 
 doc :
@@ -180,8 +206,8 @@ doc :
 install: all
 	for b in \
 		cbmc crangler \
-		goto-analyzer goto-cc goto-diff goto-instrument goto-harness \
-		symtab2gb ; do \
+		goto-analyzer goto-cc goto-diff goto-instrument goto-inspect goto-harness \
+    goto-synthesizer symtab2gb ; do \
 		  cp $$b/$$b $(PREFIX)/bin/ ; \
 			cp ../doc/man/$$b.1 $(PREFIX)/doc/man/man1/ ; \
 	done

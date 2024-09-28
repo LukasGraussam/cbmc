@@ -20,7 +20,6 @@ OBJ += ../ansi-c/ansi-c$(LIBEXT) \
       ../pointer-analysis/value_set_fi$(OBJEXT) \
       ../pointer-analysis/value_set_dereference$(OBJEXT) \
       ../pointer-analysis/add_failed_symbols$(OBJEXT) \
-      ../pointer-analysis/rewrite_index$(OBJEXT) \
       ../pointer-analysis/goto_program_dereference$(OBJEXT) \
       ../goto-instrument/source_lines$(OBJEXT) \
       ../goto-instrument/cover$(OBJEXT) \
@@ -59,11 +58,6 @@ all: cbmc$(EXEEXT)
 ifneq ($(wildcard ../bv_refinement/Makefile),)
   OBJ += ../bv_refinement/bv_refinement$(LIBEXT)
   CP_CXXFLAGS += -DHAVE_BV_REFINEMENT
-endif
-
-ifneq ($(wildcard ../jsil/Makefile),)
-  OBJ += ../jsil/jsil$(LIBEXT)
-  CP_CXXFLAGS += -DHAVE_JSIL
 endif
 
 ###############################################################################

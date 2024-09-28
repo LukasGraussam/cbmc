@@ -67,36 +67,13 @@ void cpp_internal_additions(std::ostream &out)
   out << "const unsigned __CPROVER::constant_infinity_uint;" << '\n';
   out << "typedef void " CPROVER_PREFIX "integer;" << '\n';
   out << "typedef void " CPROVER_PREFIX "rational;" << '\n';
-  // TODO: thread_local is still broken
-  // out << "thread_local unsigned long "
-  //     << CPROVER_PREFIX "thread_id = 0;" << '\n';
-  out << CPROVER_PREFIX "bool "
-      << CPROVER_PREFIX "threads_exited[__CPROVER::constant_infinity_uint];"
-      << '\n';
-  out << "unsigned long " CPROVER_PREFIX "next_thread_id = 0;" << '\n';
-  // TODO: thread_local is still broken
-  out << "void* "
-      << CPROVER_PREFIX "thread_keys[__CPROVER::constant_infinity_uint];"
-      << '\n';
-  // TODO: thread_local is still broken
-  out << "void (*"
-      << CPROVER_PREFIX "thread_key_dtors[__CPROVER::constant_infinity_uint])"
-      << "(void *);" << '\n';
-  // TODO: thread_local is still broken
-  out << "unsigned long " CPROVER_PREFIX "next_thread_key = 0;" << '\n';
-  out << "extern unsigned char "
-      << CPROVER_PREFIX "memory[__CPROVER::constant_infinity_uint];" << '\n';
 
   // malloc
   out << "const void *" CPROVER_PREFIX "deallocated = 0;" << '\n';
   out << "const void *" CPROVER_PREFIX "dead_object = 0;" << '\n';
-  out << "const void *" CPROVER_PREFIX "new_object = 0;" << '\n';
-  out << "" CPROVER_PREFIX "bool " CPROVER_PREFIX "malloc_is_new_array = 0;"
-      << '\n';
   out << "const void *" CPROVER_PREFIX "memory_leak = 0;" << '\n';
   out << "void *" CPROVER_PREFIX "allocate("
       << CPROVER_PREFIX "size_t size, " CPROVER_PREFIX "bool zero);" << '\n';
-  out << "const void *" CPROVER_PREFIX "alloca_object = 0;" << '\n';
 
   // auxiliaries for new/delete
   out << "void *__new(__CPROVER::size_t);" << '\n';
@@ -119,11 +96,6 @@ void cpp_internal_additions(std::ostream &out)
       << "  short next_avail;\n"
       << "  short next_unread;\n"
       << "};\n";
-  out << "extern struct " CPROVER_PREFIX "pipet "
-      << "" CPROVER_PREFIX "pipes[__CPROVER::constant_infinity_uint];" << '\n';
-  // offset to make sure we don't collide with other fds
-  out << "extern const int " CPROVER_PREFIX "pipe_offset;" << '\n';
-  out << "unsigned " CPROVER_PREFIX "pipe_count=0;" << '\n';
 
   // This function needs to be declared, or otherwise can't be called
   // by the entry-point construction.
@@ -139,9 +111,8 @@ void cpp_internal_additions(std::ostream &out)
 
     if(
       config.ansi_c.arch == "i386" || config.ansi_c.arch == "x86_64" ||
-      config.ansi_c.arch == "x32" || config.ansi_c.arch == "powerpc" ||
-      config.ansi_c.arch == "ppc64" || config.ansi_c.arch == "ppc64le" ||
-      config.ansi_c.arch == "ia64")
+      config.ansi_c.arch == "x32" || config.ansi_c.arch == "ia64" ||
+      config.ansi_c.arch == "powerpc" || config.ansi_c.arch == "ppc64")
     {
       // https://gcc.gnu.org/onlinedocs/gcc/Floating-Types.html
       // For clang, __float128 is a keyword.
@@ -158,6 +129,12 @@ void cpp_internal_additions(std::ostream &out)
       // C++ doesn't have _Float128.
       if(config.ansi_c.mode != configt::ansi_ct::flavourt::CLANG)
         out << "typedef long double __float128;" << '\n';
+    }
+    else if(config.ansi_c.arch == "ppc64le")
+    {
+      // https://patchwork.ozlabs.org/patch/792295/
+      if(config.ansi_c.mode != configt::ansi_ct::flavourt::CLANG)
+        out << "typedef " CPROVER_PREFIX "Float128 __ieee128;\n";
     }
 
     if(

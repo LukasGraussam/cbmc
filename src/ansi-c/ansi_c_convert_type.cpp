@@ -13,17 +13,11 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include <util/c_types.h>
 #include <util/config.h>
+#include <util/message.h>
 #include <util/std_types.h>
 #include <util/string_constant.h>
 
 #include "gcc_types.h"
-
-void ansi_c_convert_typet::read(const typet &type)
-{
-  clear();
-  source_location=type.source_location();
-  read_rec(type);
-}
 
 void ansi_c_convert_typet::read_rec(const typet &type)
 {
@@ -50,14 +44,14 @@ void ansi_c_convert_typet::read_rec(const typet &type)
       !type_with_subtypes.subtypes().empty() &&
       type_with_subtypes.subtypes()[0].id() == ID_string_constant)
       c_storage_spec.asm_label =
-        to_string_constant(type_with_subtypes.subtypes()[0]).get_value();
+        to_string_constant(type_with_subtypes.subtypes()[0]).value();
   }
   else if(
     type.id() == ID_section && type.has_subtype() &&
     to_type_with_subtype(type).subtype().id() == ID_string_constant)
   {
     c_storage_spec.section =
-      to_string_constant(to_type_with_subtype(type).subtype()).get_value();
+      to_string_constant(to_type_with_subtype(type).subtype()).value();
   }
   else if(type.id()==ID_const)
     c_qualifiers.is_constant=true;
@@ -208,20 +202,22 @@ void ansi_c_convert_typet::read_rec(const typet &type)
     const exprt &as_expr=
       static_cast<const exprt &>(static_cast<const irept &>(type));
 
-    forall_operands(it, as_expr)
+    for(const auto &op : as_expr.operands())
     {
       // these are symbols
-      const irep_idt &id=it->get(ID_identifier);
+      const irep_idt &id = op.get(ID_identifier);
 
       if(id==ID_thread)
         c_storage_spec.is_thread_local=true;
       else if(id=="align")
       {
         aligned=true;
-        alignment = to_unary_expr(*it).op();
+        alignment = to_unary_expr(op).op();
       }
     }
   }
+  else if(type.id() == ID_nodiscard)
+    c_qualifiers.is_nodiscard = true;
   else if(type.id()==ID_noreturn)
     c_qualifiers.is_noreturn=true;
   else if(type.id()==ID_constructor)
@@ -233,7 +229,7 @@ void ansi_c_convert_typet::read_rec(const typet &type)
     to_type_with_subtype(type).subtype().id() == ID_string_constant)
   {
     c_storage_spec.alias =
-      to_string_constant(to_type_with_subtype(type).subtype()).get_value();
+      to_string_constant(to_type_with_subtype(type).subtype()).value();
   }
   else if(type.id()==ID_frontend_pointer)
   {
@@ -256,7 +252,7 @@ void ansi_c_convert_typet::read_rec(const typet &type)
   {
     const exprt &as_expr =
       static_cast<const exprt &>(static_cast<const irept &>(type));
-    requires.push_back(to_unary_expr(as_expr).op());
+    c_requires.push_back(to_unary_expr(as_expr).op());
   }
   else if(type.id() == ID_C_spec_assigns)
   {
@@ -264,7 +260,7 @@ void ansi_c_convert_typet::read_rec(const typet &type)
       static_cast<const exprt &>(static_cast<const irept &>(type));
 
     for(const exprt &target : to_unary_expr(as_expr).op().operands())
-      assigns.push_back(target);
+      c_assigns.push_back(target);
   }
   else if(type.id() == ID_C_spec_frees)
   {
@@ -272,13 +268,13 @@ void ansi_c_convert_typet::read_rec(const typet &type)
       static_cast<const exprt &>(static_cast<const irept &>(type));
 
     for(const exprt &target : to_unary_expr(as_expr).op().operands())
-      frees.push_back(target);
+      c_frees.push_back(target);
   }
   else if(type.id() == ID_C_spec_ensures)
   {
     const exprt &as_expr =
       static_cast<const exprt &>(static_cast<const irept &>(type));
-    ensures.push_back(to_unary_expr(as_expr).op());
+    c_ensures.push_back(to_unary_expr(as_expr).op());
   }
   else
     other.push_back(type);
@@ -286,6 +282,8 @@ void ansi_c_convert_typet::read_rec(const typet &type)
 
 void ansi_c_convert_typet::write(typet &type)
 {
+  messaget log{message_handler};
+
   type.clear();
 
   // first, do "other"
@@ -302,8 +300,8 @@ void ansi_c_convert_typet::write(typet &type)
        gcc_float128_cnt || gcc_float128x_cnt ||
        gcc_int128_cnt || bv_cnt)
     {
-      error().source_location=source_location;
-      error() << "illegal type modifier for defined type" << eom;
+      log.error().source_location = source_location;
+      log.error() << "illegal type modifier for defined type" << messaget::eom;
       throw 0;
     }
 
@@ -318,33 +316,33 @@ void ansi_c_convert_typet::write(typet &type)
 
     if(other.size()!=1)
     {
-      error().source_location=source_location;
-      error() << "illegal combination of defined types" << eom;
+      log.error().source_location = source_location;
+      log.error() << "illegal combination of defined types" << messaget::eom;
       throw 0;
     }
 
     type.swap(other.front());
 
     // the contract expressions are meant for function types only
-    if(!requires.empty())
-      to_code_with_contract_type(type).requires() = std::move(requires);
+    if(!c_requires.empty())
+      to_code_with_contract_type(type).c_requires() = std::move(c_requires);
 
-    if(!assigns.empty())
-      to_code_with_contract_type(type).assigns() = std::move(assigns);
+    if(!c_assigns.empty())
+      to_code_with_contract_type(type).c_assigns() = std::move(c_assigns);
 
-    if(!frees.empty())
-      to_code_with_contract_type(type).frees() = std::move(frees);
+    if(!c_frees.empty())
+      to_code_with_contract_type(type).c_frees() = std::move(c_frees);
 
-    if(!ensures.empty())
-      to_code_with_contract_type(type).ensures() = std::move(ensures);
+    if(!c_ensures.empty())
+      to_code_with_contract_type(type).c_ensures() = std::move(c_ensures);
 
     if(constructor || destructor)
     {
       if(constructor && destructor)
       {
-        error().source_location=source_location;
-        error() << "combining constructor and destructor not supported"
-                << eom;
+        log.error().source_location = source_location;
+        log.error() << "combining constructor and destructor not supported"
+                    << messaget::eom;
         throw 0;
       }
 
@@ -354,9 +352,9 @@ void ansi_c_convert_typet::write(typet &type)
 
       else if(type_p->id()!=ID_empty)
       {
-        error().source_location=source_location;
-        error() << "constructor and destructor required to be type void, "
-                << "found " << type_p->pretty() << eom;
+        log.error().source_location = source_location;
+        log.error() << "constructor and destructor required to be type void, "
+                    << "found " << type_p->pretty() << messaget::eom;
         throw 0;
       }
 
@@ -365,9 +363,9 @@ void ansi_c_convert_typet::write(typet &type)
   }
   else if(constructor || destructor)
   {
-    error().source_location=source_location;
-    error() << "constructor and destructor required to be type void, "
-            << "found " << type.pretty() << eom;
+    log.error().source_location = source_location;
+    log.error() << "constructor and destructor required to be type void, "
+                << "found " << type.pretty() << messaget::eom;
     throw 0;
   }
   else if(gcc_float16_cnt ||
@@ -380,8 +378,9 @@ void ansi_c_convert_typet::write(typet &type)
        gcc_int128_cnt || bv_cnt ||
        short_cnt || char_cnt)
     {
-      error().source_location=source_location;
-      error() << "cannot combine integer type with floating-point type" << eom;
+      log.error().source_location = source_location;
+      log.error() << "cannot combine integer type with floating-point type"
+                  << messaget::eom;
       throw 0;
     }
 
@@ -391,8 +390,8 @@ void ansi_c_convert_typet::write(typet &type)
        gcc_float64_cnt+gcc_float64x_cnt+
        gcc_float128_cnt+gcc_float128x_cnt>=2)
     {
-      error().source_location=source_location;
-      error() << "conflicting type modifiers" << eom;
+      log.error().source_location = source_location;
+      log.error() << "conflicting type modifiers" << messaget::eom;
       throw 0;
     }
 
@@ -421,15 +420,16 @@ void ansi_c_convert_typet::write(typet &type)
        gcc_int128_cnt|| bv_cnt ||
        short_cnt || char_cnt)
     {
-      error().source_location=source_location;
-      error() << "cannot combine integer type with floating-point type" << eom;
+      log.error().source_location = source_location;
+      log.error() << "cannot combine integer type with floating-point type"
+                  << messaget::eom;
       throw 0;
     }
 
     if(double_cnt && float_cnt)
     {
-      error().source_location=source_location;
-      error() << "conflicting type modifiers" << eom;
+      log.error().source_location = source_location;
+      log.error() << "conflicting type modifiers" << messaget::eom;
       throw 0;
     }
 
@@ -446,15 +446,15 @@ void ansi_c_convert_typet::write(typet &type)
         type=long_double_type();
       else
       {
-        error().source_location=source_location;
-        error() << "conflicting type modifiers" << eom;
+        log.error().source_location = source_location;
+        log.error() << "conflicting type modifiers" << messaget::eom;
         throw 0;
       }
     }
     else
     {
-      error().source_location=source_location;
-      error() << "illegal type modifier for float" << eom;
+      log.error().source_location = source_location;
+      log.error() << "illegal type modifier for float" << messaget::eom;
       throw 0;
     }
   }
@@ -465,8 +465,9 @@ void ansi_c_convert_typet::write(typet &type)
        gcc_float128_cnt || bv_cnt || proper_bool_cnt ||
        char_cnt || long_cnt)
     {
-      error().source_location=source_location;
-      error() << "illegal type modifier for C boolean type" << eom;
+      log.error().source_location = source_location;
+      log.error() << "illegal type modifier for C boolean type"
+                  << messaget::eom;
       throw 0;
     }
 
@@ -479,8 +480,9 @@ void ansi_c_convert_typet::write(typet &type)
        gcc_float128_cnt || bv_cnt ||
        char_cnt || long_cnt)
     {
-      error().source_location=source_location;
-      error() << "illegal type modifier for proper boolean type" << eom;
+      log.error().source_location = source_location;
+      log.error() << "illegal type modifier for proper boolean type"
+                  << messaget::eom;
       throw 0;
     }
 
@@ -498,15 +500,15 @@ void ansi_c_convert_typet::write(typet &type)
        int8_cnt || int16_cnt || int32_cnt || int64_cnt ||
        gcc_float128_cnt || bv_cnt || proper_bool_cnt)
     {
-      error().source_location=source_location;
-      error() << "illegal type modifier for char type" << eom;
+      log.error().source_location = source_location;
+      log.error() << "illegal type modifier for char type" << messaget::eom;
       throw 0;
     }
 
     if(signed_cnt && unsigned_cnt)
     {
-      error().source_location=source_location;
-      error() << "conflicting type modifiers" << eom;
+      log.error().source_location = source_location;
+      log.error() << "conflicting type modifiers" << messaget::eom;
       throw 0;
     }
     else if(unsigned_cnt)
@@ -524,8 +526,8 @@ void ansi_c_convert_typet::write(typet &type)
 
     if(signed_cnt && unsigned_cnt)
     {
-      error().source_location=source_location;
-      error() << "conflicting type modifiers" << eom;
+      log.error().source_location = source_location;
+      log.error() << "conflicting type modifiers" << messaget::eom;
       throw 0;
     }
     else if(unsigned_cnt)
@@ -537,8 +539,8 @@ void ansi_c_convert_typet::write(typet &type)
     {
       if(long_cnt || char_cnt || short_cnt || gcc_int128_cnt || bv_cnt)
       {
-        error().source_location=source_location;
-        error() << "conflicting type modifiers" << eom;
+        log.error().source_location = source_location;
+        log.error() << "conflicting type modifiers" << messaget::eom;
         throw 0;
       }
 
@@ -594,8 +596,8 @@ void ansi_c_convert_typet::write(typet &type)
     {
       if(long_cnt || char_cnt)
       {
-        error().source_location=source_location;
-        error() << "conflicting type modifiers" << eom;
+        log.error().source_location = source_location;
+        log.error() << "conflicting type modifiers" << messaget::eom;
         throw 0;
       }
 
@@ -627,8 +629,8 @@ void ansi_c_convert_typet::write(typet &type)
     }
     else
     {
-      error().source_location=source_location;
-      error() << "illegal type modifier for integer type" << eom;
+      log.error().source_location = source_location;
+      log.error() << "illegal type modifier for integer type" << messaget::eom;
       throw 0;
     }
   }

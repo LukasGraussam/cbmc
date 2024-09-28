@@ -8,6 +8,12 @@ cbmc \- Bounded Model Checker for C/C++ and Java programs
 
 .B cbmc [--all-properties] \fIfile.c\fB ...
 
+.B cbmc [--no-standard-checks] \fIfile.c\fB ...
+
+.B cbmc [--no-standard-checks] [--pointer-check] \fIfile.c\fB ...
+
+.B cbmc [--no-bounds-check] \fIfile.c\fB ...
+
 .B goto-cc [-I \fIinclude-path\fB] [-c] \fIfile.c\fB [-o \fIoutfile.o\fB]
 
 .B goto-instrument \fIinfile\fB \fIoutfile\fR
@@ -41,7 +47,77 @@ The usual flow is to (1) translate source into a GOTO binary using
 goto-cc, then (2) perform instrumentation with goto-instrument, and
 finally (3) perform the analysis with cbmc.
 .SH OPTIONS
+.SS "Standard Checks"
+From version \fB6.0\fR onwards, \fBcbmc\fR, \fBgoto-analyzer\fR and some other tools
+apply some checks to the program by default (called the "standard checks"), with the
+aim to provide a better user experience for a non-expert user of the tool. These checks are:
+.TP
+\fB\-\-pointer\-check\fR
+enable pointer checks
+.TP
+\fB\-\-bounds\-check\fR
+enable array bounds checks
+.TP
+\fB\-\-undefined\-shift\-check\fR
+check shift greater than bit\-width
+.TP
+\fB\-\-div\-by\-zero\-check\fR
+enable division by zero checks for integer division
+.TP
+\fB\-\-float\-div\-by\-zero\-check\fR
+enable division by zero checks for floating-point division
+.TP
+\fB\-\-pointer\-primitive\-check\fR
+checks that all pointers in pointer primitives are valid or null
+.TP
+\fB\-\-signed\-overflow\-check\fR
+enable signed arithmetic over\- and underflow checks
+.TP
+\fB\-\-malloc\-may\-fail\fR
+allow malloc calls to return a null pointer
+.TP
+\fB\-\-malloc\-fail\-null\fR
+set malloc failure mode to return null
+.TP
+\fB\-\-unwinding\-assertions\fR
+generate unwinding assertions (cannot be
+used with \fB\-\-cover\fR)
+.PP
+These checks can all be deactivated at once by using the \fB\-\-no\-standard\-checks\fR flag
+like in the header example, or individually, by prepending a \fBno\-\fR before the flag, like
+so:
+.TP
+\fB\-\-no\-pointer\-check\fR
+disable pointer checks
+.TP
+\fB\-\-no\-bounds\-check\fR
+disable array bounds checks
+.TP
+\fB\-\-no\-undefined\-shift\-check\fR
+do not perform check for shift greater than bit\-width
+.TP
+\fB\-\-no\-div\-by\-zero\-check\fR
+disable division by zero checks
+.TP
+\fB\-\-no\-pointer\-primitive\-check\fR
+do not check that all pointers in pointer primitives are valid or null
+.TP
+\fB\-\-no\-signed\-overflow\-check\fR
+disable signed arithmetic over\- and underflow checks
+.TP
+\fB\-\-no\-malloc\-may\-fail\fR
+do not allow malloc calls to fail by default
+.TP
+\fB\-\-no\-unwinding\-assertions\fR
+do not generate unwinding assertions
+.PP
+If an already set flag is re-set, like calling \fB\-\-pointer\-check\fR
+when default checks are already on, the flag is simply ignored.
 .SS "Analysis options:"
+.TP
+\fB\-\-no\-standard\-checks\fR
+disable the standard (default) checks applied to a C/GOTO program
+(see above for more information)
 .TP
 \fB\-\-show\-properties\fR
 show the properties, but don't run analysis
@@ -124,8 +200,8 @@ Set analysis architecture, which defaults to the host architecture. Use one of:
 .TP
 \fB\-\-os\fR \fIos\fR
 Set analysis operating system, which defaults to the host operating system. Use
-one of: \fBfreebsd\fR, \fBlinux\fR, \fBmacos\fR, \fBsolaris\fR, or
-\fBwindows\fR.
+one of: \fBfreebsd\fR, \fBlinux\fR, \fBmacos\fR, \fBnetbsd\fR, \fBopenbsd\fR,
+\fBsolaris\fR, \fBhurd\fR, or \fBwindows\fR.
 .TP
 \fB\-\-i386\-linux\fR, \fB\-\-i386\-win32\fR, \fB\-\-i386\-macos\fR, \fB\-\-ppc\-macos\fR, \fB\-\-win32\fR, \fB\-\-winx64\fR
 Set analysis architecture and operating system.
@@ -258,12 +334,6 @@ set malloc failure mode to return null
 \fB\-\-string\-abstraction\fR
 track C string lengths and zero\-termination
 .TP
-\fB\-\-fp\-reachability\-slice\fR f
-remove instructions that cannot appear on a trace
-that visits all given functions. The list of
-functions has to be given as a comma separated
-list f.
-.TP
 \fB\-\-reachability\-slice\fR
 remove instructions that cannot appear on a trace
 from entry point to a property
@@ -277,10 +347,6 @@ run full slicer (experimental)
 .TP
 \fB\-\-drop\-unused\-functions\fR
 drop functions trivially unreachable from main function
-.TP
-\fB\-\-havoc\-undefined\-functions\fR
-for any function that has no body, assign non\-deterministic values to
-any parameters passed as non\-const pointers and the return value
 .SS "Semantic transformations:"
 .TP
 \fB\-\-nondet\-static\fR
@@ -323,13 +389,13 @@ sensitivity size for arrays to 0
 \fB\-\-show\-loops\fR
 show the loops in the program
 .TP
-\fB\-\-unwind\fR nr
-unwind nr times
+\fB\-\-unwind\fR \fInr\fR
+unwind all loops at most \fInr\fR times
 .TP
-\fB\-\-unwindset\fR [T:]L:B,...
-unwind loop L with a bound of B
-(optionally restricted to thread T)
-(use \fB\-\-show\-loops\fR to get the loop IDs)
+\fB\-\-unwindset\fR [\fIT\fR:]\fIL\fR:\fIB\fR,...
+unwind loop \fIL\fR with a bound of \fIB\fR, optionally restricted to thread
+\fIT\fR, and overriding what may be set as default unwinding via
+\fB\-\-unwind\fR (use \fB\-\-show\-loops\fR to get the loop IDs)
 .TP
 \fB\-\-incremental\-loop\fR L
 check properties after each unwinding
@@ -358,11 +424,14 @@ show the verification conditions
 remove assignments unrelated to property
 .TP
 \fB\-\-unwinding\-assertions\fR
-generate unwinding assertions (cannot be
-used with \fB\-\-cover\fR)
+generate unwinding assertions (which are enabled by default; overrides
+\fB\-\-no\-unwinding\-assertions\fR when both of these are given); cannot be
+used with \fB\-\-cover\fR
 .TP
 \fB\-\-partial\-loops\fR
-permit paths with partial loops
+permit paths that execute loops only partially (up to the given unwinding bound)
+and then continue beyond the loop even when the loop condition would still hold
+(such paths may be spurious, resulting in false alarms)
 .TP
 \fB\-\-no\-self\-loops\-to\-assumptions\fR
 do not simplify while(1){} to assume(0)
@@ -388,6 +457,9 @@ enable caching of repeated dereferences
 \fB\-\-object\-bits\fR n
 number of bits used for object addresses
 .TP
+\fB\-\-sat\-solver\fR solver
+use specified SAT solver
+.TP
 \fB\-\-external\-sat\-solver\fR cmd
 command to invoke SAT solver process
 .TP
@@ -407,6 +479,9 @@ use default SMT1 solver (obsolete)
 \fB\-\-smt2\fR
 use default SMT2 solver (Z3)
 .TP
+\fB\-\-bitwuzla\fR
+use Bitwuzla
+.TP
 \fB\-\-boolector\fR
 use Boolector
 .TP
@@ -418,6 +493,9 @@ use CVC3
 .TP
 \fB\-\-cvc4\fR
 use CVC4
+.TP
+\fB\-\-cvc5\fR
+use CVC5
 .TP
 \fB\-\-mathsat\fR
 use MathSAT
@@ -461,11 +539,12 @@ The solver name must be in the "PATH" or be an executable with full path.
 The SMT solver should accept incremental SMTlib v2.6 formatted input from the stdin.
 .br
 The SMT solver should support the QF_AUFBV logic.
-.br
-The flag \fB\-\-slice\-formula\fR should be added to remove some not-yet supported features.
 .TP
 \fB\-\-outfile\fR filename
 output formula to given file
+.TP
+\fB\-\-dump\-smt\-formula\fR filename
+output smt incremental formula to the given file
 .TP
 \fB\-\-write\-solver\-stats\-to\fR json\-file
 collect the solver query complexity
@@ -521,6 +600,9 @@ give a stack trace only
 \fB\-\-flush\fR
 flush every line of output
 .TP
+\fB\-\-export\-symex\-ready\-goto\fR filename
+export the symex ready version of the goto-model into the given filename
+.TP
 \fB\-\-verbosity\fR #
 verbosity level
 .TP
@@ -530,7 +612,7 @@ monotonically.  \fBwall\fR: ISO\-8601 wall clock timestamps.
 .SH ENVIRONMENT
 All tools honor the TMPDIR environment variable when generating temporary
 files and directories. Furthermore note that
-the preprocessor used by \fBcbmc\R will use environment variables to locate
+the preprocessor used by \fBcbmc\fR will use environment variables to locate
 header files.
 .SH BUGS
 If you encounter a problem please create an issue at

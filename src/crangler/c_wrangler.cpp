@@ -23,6 +23,7 @@ Author: Daniel Kroening, dkr@amazon.com
 
 #include <fstream> // IWYU pragma: keep
 #include <iostream>
+#include <list>
 #include <map>
 #include <regex>
 #include <sstream>
@@ -80,7 +81,7 @@ struct c_wranglert
     std::vector<function_contract_clauset> function_contract;
     std::vector<loop_contract_clauset> loop_contract;
     std::vector<assertiont> assertions;
-    optionalt<std::string> stub;
+    std::optional<std::string> stub;
     bool remove_static = false;
   };
 

@@ -447,38 +447,29 @@ inline extractbit_exprt &to_extractbit_expr(exprt &expr)
 class extractbits_exprt : public expr_protectedt
 {
 public:
-  /// Extract the bits [\p _lower .. \p _upper] from \p _src to produce a result
-  /// of type \p _type. Note that this specifies a closed interval, i.e., both
-  /// bits \p _lower and \p _upper are included. Indices count from the
-  /// least-significant bit, and are not affected by endianness.
-  /// The ordering upper-lower matches what SMT-LIB uses.
-  extractbits_exprt(exprt _src, exprt _upper, exprt _lower, typet _type)
+  /// Extract the bits [\p _index .. \p _index + width - 1] from \p _src
+  /// to produce a result of type \p _type where width is the number of bits
+  /// of \p _type. Note that this specifies a closed interval, i.e., both
+  /// bits \p _lower and \p _index + width - 1 are included. Indices count
+  /// from the least-significant bit, and are not affected by endianness.
+  extractbits_exprt(exprt _src, exprt _index, typet _type)
     : expr_protectedt(
         ID_extractbits,
         std::move(_type),
-        {std::move(_src), std::move(_upper), std::move(_lower)})
+        {std::move(_src), std::move(_index)})
   {
   }
 
-  extractbits_exprt(
-    exprt _src,
-    const std::size_t _upper,
-    const std::size_t _lower,
-    typet _type);
+  extractbits_exprt(exprt _src, const std::size_t _index, typet _type);
 
   exprt &src()
   {
     return op0();
   }
 
-  exprt &upper()
+  exprt &index()
   {
     return op1();
-  }
-
-  exprt &lower()
-  {
-    return op2();
   }
 
   const exprt &src() const
@@ -486,14 +477,9 @@ public:
     return op0();
   }
 
-  const exprt &upper() const
+  const exprt &index() const
   {
     return op1();
-  }
-
-  const exprt &lower() const
-  {
-    return op2();
   }
 };
 
@@ -505,7 +491,7 @@ inline bool can_cast_expr<extractbits_exprt>(const exprt &base)
 
 inline void validate_expr(const extractbits_exprt &value)
 {
-  validate_operands(value, 3, "Extract bits must have three operands");
+  validate_operands(value, 2, "Extractbits must have two operands");
 }
 
 /// \brief Cast an exprt to an \ref extractbits_exprt
@@ -529,6 +515,179 @@ inline extractbits_exprt &to_extractbits_expr(exprt &expr)
   extractbits_exprt &ret = static_cast<extractbits_exprt &>(expr);
   validate_expr(ret);
   return ret;
+}
+
+/// \brief Replaces a sub-range of a bit-vector operand
+class update_bit_exprt : public expr_protectedt
+{
+public:
+  /// Replaces the bit [\p _index] from \p _src to produce a result of
+  /// the same type as \p _src. The index counts from the
+  /// least-significant bit. Updates outside of the range of \p _src
+  /// yield an expression equal to \p _src.
+  update_bit_exprt(exprt _src, exprt _index, exprt _new_value)
+    : expr_protectedt(
+        ID_update_bit,
+        _src.type(),
+        {_src, std::move(_index), std::move(_new_value)})
+  {
+    PRECONDITION(new_value().type().id() == ID_bool);
+  }
+
+  update_bit_exprt(exprt _src, const std::size_t _index, exprt _new_value);
+
+  exprt &src()
+  {
+    return op0();
+  }
+
+  exprt &index()
+  {
+    return op1();
+  }
+
+  exprt &new_value()
+  {
+    return op2();
+  }
+
+  const exprt &src() const
+  {
+    return op0();
+  }
+
+  const exprt &index() const
+  {
+    return op1();
+  }
+
+  const exprt &new_value() const
+  {
+    return op2();
+  }
+
+  static void check(
+    const exprt &expr,
+    const validation_modet vm = validation_modet::INVARIANT)
+  {
+    validate_operands(expr, 3, "update_bit must have three operands");
+  }
+
+  /// A lowering to masking, shifting, or.
+  exprt lower() const;
+};
+
+template <>
+inline bool can_cast_expr<update_bit_exprt>(const exprt &base)
+{
+  return base.id() == ID_update_bit;
+}
+
+/// \brief Cast an exprt to an \ref update_bit_exprt
+///
+/// \a expr must be known to be \ref update_bit_exprt.
+///
+/// \param expr: Source expression
+/// \return Object of type \ref update_bit_exprt
+inline const update_bit_exprt &to_update_bit_expr(const exprt &expr)
+{
+  PRECONDITION(expr.id() == ID_update_bit);
+  update_bit_exprt::check(expr);
+  return static_cast<const update_bit_exprt &>(expr);
+}
+
+/// \copydoc to_update_bit_expr(const exprt &)
+inline update_bit_exprt &to_update_bit_expr(exprt &expr)
+{
+  PRECONDITION(expr.id() == ID_update_bit);
+  update_bit_exprt::check(expr);
+  return static_cast<update_bit_exprt &>(expr);
+}
+
+/// \brief Replaces a sub-range of a bit-vector operand
+class update_bits_exprt : public expr_protectedt
+{
+public:
+  /// Replace the bits [\p _index .. \p _index + size] from \p _src
+  /// where size is the width of \p _new_value to produce a result of
+  /// the same type as \p _src. The index counts from the
+  /// least-significant bit.
+  update_bits_exprt(exprt _src, exprt _index, exprt _new_value)
+    : expr_protectedt(
+        ID_update_bits,
+        _src.type(),
+        {_src, std::move(_index), std::move(_new_value)})
+  {
+  }
+
+  update_bits_exprt(exprt _src, const std::size_t _index, exprt _new_value);
+
+  exprt &src()
+  {
+    return op0();
+  }
+
+  exprt &index()
+  {
+    return op1();
+  }
+
+  exprt &new_value()
+  {
+    return op2();
+  }
+
+  const exprt &src() const
+  {
+    return op0();
+  }
+
+  const exprt &index() const
+  {
+    return op1();
+  }
+
+  const exprt &new_value() const
+  {
+    return op2();
+  }
+
+  static void check(
+    const exprt &expr,
+    const validation_modet vm = validation_modet::INVARIANT)
+  {
+    validate_operands(expr, 3, "update_bits must have three operands");
+  }
+
+  /// A lowering to masking, shifting, or.
+  exprt lower() const;
+};
+
+template <>
+inline bool can_cast_expr<update_bits_exprt>(const exprt &base)
+{
+  return base.id() == ID_update_bits;
+}
+
+/// \brief Cast an exprt to an \ref update_bits_exprt
+///
+/// \a expr must be known to be \ref update_bits_exprt.
+///
+/// \param expr: Source expression
+/// \return Object of type \ref update_bits_exprt
+inline const update_bits_exprt &to_update_bits_expr(const exprt &expr)
+{
+  PRECONDITION(expr.id() == ID_update_bits);
+  update_bits_exprt::check(expr);
+  return static_cast<const update_bits_exprt &>(expr);
+}
+
+/// \copydoc to_update_bits_expr(const exprt &)
+inline update_bits_exprt &to_update_bits_expr(exprt &expr)
+{
+  PRECONDITION(expr.id() == ID_update_bits);
+  update_bits_exprt::check(expr);
+  return static_cast<update_bits_exprt &>(expr);
 }
 
 /// \brief Bit-vector replication

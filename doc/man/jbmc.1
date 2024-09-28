@@ -82,8 +82,8 @@ Set analysis architecture, which defaults to the host architecture. Use one of:
 .TP
 \fB\-\-os\fR \fIos\fR
 Set analysis operating system, which defaults to the host operating system. Use
-one of: \fBfreebsd\fR, \fBlinux\fR, \fBmacos\fR, \fBsolaris\fR, or
-\fBwindows\fR.
+one of: \fBfreebsd\fR, \fBlinux\fR, \fBmacos\fR, \fBnetbsd\fR, \fBopenbsd\fR,
+\fBsolaris\fR, \fBhurd\fR, or \fBwindows\fR.
 .TP
 \fB\-\-i386\-linux\fR, \fB\-\-i386\-win32\fR, \fB\-\-i386\-macos\fR, \fB\-\-ppc\-macos\fR, \fB\-\-win32\fR, \fB\-\-winx64\fR
 Set analysis architecture and operating system.
@@ -137,12 +137,6 @@ ignore user assumptions
 .TP
 \fB\-\-mm\fR MM
 memory consistency model for concurrent programs
-.TP
-\fB\-\-fp\-reachability\-slice\fR f
-remove instructions that cannot appear on a trace
-that visits all given functions. The list of
-functions has to be given as a comma separated
-list f.
 .TP
 \fB\-\-reachability\-slice\fR
 remove instructions that cannot appear on a trace
@@ -318,12 +312,12 @@ sensitivity size for arrays to 0
 show the loops in the program
 .TP
 \fB\-\-unwind\fR nr
-unwind nr times
+unwind all loops at most nr times
 .TP
-\fB\-\-unwindset\fR [T:]L:B,...
-unwind loop L with a bound of B
-(optionally restricted to thread T)
-(use \fB\-\-show\-loops\fR to get the loop IDs)
+\fB\-\-unwindset\fR [\fIT\fR:]\fIL\fR:\fIB\fR,...
+unwind loop \fIL\fR with a bound of \fIB\fR, optionally restricted to thread
+\fIT\fR, and overriding what may be set as default unwinding via
+\fB\-\-unwind\fR (use \fB\-\-show\-loops\fR to get the loop IDs)
 .TP
 \fB\-\-incremental\-loop\fR L
 check properties after each unwinding
@@ -352,11 +346,17 @@ show the verification conditions
 remove assignments unrelated to property
 .TP
 \fB\-\-unwinding\-assertions\fR
-generate unwinding assertions (cannot be
-used with \fB\-\-cover\fR)
+generate unwinding assertions (which are enabled by default; overrides
+\fB\-\-no\-unwinding\-assertions\fR when both of these are given); cannot be
+used with \fB\-\-cover\fR
+.TP
+\fB\-\-no\-unwinding\-assertions\fR
+do not generate unwinding assertions
 .TP
 \fB\-\-partial\-loops\fR
-permit paths with partial loops
+permit paths that execute loops only partially (up to the given unwinding bound)
+and then continue beyond the loop even when the loop condition would still hold
+(such paths may be spurious, resulting in false alarms)
 .TP
 \fB\-\-no\-self\-loops\-to\-assumptions\fR
 do not simplify while(1){} to assume(0)
@@ -382,6 +382,9 @@ enable caching of repeated dereferences
 \fB\-\-object\-bits\fR n
 number of bits used for object addresses
 .TP
+\fB\-\-sat\-solver\fR solver
+use specified SAT solver
+.TP
 \fB\-\-external\-sat\-solver\fR \fIcmd\fR
 command to invoke SAT solver process
 .TP
@@ -401,6 +404,9 @@ use default SMT1 solver (obsolete)
 \fB\-\-smt2\fR
 use default SMT2 solver (Z3)
 .TP
+\fB\-\-bitwuzla\fR
+use Boolector
+.TP
 \fB\-\-boolector\fR
 use Boolector
 .TP
@@ -412,6 +418,9 @@ use CVC3
 .TP
 \fB\-\-cvc4\fR
 use CVC4
+.TP
+\fB\-\-cvc5\fR
+use CVC5
 .TP
 \fB\-\-mathsat\fR
 use MathSAT
@@ -444,6 +453,9 @@ incremental solving (experimental)
 .TP
 \fB\-\-outfile\fR filename
 output formula to given file
+.TP
+\fB\-\-dump\-smt\-formula\fR filename
+output smt incremental formula to the given file
 .TP
 \fB\-\-write\-solver\-stats\-to\fR \fIjson\-file\fR
 collect the solver query complexity

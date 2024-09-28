@@ -89,6 +89,7 @@ Author: Daniel Kroening, kroening@kroening.com
 #ifndef CPROVER_GOTO_ANALYZER_GOTO_ANALYZER_PARSE_OPTIONS_H
 #define CPROVER_GOTO_ANALYZER_GOTO_ANALYZER_PARSE_OPTIONS_H
 
+#include <util/config.h>
 #include <util/parse_options.h>
 #include <util/timestamper.h>
 #include <util/ui_message.h>
@@ -99,7 +100,7 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <goto-programs/show_properties.h>
 
 #include <analyses/variable-sensitivity/variable_sensitivity_domain.h>
-#include <ansi-c/goto_check_c.h>
+#include <ansi-c/goto-conversion/goto_check_c.h>
 #include <langapi/language.h>
 
 class optionst;
@@ -109,7 +110,8 @@ class optionst;
   "(show)(verify)(simplify):" \
   "(show-on-source)" \
   "(unreachable-instructions)(unreachable-functions)" \
-  "(reachable-functions)"
+  "(reachable-functions)"           \
+  "(no-standard-checks)"
 
 #define GOTO_ANALYSER_OPTIONS_AI \
   "(recursive-interprocedural)" \
@@ -151,6 +153,7 @@ class optionst;
   OPT_SHOW_GOTO_FUNCTIONS \
   OPT_SHOW_PROPERTIES \
   OPT_GOTO_CHECK \
+  OPT_CONFIG_LIBRARY \
   "(show-symbol-table)(show-parse-tree)" \
   "(property):" \
   "(verbosity):(version)" \
@@ -188,6 +191,9 @@ protected:
   virtual bool process_goto_program(const optionst &options);
 
   virtual int perform_analysis(const optionst &options);
+
+  // TODO: Add documentation
+  static void set_default_analysis_flags(optionst &options, const bool enabled);
 };
 
 #endif // CPROVER_GOTO_ANALYZER_GOTO_ANALYZER_PARSE_OPTIONS_H

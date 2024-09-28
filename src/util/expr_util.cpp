@@ -9,12 +9,14 @@ Author: Daniel Kroening, kroening@kroening.com
 #include "expr_util.h"
 
 #include "arith_tools.h"
+#include "bitvector_expr.h"
+#include "byte_operators.h"
 #include "c_types.h"
 #include "config.h"
 #include "expr_iterator.h"
 #include "namespace.h"
 #include "pointer_expr.h"
-#include "std_expr.h"
+#include "pointer_offset_size.h"
 
 #include <algorithm>
 #include <unordered_set>
@@ -66,33 +68,7 @@ exprt make_binary(const exprt &expr)
 
 with_exprt make_with_expr(const update_exprt &src)
 {
-  const exprt::operandst &designator=src.designator();
-  PRECONDITION(!designator.empty());
-
-  with_exprt result{exprt{}, exprt{}, exprt{}};
-  exprt *dest=&result;
-
-  for(const auto &expr : designator)
-  {
-    with_exprt tmp{exprt{}, exprt{}, exprt{}};
-
-    if(expr.id() == ID_index_designator)
-    {
-      tmp.where() = to_index_designator(expr).index();
-    }
-    else if(expr.id() == ID_member_designator)
-    {
-      // irep_idt component_name=
-      //  to_member_designator(*it).get_component_name();
-    }
-    else
-      UNREACHABLE;
-
-    *dest=tmp;
-    dest=&to_with_expr(*dest).new_value();
-  }
-
-  return result;
+  return src.make_with_expr();
 }
 
 exprt is_not_zero(
@@ -224,35 +200,88 @@ const exprt &skip_typecast(const exprt &expr)
 
 /// This function determines what expressions are to be propagated as
 /// "constants"
-bool is_constantt::is_constant(const exprt &expr) const
+bool can_forward_propagatet::is_constant(const exprt &expr) const
 {
-  if(expr.is_constant())
-    return true;
+  if(
+    expr.id() == ID_symbol || expr.id() == ID_nondet_symbol ||
+    expr.id() == ID_side_effect)
+  {
+    return false;
+  }
 
   if(expr.id() == ID_address_of)
   {
     return is_constant_address_of(to_address_of_expr(expr).object());
   }
-  else if(
-    expr.id() == ID_typecast || expr.id() == ID_array_of ||
-    expr.id() == ID_plus || expr.id() == ID_mult || expr.id() == ID_array ||
-    expr.id() == ID_with || expr.id() == ID_struct || expr.id() == ID_union ||
-    expr.id() == ID_empty_union ||
-    // byte_update works, byte_extract may be out-of-bounds
-    expr.id() == ID_byte_update_big_endian ||
-    expr.id() == ID_byte_update_little_endian)
+  else if(auto index = expr_try_dynamic_cast<index_exprt>(expr))
   {
+    if(!is_constant(index->array()) || !index->index().is_constant())
+      return false;
+
+    const auto &array_type = to_array_type(index->array().type());
+    if(!array_type.size().is_constant())
+      return false;
+
+    const mp_integer size =
+      numeric_cast_v<mp_integer>(to_constant_expr(array_type.size()));
+    const mp_integer index_int =
+      numeric_cast_v<mp_integer>(to_constant_expr(index->index()));
+
+    return index_int >= 0 && index_int < size;
+  }
+  else if(auto be = expr_try_dynamic_cast<byte_extract_exprt>(expr))
+  {
+    if(!is_constant(be->op()) || !be->offset().is_constant())
+      return false;
+
+    const auto op_bits = pointer_offset_bits(be->op().type(), ns);
+    if(!op_bits.has_value())
+      return false;
+
+    const auto extract_bits = pointer_offset_bits(be->type(), ns);
+    if(!extract_bits.has_value())
+      return false;
+
+    const mp_integer offset_bits =
+      numeric_cast_v<mp_integer>(to_constant_expr(be->offset())) *
+      be->get_bits_per_byte();
+
+    return offset_bits >= 0 && offset_bits + *extract_bits <= *op_bits;
+  }
+  else if(auto eb = expr_try_dynamic_cast<extractbits_exprt>(expr))
+  {
+    if(!is_constant(eb->src()) || !eb->index().is_constant())
+    {
+      return false;
+    }
+
+    const auto eb_bits = pointer_offset_bits(eb->type(), ns);
+    if(!eb_bits.has_value())
+      return false;
+
+    const auto src_bits = pointer_offset_bits(eb->src().type(), ns);
+    if(!src_bits.has_value())
+      return false;
+
+    const mp_integer lower_bound =
+      numeric_cast_v<mp_integer>(to_constant_expr(eb->index()));
+    const mp_integer upper_bound = lower_bound + eb_bits.value() - 1;
+
+    return lower_bound >= 0 && lower_bound <= upper_bound &&
+           upper_bound < src_bits.value();
+  }
+  else
+  {
+    // std::all_of returns true when there are no operands
     return std::all_of(
       expr.operands().begin(), expr.operands().end(), [this](const exprt &e) {
         return is_constant(e);
       });
   }
-
-  return false;
 }
 
 /// this function determines which reference-typed expressions are constant
-bool is_constantt::is_constant_address_of(const exprt &expr) const
+bool can_forward_propagatet::is_constant_address_of(const exprt &expr) const
 {
   if(expr.id() == ID_symbol)
   {
@@ -291,7 +320,7 @@ constant_exprt make_boolean_expr(bool value)
 
 exprt make_and(exprt a, exprt b)
 {
-  PRECONDITION(a.type().id() == ID_bool && b.type().id() == ID_bool);
+  PRECONDITION(a.is_boolean() && b.is_boolean());
   if(b.is_constant())
   {
     if(b.get(ID_value) == ID_false)
@@ -314,20 +343,5 @@ exprt make_and(exprt a, exprt b)
 
 bool is_null_pointer(const constant_exprt &expr)
 {
-  if(expr.type().id() != ID_pointer)
-    return false;
-
-  if(expr.get_value() == ID_NULL)
-    return true;
-
-    // We used to support "0" (when NULL_is_zero), but really front-ends should
-    // resolve this and generate ID_NULL instead.
-#if 0
-  return config.ansi_c.NULL_is_zero && expr.value_is_zero_string();
-#else
-  INVARIANT(
-    !expr.value_is_zero_string() || !config.ansi_c.NULL_is_zero,
-    "front-end should use ID_NULL");
-  return false;
-#endif
+  return expr.is_null_pointer();
 }

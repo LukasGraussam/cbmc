@@ -13,10 +13,11 @@ Date: May 2007
 
 #include "irep_serialization.h"
 
+#include "exception_utils.h"
+#include "string_container.h"
+
 #include <climits>
 #include <iostream>
-
-#include "exception_utils.h"
 
 void irep_serializationt::write_irep(
   std::ostream &out,
@@ -75,31 +76,18 @@ irept irep_serializationt::read_irep(std::istream &in)
     sub.push_back(reference_convert(in));
   }
 
-#if NAMED_SUB_IS_FORWARD_LIST
-  irept::named_subt::iterator before = named_sub.before_begin();
-#endif
   while(in.peek()=='N')
   {
     in.get();
     irep_idt id = read_string_ref(in);
-#if NAMED_SUB_IS_FORWARD_LIST
-    named_sub.emplace_after(before, id, reference_convert(in));
-    ++before;
-#else
     named_sub.emplace(id, reference_convert(in));
-#endif
   }
 
   while(in.peek()=='C')
   {
     in.get();
     irep_idt id = read_string_ref(in);
-#if NAMED_SUB_IS_FORWARD_LIST
-    named_sub.emplace_after(before, id, reference_convert(in));
-    ++before;
-#else
     named_sub.emplace(id, reference_convert(in));
-#endif
   }
 
   if(in.get()!=0)
@@ -224,7 +212,7 @@ void irep_serializationt::write_string_ref(
   std::ostream &out,
   const irep_idt &s)
 {
-  size_t id=irep_id_hash()(s);
+  size_t id = s.get_no();
   if(id>=ireps_container.string_map.size())
     ireps_container.string_map.resize(id+1, false);
 

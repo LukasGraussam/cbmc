@@ -1,10 +1,10 @@
-CORE
+CORE dfcc-only
 main.c
 --dfcc main --enforce-contract f2
 ^EXIT=10$
 ^SIGNAL=0$
-^\[f2.assigns.\d+\] line \d+ Check that p->buf\[\(.*\)0\] is assignable: FAILURE$
-^\[f2.assigns.\d+\] line \d+ Check that p->size is assignable: SUCCESS$
+^\[f2.assigns.\d+\] line \d+ Check that p->buf\[(\(.*\))?0\] is assignable: FAILURE$
+^\[f2.assigns.\d+\] line \d+ Check that p->size is assignable: UNKNOWN$
 ^VERIFICATION FAILED$
 --
 --

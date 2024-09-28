@@ -1,27 +1,53 @@
 /* FUNCTION: abs */
 
+#ifndef __CPROVER_LIMITS_H_INCLUDED
+#  include <limits.h>
+#  define __CPROVER_LIMITS_H_INCLUDED
+#endif
+
 #undef abs
 
 int abs(int i)
 {
+  // C99 Section 7.20.6.1:
+  // "If the result cannot be represented, the behavior is undefined."
+  __CPROVER_precondition(i != INT_MIN, "argument to abs must not be INT_MIN");
   return __CPROVER_abs(i);
 }
 
 /* FUNCTION: labs */
 
+#ifndef __CPROVER_LIMITS_H_INCLUDED
+#  include <limits.h>
+#  define __CPROVER_LIMITS_H_INCLUDED
+#endif
+
 #undef labs
 
 long int labs(long int i)
 {
+  // C99 Section 7.20.6.1:
+  // "If the result cannot be represented, the behavior is undefined."
+  __CPROVER_precondition(
+    i != LONG_MIN, "argument to labs must not be LONG_MIN");
   return __CPROVER_labs(i);
 }
 
 /* FUNCTION: llabs */
 
+#ifndef __CPROVER_LIMITS_H_INCLUDED
+#  include <limits.h>
+#  define __CPROVER_LIMITS_H_INCLUDED
+#endif
+
 #undef llabs
 
 long long int llabs(long long int i)
 {
+  // C99 Section 7.20.6.1:
+  // "If the result cannot be represented, the behavior is undefined."
+  __CPROVER_precondition(
+    i != LLONG_MIN, "argument to llabs must not be LLONG_MIN");
   return __CPROVER_llabs(i);
 }
 
@@ -32,12 +58,19 @@ long long int llabs(long long int i)
 #  define __CPROVER_INTTYPES_H_INCLUDED
 #endif
 
+#ifndef __CPROVER_LIMITS_H_INCLUDED
+#  include <limits.h>
+#  define __CPROVER_LIMITS_H_INCLUDED
+#endif
+
 #undef imaxabs
 
 intmax_t __CPROVER_imaxabs(intmax_t);
 
 intmax_t imaxabs(intmax_t i)
 {
+  __CPROVER_precondition(
+    i != INTMAX_MIN, "argument to imaxabs must not be INTMAX_MIN");
   return __CPROVER_imaxabs(i);
 }
 
@@ -104,10 +137,11 @@ void abort(void)
 
 #undef calloc
 
-__CPROVER_bool __VERIFIER_nondet___CPROVER_bool();
+__CPROVER_bool __VERIFIER_nondet___CPROVER_bool(void);
 #ifndef __GNUC__
 _Bool __builtin_mul_overflow();
 #endif
+__CPROVER_bool __CPROVER_malloc_is_new_array = 0;
 
 void *calloc(__CPROVER_size_t nmemb, __CPROVER_size_t size)
 {
@@ -146,10 +180,6 @@ __CPROVER_HIDE:;
   // and __CPROVER_allocate doesn't, but no one cares
   malloc_res = __CPROVER_allocate(alloc_size, 1);
 
-  // make sure it's not recorded as deallocated
-  __CPROVER_deallocated =
-    (malloc_res == __CPROVER_deallocated) ? 0 : __CPROVER_deallocated;
-
   // record the object size for non-determistic bounds checking
   __CPROVER_bool record_malloc = __VERIFIER_nondet___CPROVER_bool();
   __CPROVER_malloc_is_new_array =
@@ -172,7 +202,10 @@ __CPROVER_HIDE:;
 
 #undef malloc
 
-__CPROVER_bool __VERIFIER_nondet___CPROVER_bool();
+__CPROVER_bool __VERIFIER_nondet___CPROVER_bool(void);
+#ifndef LIBRARY_CHECK
+__CPROVER_bool __CPROVER_malloc_is_new_array = 0;
+#endif
 
 // malloc is marked "inline" for the benefit of goto-analyzer. Really,
 // goto-analyzer should take care of inlining as needed.
@@ -210,10 +243,6 @@ __CPROVER_HIDE:;
   void *malloc_res;
   malloc_res = __CPROVER_allocate(malloc_size, 0);
 
-  // make sure it's not recorded as deallocated
-  __CPROVER_deallocated =
-    (malloc_res == __CPROVER_deallocated) ? 0 : __CPROVER_deallocated;
-
   // record the object size for non-determistic bounds checking
   __CPROVER_bool record_malloc = __VERIFIER_nondet___CPROVER_bool();
   __CPROVER_malloc_is_new_array =
@@ -232,17 +261,17 @@ __CPROVER_HIDE:;
 
 /* FUNCTION: __builtin_alloca */
 
-__CPROVER_bool __VERIFIER_nondet___CPROVER_bool();
-extern void *__CPROVER_alloca_object;
+__CPROVER_bool __VERIFIER_nondet___CPROVER_bool(void);
+const void *__CPROVER_alloca_object = 0;
+#ifndef LIBRARY_CHECK
+__CPROVER_bool __CPROVER_malloc_is_new_array = 0;
+#endif
 
 void *__builtin_alloca(__CPROVER_size_t alloca_size)
 {
   __CPROVER_HIDE:;
   void *res;
   res = __CPROVER_allocate(alloca_size, 0);
-
-  // make sure it's not recorded as deallocated
-  __CPROVER_deallocated=(res==__CPROVER_deallocated)?0:__CPROVER_deallocated;
 
   // record the object size for non-determistic bounds checking
   __CPROVER_bool record_malloc=__VERIFIER_nondet___CPROVER_bool();
@@ -275,8 +304,15 @@ __CPROVER_HIDE:;
 
 #undef free
 
-__CPROVER_bool __VERIFIER_nondet___CPROVER_bool();
-extern void *__CPROVER_alloca_object;
+void __CPROVER_deallocate(void *);
+__CPROVER_bool __VERIFIER_nondet___CPROVER_bool(void);
+#ifndef LIBRARY_CHECK
+const void *__CPROVER_alloca_object = 0;
+#endif
+const void *__CPROVER_new_object = 0;
+#ifndef LIBRARY_CHECK
+__CPROVER_bool __CPROVER_malloc_is_new_array = 0;
+#endif
 
 void free(void *ptr)
 {
@@ -454,8 +490,8 @@ long atol(const char *nptr)
 #  define __CPROVER_STDDEF_H_INCLUDED
 #endif
 
-__CPROVER_bool __VERIFIER_nondet___CPROVER_bool();
-ptrdiff_t __VERIFIER_nondet_ptrdiff_t();
+__CPROVER_bool __VERIFIER_nondet___CPROVER_bool(void);
+ptrdiff_t __VERIFIER_nondet_ptrdiff_t(void);
 
 char *getenv(const char *name)
 {
@@ -589,7 +625,7 @@ __CPROVER_HIDE:;
 
 /* FUNCTION: random */
 
-long __VERIFIER_nondet_long();
+long __VERIFIER_nondet_long(void);
 
 long random(void)
 {
@@ -602,7 +638,7 @@ long random(void)
 
 /* FUNCTION: rand */
 
-int __VERIFIER_nondet_int();
+int __VERIFIER_nondet_int(void);
 
 int rand(void)
 {
@@ -615,7 +651,7 @@ __CPROVER_HIDE:;
 
 /* FUNCTION: rand_r */
 
-int __VERIFIER_nondet_int();
+int __VERIFIER_nondet_int(void);
 
 int rand_r(unsigned int *seed)
 {
@@ -629,7 +665,7 @@ __CPROVER_HIDE:;
 
 /* FUNCTION: __CPROVER_deallocate */
 
-__CPROVER_bool __VERIFIER_nondet___CPROVER_bool();
+__CPROVER_bool __VERIFIER_nondet___CPROVER_bool(void);
 
 void __CPROVER_deallocate(void *ptr)
 {

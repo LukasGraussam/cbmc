@@ -30,8 +30,13 @@ Date:   December 2014
 class remove_asmt
 {
 public:
-  remove_asmt(symbol_tablet &_symbol_table, goto_functionst &_goto_functions)
-    : symbol_table(_symbol_table), goto_functions(_goto_functions)
+  remove_asmt(
+    symbol_tablet &_symbol_table,
+    goto_functionst &_goto_functions,
+    message_handlert &message_handler)
+    : symbol_table(_symbol_table),
+      goto_functions(_goto_functions),
+      message_handler(message_handler)
   {
   }
 
@@ -44,6 +49,7 @@ public:
 protected:
   symbol_tablet &symbol_table;
   goto_functionst &goto_functions;
+  message_handlert &message_handler;
 
   void process_function(const irep_idt &, goto_functionst::goto_functiont &);
 
@@ -62,6 +68,7 @@ protected:
   void gcc_asm_function_call(
     const irep_idt &function_base_name,
     const code_asm_gcct &code,
+    std::size_t n_args,
     goto_programt &dest);
 
   void msc_asm_function_call(
@@ -77,10 +84,12 @@ protected:
 /// \param function_base_name: Name of the function to call
 /// \param code: gcc-style inline assembly statement to translate to function
 ///   call
+/// \param n_args: Number of arguments required by \p function_base_name
 /// \param dest: Goto program to append the function call to
 void remove_asmt::gcc_asm_function_call(
   const irep_idt &function_base_name,
   const code_asm_gcct &code,
+  std::size_t n_args,
   goto_programt &dest)
 {
   irep_idt function_identifier = function_base_name;
@@ -109,12 +118,23 @@ void remove_asmt::gcc_asm_function_call(
     }
   }
 
+  // An inline asm statement may consist of multiple commands, not all of which
+  // use all of the inputs/outputs of the inline asm statement.
+  DATA_INVARIANT_WITH_DIAGNOSTICS(
+    arguments.size() >= n_args,
+    "insufficient number of arguments for calling " +
+      id2string(function_identifier),
+    "required arguments: " + std::to_string(n_args),
+    code.pretty());
+  arguments.resize(n_args);
+
   code_typet fkt_type{
     code_typet::parameterst{
       arguments.size(), code_typet::parametert{void_pointer}},
     empty_typet()};
 
-  symbol_exprt fkt(function_identifier, fkt_type);
+  auto fkt = symbol_exprt{function_identifier, fkt_type}.with_source_location(
+    code.source_location());
 
   code_function_callt function_call(std::move(fkt), std::move(arguments));
 
@@ -124,13 +144,8 @@ void remove_asmt::gcc_asm_function_call(
   // do we have it?
   if(!symbol_table.has_symbol(function_identifier))
   {
-    symbolt symbol;
-
-    symbol.name = function_identifier;
-    symbol.type = fkt_type;
+    symbolt symbol{function_identifier, fkt_type, ID_C};
     symbol.base_name = function_base_name;
-    symbol.value = nil_exprt();
-    symbol.mode = ID_C;
 
     symbol_table.add(symbol);
 
@@ -138,9 +153,12 @@ void remove_asmt::gcc_asm_function_call(
   }
   else
   {
-    DATA_INVARIANT(
+    DATA_INVARIANT_WITH_DIAGNOSTICS(
       symbol_table.lookup_ref(function_identifier).type == fkt_type,
-      "function types should match");
+      "types of function " + id2string(function_identifier) + " should match",
+      code.pretty(),
+      symbol_table.lookup_ref(function_identifier).type.pretty(),
+      fkt_type.pretty());
   }
 }
 
@@ -172,8 +190,8 @@ void remove_asmt::msc_asm_function_call(
       arguments.size(), code_typet::parametert{void_pointer}},
     empty_typet()};
 
-  symbol_exprt fkt(function_identifier, fkt_type);
-
+  auto fkt = symbol_exprt{function_identifier, fkt_type}.with_source_location(
+    code.source_location());
   code_function_callt function_call(std::move(fkt), std::move(arguments));
 
   dest.add(
@@ -182,13 +200,8 @@ void remove_asmt::msc_asm_function_call(
   // do we have it?
   if(!symbol_table.has_symbol(function_identifier))
   {
-    symbolt symbol;
-
-    symbol.name = function_identifier;
-    symbol.type = fkt_type;
+    symbolt symbol{function_identifier, fkt_type, ID_C};
     symbol.base_name = function_base_name;
-    symbol.value = nil_exprt();
-    symbol.mode = ID_C;
 
     symbol_table.add(symbol);
 
@@ -235,10 +248,10 @@ void remove_asmt::process_instruction_gcc(
   const code_asm_gcct &code,
   goto_programt &dest)
 {
-  const irep_idt &i_str = to_string_constant(code.asm_text()).get_value();
+  const irep_idt &i_str = to_string_constant(code.asm_text()).value();
 
   std::istringstream str(id2string(i_str));
-  assembler_parser.clear();
+  assembler_parsert assembler_parser{message_handler};
   assembler_parser.in = &str;
   assembler_parser.parse();
 
@@ -303,12 +316,12 @@ void remove_asmt::process_instruction_gcc(
 
     if(command == "fstcw" || command == "fnstcw" || command == "fldcw") // x86
     {
-      gcc_asm_function_call("__asm_" + id2string(command), code, tmp_dest);
+      gcc_asm_function_call("__asm_" + id2string(command), code, 1, tmp_dest);
     }
     else if(
       command == "mfence" || command == "lfence" || command == "sfence") // x86
     {
-      gcc_asm_function_call("__asm_" + id2string(command), code, tmp_dest);
+      gcc_asm_function_call("__asm_" + id2string(command), code, 0, tmp_dest);
     }
     else if(command == ID_sync) // Power
     {
@@ -406,10 +419,10 @@ void remove_asmt::process_instruction_msc(
   const code_asmt &code,
   goto_programt &dest)
 {
-  const irep_idt &i_str = to_string_constant(code.op0()).get_value();
+  const irep_idt &i_str = to_string_constant(code.op0()).value();
 
   std::istringstream str(id2string(i_str));
-  assembler_parser.clear();
+  assembler_parsert assembler_parser{message_handler};
   assembler_parser.in = &str;
   assembler_parser.parse();
 
@@ -554,13 +567,17 @@ void remove_asmt::process_function(
     remove_skip(goto_function.body);
 }
 
-/// \copybrief remove_asm(goto_modelt &)
+/// \copybrief remove_asm(goto_modelt &, message_handlert &)
 ///
 /// \param goto_functions: The goto functions
 /// \param symbol_table: The symbol table
-void remove_asm(goto_functionst &goto_functions, symbol_tablet &symbol_table)
+/// \param message_handler: Message handler
+void remove_asm(
+  goto_functionst &goto_functions,
+  symbol_tablet &symbol_table,
+  message_handlert &message_handler)
 {
-  remove_asmt rem(symbol_table, goto_functions);
+  remove_asmt rem(symbol_table, goto_functions, message_handler);
   rem();
 }
 
@@ -571,7 +588,28 @@ void remove_asm(goto_functionst &goto_functions, symbol_tablet &symbol_table)
 /// Unrecognised assembly instructions are ignored.
 ///
 /// \param goto_model: The goto model
-void remove_asm(goto_modelt &goto_model)
+/// \param message_handler: Message handler
+void remove_asm(goto_modelt &goto_model, message_handlert &message_handler)
 {
-  remove_asm(goto_model.goto_functions, goto_model.symbol_table);
+  remove_asm(
+    goto_model.goto_functions, goto_model.symbol_table, message_handler);
+}
+
+bool has_asm(const goto_functionst &goto_functions)
+{
+  for(auto &function_it : goto_functions.function_map)
+    for(auto &instruction : function_it.second.body.instructions)
+      if(
+        instruction.is_other() &&
+        instruction.get_other().get_statement() == ID_asm)
+      {
+        return true;
+      }
+
+  return false;
+}
+
+bool has_asm(const goto_modelt &goto_model)
+{
+  return has_asm(goto_model.goto_functions);
 }

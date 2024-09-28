@@ -11,8 +11,8 @@ Date:   December 2014
 
 /// \file
 /// Remove 'asm' statements by compiling them into suitable standard goto
-/// program instructions
-
+/// program instructions.
+/// \details
 /// Inline assembly statements in the source program (in either gcc- or
 /// msc-style) are represented by instructions of kind `OTHER` with a `code`
 /// member of type `code_asmt` in the goto program.
@@ -54,10 +54,17 @@ Date:   December 2014
 
 class goto_functionst;
 class goto_modelt;
+class message_handlert;
 class symbol_tablet;
 
-void remove_asm(goto_functionst &, symbol_tablet &);
+void remove_asm(goto_functionst &, symbol_tablet &, message_handlert &);
 
-void remove_asm(goto_modelt &);
+void remove_asm(goto_modelt &, message_handlert &);
+
+/// returns true iff the given goto functions use asm instructions
+bool has_asm(const goto_functionst &);
+
+/// returns true iff the given goto model uses asm instructions
+bool has_asm(const goto_modelt &);
 
 #endif // CPROVER_ASSEMBLER_REMOVE_ASM_H

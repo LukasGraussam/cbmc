@@ -22,7 +22,7 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <pointer-analysis/value_set_dereference.h>
 
 #include "goto_symex.h"
-#include "goto_symex_is_constant.h"
+#include "goto_symex_can_forward_propagate.h"
 #include "path_storage.h"
 
 #include <algorithm>
@@ -72,13 +72,13 @@ void goto_symext::apply_goto_condition(
 /// \param symbol_expr: The symbol expression in the condition
 /// \param other_operand: The other expression in the condition; we only support
 ///   an address of expression, a typecast of an address of expression or a
-///   null pointer, and return an empty optionalt in all other cases
+///   null pointer, and return an empty std::optional in all other cases
 /// \param value_set: The value-set for looking up what the symbol can point to
 /// \param language_mode: The language mode
 /// \param ns: A namespace
 /// \return If we were able to evaluate the condition as true or false then we
-///   return that, otherwise we return an empty optionalt
-static optionalt<renamedt<exprt, L2>> try_evaluate_pointer_comparison(
+///   return that, otherwise we return an empty std::optional
+static std::optional<renamedt<exprt, L2>> try_evaluate_pointer_comparison(
   const irep_idt &operation,
   const symbol_exprt &symbol_expr,
   const exprt &other_operand,
@@ -91,7 +91,7 @@ static optionalt<renamedt<exprt, L2>> try_evaluate_pointer_comparison(
 
   if(
     skip_typecast(other_operand).id() != ID_address_of &&
-    (!constant_expr || !is_null_pointer(*constant_expr)))
+    (!constant_expr || !constant_expr->is_null_pointer()))
   {
     return {};
   }
@@ -179,8 +179,8 @@ static optionalt<renamedt<exprt, L2>> try_evaluate_pointer_comparison(
 /// \param language_mode: The language mode
 /// \param ns: A namespace
 /// \return If we were able to evaluate the condition as true or false then we
-///   return that, otherwise we return an empty optionalt
-static optionalt<renamedt<exprt, L2>> try_evaluate_pointer_comparison(
+///   return that, otherwise we return an empty std::optional
+static std::optional<renamedt<exprt, L2>> try_evaluate_pointer_comparison(
   const renamedt<exprt, L2> &renamed_expr,
   const value_sett &value_set,
   const irep_idt &language_mode,
@@ -204,7 +204,7 @@ static optionalt<renamedt<exprt, L2>> try_evaluate_pointer_comparison(
   if(!symbol_expr_lhs)
     return {};
 
-  if(!goto_symex_is_constantt()(rhs))
+  if(!goto_symex_can_forward_propagatet(ns)(rhs))
     return {};
 
   return try_evaluate_pointer_comparison(
@@ -279,7 +279,7 @@ void goto_symext::symex_goto(statet &state)
     {
       // generate assume(false) or a suitable negation if this
       // instruction is a conditional goto
-      exprt negated_guard = not_exprt{new_guard};
+      exprt negated_guard = boolean_negate(new_guard);
       do_simplify(negated_guard);
       log.statistics() << "replacing self-loop at "
                        << state.source.pc->source_location() << " by assume("
@@ -927,21 +927,20 @@ void goto_symext::loop_bound_exceeded(
   statet &state,
   const exprt &guard)
 {
-  const unsigned loop_number=state.source.pc->loop_number;
+  const std::string loop_number = std::to_string(state.source.pc->loop_number);
 
-  exprt negated_cond;
-
-  if(guard.is_true())
-    negated_cond=false_exprt();
-  else
-    negated_cond=not_exprt(guard);
+  exprt negated_cond = boolean_negate(guard);
 
   if(symex_config.unwinding_assertions)
   {
     // Generate VCC for unwinding assertion.
+    const std::string property_id =
+      id2string(state.source.pc->source_location().get_function()) +
+      ".unwind." + loop_number;
     vcc(
       negated_cond,
-      "unwinding assertion loop " + std::to_string(loop_number),
+      property_id,
+      "unwinding assertion loop " + loop_number,
       state);
   }
 

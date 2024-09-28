@@ -21,7 +21,7 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <goto-programs/goto_trace.h>
 
 #include <ansi-c/ansi_c_language.h>
-#include <ansi-c/goto_check_c.h>
+#include <ansi-c/goto-conversion/goto_check_c.h>
 #include <goto-checker/bmc_util.h>
 #include <goto-instrument/cover.h>
 #include <json/json_interface.h>
@@ -34,6 +34,7 @@ class optionst;
 // clang-format off
 #define CBMC_OPTIONS \
   OPT_BMC \
+  "(no-standard-checks)" \
   "(preprocess)(slice-by-trace):" \
   OPT_FUNCTIONS \
   "(no-simplify)(full-slice)" \
@@ -54,11 +55,11 @@ class optionst;
   OPT_SHOW_PROPERTIES \
   "(show-symbol-table)(show-parse-tree)" \
   "(drop-unused-functions)" \
-  "(havoc-undefined-functions)" \
   "(property):(stop-on-fail)(trace)" \
   "(verbosity):(no-library)" \
   "(nondet-static)" \
   "(version)" \
+  "(export-symex-ready-goto):" \
   OPT_COVER \
   "(symex-coverage-report):" \
   "(mm):" \
@@ -90,6 +91,11 @@ public:
   /// default behaviour, for example unit tests.
   static void set_default_options(optionst &);
 
+  /// \brief Setup default analysis flags.
+  ///
+  /// This function sets up the default analysis checks as discussed
+  /// in RFC https://github.com/diffblue/cbmc/issues/7975.
+  static void set_default_analysis_flags(optionst &, const bool enabled);
   static bool process_goto_program(goto_modelt &, const optionst &, messaget &);
 
   static int get_goto_program(

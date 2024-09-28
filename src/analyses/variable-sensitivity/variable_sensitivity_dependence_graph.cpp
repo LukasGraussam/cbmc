@@ -326,10 +326,13 @@ bool variable_sensitivity_dependence_domaint::merge_control_dependencies(
   for(const auto &c_dep : other_control_deps)
   {
     // find position to insert
-    while(it != control_deps.end() && it->first < c_dep.first)
+    while(it != control_deps.end() &&
+          goto_programt::target_less_than()(it->first, c_dep.first))
       ++it;
 
-    if(it == control_deps.end() || c_dep.first < it->first)
+    if(
+      it == control_deps.end() ||
+      goto_programt::target_less_than()(c_dep.first, it->first))
     {
       // hint points at position that will follow the new element
       control_deps.insert(it, c_dep);
@@ -340,9 +343,11 @@ bool variable_sensitivity_dependence_domaint::merge_control_dependencies(
       INVARIANT(
         it != control_deps.end(), "Property of branch needed for safety");
       INVARIANT(
-        !(it->first < c_dep.first), "Property of loop needed for safety");
+        !(goto_programt::target_less_than()(it->first, c_dep.first)),
+        "Property of loop needed for safety");
       INVARIANT(
-        !(c_dep.first < it->first), "Property of loop needed for safety");
+        !(goto_programt::target_less_than()(c_dep.first, it->first)),
+        "Property of loop needed for safety");
 
       tvt &branch1 = it->second;
       const tvt &branch2 = c_dep.second;
@@ -433,20 +438,9 @@ bool variable_sensitivity_dependence_domaint::merge(
 }
 
 /**
- * Perform a context aware merge of the changes that have been applied
- * between function_start and the current state. Anything that has not been
- * modified will be taken from the \p function_call domain.
- *
- * \param function_call: The local of the merge - values from here will be
- *   taken if they have not been modified
- * \param function_start: The base of the merge - changes that have been made
- *   between here and the end will be retained.
- * \param function_end: The end of the merge - changes that have been made
-///   between the start and here will be retained.
- * \param ns: The global namespace
+ * \copydoc variable_sensitivity_domaint::merge_three_way_function_return
  */
 void variable_sensitivity_dependence_domaint::merge_three_way_function_return(
-  const ai_domain_baset &function_call,
   const ai_domain_baset &function_start,
   const ai_domain_baset &function_end,
   const namespacet &ns)
@@ -457,7 +451,7 @@ void variable_sensitivity_dependence_domaint::merge_three_way_function_return(
   // the three way merge is that the underlying variable sensitivity domain
   // does its three way merge.
   variable_sensitivity_domaint::merge_three_way_function_return(
-    function_call, function_start, function_end, ns);
+    function_start, function_end, ns);
 }
 
 /**
@@ -623,7 +617,7 @@ public:
   {
     auto node_id = dg.add_node();
     dg.nodes[node_id].PC = l;
-    auto p = util_make_unique<variable_sensitivity_dependence_domaint>(
+    auto p = std::make_unique<variable_sensitivity_dependence_domaint>(
       node_id, object_factory, configuration);
     CHECK_RETURN(p->is_bottom());
 
@@ -643,12 +637,12 @@ variable_sensitivity_dependence_grapht::variable_sensitivity_dependence_grapht(
   const vsd_configt &configuration,
   message_handlert &message_handler)
   : ai_three_way_merget(
-      util_make_unique<ai_history_factory_default_constructort<ahistoricalt>>(),
-      util_make_unique<variable_sensitivity_dependence_domain_factoryt>(
+      std::make_unique<ai_history_factory_default_constructort<ahistoricalt>>(),
+      std::make_unique<variable_sensitivity_dependence_domain_factoryt>(
         *this,
         object_factory,
         configuration),
-      util_make_unique<location_sensitive_storaget>(),
+      std::make_unique<location_sensitive_storaget>(),
       message_handler),
     goto_functions(goto_functions),
     ns(_ns)

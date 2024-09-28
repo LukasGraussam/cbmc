@@ -12,15 +12,15 @@ Author: Daniel Kroening, kroening@kroening.com
 #ifndef CPROVER_UTIL_PARSER_H
 #define CPROVER_UTIL_PARSER_H
 
+#include "expr.h"
+#include "message.h"
+
+#include <filesystem>
 #include <iosfwd>
 #include <string>
 #include <vector>
 
-#include "expr.h"
-#include "message.h"
-#include "file_util.h"
-
-class parsert:public messaget
+class parsert
 {
 public:
   std::istream *in;
@@ -29,17 +29,15 @@ public:
 
   std::vector<exprt> stack;
 
-  virtual void clear()
+  explicit parsert(message_handlert &message_handler)
+    : in(nullptr),
+      log(message_handler),
+      line_no(0),
+      previous_line_no(0),
+      column(1)
   {
-    line_no=0;
-    previous_line_no=0;
-    column=1;
-    stack.clear();
-    source_location.clear();
-    last_line.clear();
   }
 
-  parsert():in(nullptr) { clear(); }
   virtual ~parsert() { }
 
   // The following are for the benefit of the scanner
@@ -86,7 +84,7 @@ public:
   {
     source_location.set_file(file);
     source_location.set_working_directory(
-      get_current_working_directory());
+      std::filesystem::current_path().string());
   }
 
   irep_idt get_file() const
@@ -132,6 +130,7 @@ public:
   }
 
 protected:
+  messaget log;
   source_locationt source_location;
   unsigned line_no, previous_line_no;
   unsigned column;

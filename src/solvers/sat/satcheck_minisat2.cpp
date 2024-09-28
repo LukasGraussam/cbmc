@@ -16,11 +16,15 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <limits>
 
 #include <util/invariant.h>
-#include <util/make_unique.h>
 #include <util/threeval.h>
 
 #include <minisat/core/Solver.h>
 #include <minisat/simp/SimpSolver.h>
+
+#ifndef l_False
+#  define l_False Minisat::l_False
+#  define l_True Minisat::l_True
+#endif
 
 #ifndef HAVE_MINISAT2
 #error "Expected HAVE_MINISAT2"
@@ -35,6 +39,20 @@ void convert(const bvt &bv, Minisat::vec<Minisat::Lit> &dest)
   for(const auto &literal : bv)
   {
     if(!literal.is_false())
+      dest.push(Minisat::mkLit(literal.var_no(), literal.sign()));
+  }
+}
+
+void convert_assumptions(const bvt &bv, Minisat::vec<Minisat::Lit> &dest)
+{
+  PRECONDITION(
+    bv.size() <= static_cast<std::size_t>(std::numeric_limits<int>::max()));
+  dest.capacity(static_cast<int>(bv.size()));
+
+  for(const auto &literal : bv)
+  {
+    // when converting assumptions, ignore 'true'
+    if(!literal.is_true())
       dest.push(Minisat::mkLit(literal.var_no(), literal.sign()));
   }
 }
@@ -186,7 +204,7 @@ static void interrupt_solver(int signum)
 #endif
 
 template <typename T>
-propt::resultt satcheck_minisat2_baset<T>::do_prop_solve()
+propt::resultt satcheck_minisat2_baset<T>::do_prop_solve(const bvt &assumptions)
 {
   PRECONDITION(status != statust::ERROR);
 
@@ -218,7 +236,7 @@ propt::resultt satcheck_minisat2_baset<T>::do_prop_solve()
     }
 
     Minisat::vec<Minisat::Lit> solver_assumptions;
-    convert(assumptions, solver_assumptions);
+    convert_assumptions(assumptions, solver_assumptions);
 
     using Minisat::lbool;
 
@@ -311,7 +329,7 @@ template <typename T>
 satcheck_minisat2_baset<T>::satcheck_minisat2_baset(
   message_handlert &message_handler)
   : cnf_solvert(message_handler),
-    solver(util_make_unique<T>()),
+    solver(std::make_unique<T>()),
     time_limit_seconds(0)
 {
 }
@@ -329,21 +347,6 @@ bool satcheck_minisat2_baset<T>::is_in_conflict(literalt a) const
       return true;
 
   return false;
-}
-
-template<typename T>
-void satcheck_minisat2_baset<T>::set_assumptions(const bvt &bv)
-{
-  // We filter out 'true' assumptions which cause an assertion violation
-  // in Minisat2.
-  assumptions.clear();
-  for(const auto &assumption : bv)
-  {
-    if(!assumption.is_true())
-    {
-      assumptions.push_back(assumption);
-    }
-  }
 }
 
 template class satcheck_minisat2_baset<Minisat::Solver>;

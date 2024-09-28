@@ -12,7 +12,6 @@
 #include <util/bitvector_types.h>
 #include <util/expr_util.h>
 #include <util/invariant.h>
-#include <util/make_unique.h>
 #include <util/simplify_expr.h>
 
 #include "abstract_environment.h"
@@ -72,7 +71,7 @@ static index_range_implementation_ptrt make_interval_index_range(
   const constant_interval_exprt &interval,
   const namespacet &n)
 {
-  return util_make_unique<interval_index_ranget>(interval, n);
+  return std::make_unique<interval_index_ranget>(interval, n);
 }
 
 static inline bool
@@ -106,19 +105,20 @@ bvint_value_is_min(const typet &type, const mp_integer &value)
 static inline constant_interval_exprt
 interval_from_x_le_value(const exprt &value)
 {
-  return constant_interval_exprt(min_exprt(value.type()), value);
+  return constant_interval_exprt(min_value_exprt(value.type()), value);
 }
 
 static inline constant_interval_exprt
 interval_from_x_ge_value(const exprt &value)
 {
-  return constant_interval_exprt(value, max_exprt(value.type()));
+  return constant_interval_exprt(value, max_value_exprt(value.type()));
 }
 
 static inline mp_integer force_value_from_expr(const exprt &value)
 {
   PRECONDITION(constant_interval_exprt::is_int(value.type()));
-  optionalt<mp_integer> maybe_integer_value = numeric_cast<mp_integer>(value);
+  std::optional<mp_integer> maybe_integer_value =
+    numeric_cast<mp_integer>(value);
   INVARIANT(maybe_integer_value.has_value(), "Input has to have a value");
   return maybe_integer_value.value();
 }
@@ -129,7 +129,8 @@ interval_from_x_lt_value(const exprt &value)
   mp_integer integer_value = force_value_from_expr(value);
   if(!bvint_value_is_min(value.type(), integer_value))
     return constant_interval_exprt(
-      min_exprt(value.type()), from_integer(integer_value - 1, value.type()));
+      min_value_exprt(value.type()),
+      from_integer(integer_value - 1, value.type()));
   else
     return constant_interval_exprt::bottom(value.type());
 }
@@ -140,7 +141,8 @@ interval_from_x_gt_value(const exprt &value)
   mp_integer integer_value = force_value_from_expr(value);
   if(!bvint_value_is_max(value.type(), integer_value))
     return constant_interval_exprt(
-      from_integer(integer_value + 1, value.type()), max_exprt(value.type()));
+      from_integer(integer_value + 1, value.type()),
+      max_value_exprt(value.type()));
   else
     return constant_interval_exprt::bottom(value.type());
 }
@@ -148,7 +150,7 @@ interval_from_x_gt_value(const exprt &value)
 static inline bool represents_interval(const exprt &expr)
 {
   const exprt &e = skip_typecast(expr);
-  return (e.id() == ID_constant_interval || e.id() == ID_constant);
+  return (e.id() == ID_constant_interval || e.is_constant());
 }
 
 static inline constant_interval_exprt make_interval_expr(const exprt &expr)
@@ -159,7 +161,7 @@ static inline constant_interval_exprt make_interval_expr(const exprt &expr)
   {
     return to_constant_interval_expr(e);
   }
-  else if(e.id() == ID_constant)
+  else if(e.is_constant())
   {
     return constant_interval_exprt(e, e);
   }
@@ -201,8 +203,8 @@ static inline constant_interval_exprt interval_from_relation(const exprt &e)
   PRECONDITION(
     relation == ID_le || relation == ID_lt || relation == ID_ge ||
     relation == ID_gt || relation == ID_equal);
-  PRECONDITION(lhs.id() == ID_constant || lhs.id() == ID_symbol);
-  PRECONDITION(rhs.id() == ID_constant || rhs.id() == ID_symbol);
+  PRECONDITION(lhs.is_constant() || lhs.id() == ID_symbol);
+  PRECONDITION(rhs.is_constant() || rhs.id() == ID_symbol);
   PRECONDITION(lhs.id() != rhs.id());
 
   const auto the_constant_part_of_the_relation =
@@ -222,11 +224,6 @@ static inline constant_interval_exprt interval_from_relation(const exprt &e)
     maybe_inverted_relation == ID_equal, "We excluded other cases above");
   return constant_interval_exprt(
     the_constant_part_of_the_relation, the_constant_part_of_the_relation);
-}
-
-interval_abstract_valuet::interval_abstract_valuet(const typet &t)
-  : abstract_value_objectt(t), interval(t)
-{
 }
 
 interval_abstract_valuet::interval_abstract_valuet(
@@ -327,28 +324,26 @@ void interval_abstract_valuet::output(
     std::string lower_string;
     std::string upper_string;
 
-    if(interval.get_lower().id() == ID_min)
+    if(interval.get_lower().id() == ID_min_value)
     {
       lower_string = "-INF";
     }
     else
     {
       INVARIANT(
-        interval.get_lower().id() == ID_constant,
-        "We only support constant limits");
+        interval.get_lower().is_constant(), "We only support constant limits");
       lower_string =
         id2string(to_constant_expr(interval.get_lower()).get_value());
     }
 
-    if(interval.get_upper().id() == ID_max)
+    if(interval.get_upper().id() == ID_max_value)
     {
       upper_string = "+INF";
     }
     else
     {
       INVARIANT(
-        interval.get_upper().id() == ID_constant,
-        "We only support constant limits");
+        interval.get_upper().is_constant(), "We only support constant limits");
       upper_string =
         id2string(to_constant_expr(interval.get_upper()).get_value());
     }
@@ -427,8 +422,12 @@ interval_abstract_valuet::index_range_implementation(const namespacet &ns) const
 {
   if(is_top() || is_bottom() || interval.is_top() || interval.is_bottom())
     return make_empty_index_range();
-  if(interval.get_lower().id() == ID_min || interval.get_upper().id() == ID_max)
+  if(
+    interval.get_lower().id() == ID_min_value ||
+    interval.get_upper().id() == ID_max_value)
+  {
     return make_empty_index_range();
+  }
 
   return make_interval_index_range(interval, ns);
 }

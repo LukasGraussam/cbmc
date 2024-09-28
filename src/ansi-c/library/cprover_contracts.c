@@ -7,19 +7,24 @@
 #define __CPROVER_contracts_library_defined
 
 // external dependencies
-extern __CPROVER_size_t __CPROVER_max_malloc_size;
-extern const void *__CPROVER_alloca_object;
+const void *__CPROVER_alloca_object = 0;
 extern const void *__CPROVER_deallocated;
-extern const void *__CPROVER_new_object;
-extern __CPROVER_bool __CPROVER_malloc_is_new_array;
+const void *__CPROVER_new_object = 0;
+extern const void *__CPROVER_memory_leak;
+__CPROVER_bool __CPROVER_malloc_is_new_array = 0;
+#if defined(_WIN32) && defined(_M_X64)
 int __builtin_clzll(unsigned long long);
-__CPROVER_bool __VERIFIER_nondet_CPROVER_bool();
+#else
+int __builtin_clzl(unsigned long);
+#endif
+__CPROVER_bool __VERIFIER_nondet___CPROVER_bool(void);
+__CPROVER_size_t __VERIFIER_nondet_size(void);
 
 /// \brief A conditionally writable range of bytes.
 typedef struct
 {
   /// \brief  True iff __CPROVER_w_ok(lb, size) holds at creation
-  __CPROVER_bool is_writable;
+  unsigned char is_writable;
   /// \brief Size of the range in bytes
   __CPROVER_size_t size;
   /// \brief Lower bound address of the range
@@ -51,9 +56,9 @@ typedef struct
   /// \brief Number of elements currently in the elems array
   __CPROVER_size_t nof_elems;
   /// \brief True iff nof_elems is 0
-  __CPROVER_bool is_empty;
+  unsigned char is_empty;
   /// \brief True iff elems is indexed by the object id of the pointers
-  __CPROVER_bool indexed_by_object_id;
+  unsigned char indexed_by_object_id;
   /// \brief Array of void *pointers, indexed by their object ID
   /// or some other order
   void **elems;
@@ -70,7 +75,7 @@ typedef struct
   /// \brief Set of freeable pointers derived from the contract (indexed mode)
   __CPROVER_contracts_obj_set_t contract_frees;
   /// \brief Set of freeable pointers derived from the contract (append mode)
-  __CPROVER_contracts_obj_set_t contract_frees_replacement;
+  __CPROVER_contracts_obj_set_t contract_frees_append;
   /// \brief Set of objects allocated by the function under analysis
   /// (indexed mode)
   __CPROVER_contracts_obj_set_t allocated;
@@ -81,20 +86,21 @@ typedef struct
   /// (indexed mode)
   __CPROVER_contracts_obj_set_ptr_t linked_is_fresh;
   /// \brief Object set recording the is_fresh allocations in post conditions
-  /// (replacement mode only)
   __CPROVER_contracts_obj_set_ptr_t linked_allocated;
   /// \brief Object set recording the deallocations (used by was_freed)
   __CPROVER_contracts_obj_set_ptr_t linked_deallocated;
-  /// \brief True iff this write set is used for contract replacement
-  __CPROVER_bool replacement;
   /// \brief True iff the write set checks requires clauses in an assumption ctx
-  __CPROVER_bool assume_requires_ctx;
+  unsigned char assume_requires_ctx;
   /// \brief True iff the write set checks requires clauses in an assertion ctx
-  __CPROVER_bool assert_requires_ctx;
+  unsigned char assert_requires_ctx;
   /// \brief True iff the write set checks ensures clauses in an assumption ctx
-  __CPROVER_bool assume_ensures_ctx;
+  unsigned char assume_ensures_ctx;
   /// \brief True iff this write set checks ensures clauses in an assertion ctx
-  __CPROVER_bool assert_ensures_ctx;
+  unsigned char assert_ensures_ctx;
+  /// \brief True iff dynamic allocation is allowed (default: true)
+  unsigned char allow_allocate;
+  /// \brief True iff dynamic deallocation is allowed (default: true)
+  unsigned char allow_deallocate;
 } __CPROVER_contracts_write_set_t;
 
 /// \brief Type of pointers to \ref __CPROVER_contracts_write_set_t.
@@ -112,12 +118,11 @@ __CPROVER_HIDE:;
     ((ptr == 0) | __CPROVER_rw_ok(ptr, size)),
     "ptr NULL or writable up to size");
   __CPROVER_assert(
-    size < __CPROVER_max_malloc_size,
+    size <= __CPROVER_max_malloc_size,
     "CAR size is less than __CPROVER_max_malloc_size");
-  __CPROVER_ssize_t offset = __CPROVER_POINTER_OFFSET(ptr);
+  __CPROVER_size_t offset = __CPROVER_POINTER_OFFSET(ptr);
   __CPROVER_assert(
-    !(offset > 0) |
-      ((__CPROVER_size_t)offset + size < __CPROVER_max_malloc_size),
+    !(offset > 0) | (offset + size <= __CPROVER_max_malloc_size),
     "no offset bits overflow on CAR upper bound computation");
   return (__CPROVER_contracts_car_t){
     .is_writable = ptr != 0, .size = size, .lb = ptr, .ub = (char *)ptr + size};
@@ -161,12 +166,11 @@ __CPROVER_HIDE:;
     ((ptr == 0) | __CPROVER_rw_ok(ptr, size)),
     "ptr NULL or writable up to size");
   __CPROVER_assert(
-    size < __CPROVER_max_malloc_size,
+    size <= __CPROVER_max_malloc_size,
     "CAR size is less than __CPROVER_max_malloc_size");
-  __CPROVER_ssize_t offset = __CPROVER_POINTER_OFFSET(ptr);
+  __CPROVER_size_t offset = __CPROVER_POINTER_OFFSET(ptr);
   __CPROVER_assert(
-    !(offset > 0) |
-      ((__CPROVER_size_t)offset + size < __CPROVER_max_malloc_size),
+    !(offset > 0) | (offset + size <= __CPROVER_max_malloc_size),
     "no offset bits overflow on CAR upper bound computation");
   __CPROVER_contracts_car_t *elem = set->elems + idx;
   *elem = (__CPROVER_contracts_car_t){
@@ -210,8 +214,8 @@ __CPROVER_HIDE:;
 CAR_SET_CONTAINS_LOOP:
   while(idx != 0)
   {
-    incl |= candidate.is_writable & elem->is_writable &
-            __CPROVER_same_object(elem->lb, candidate.lb) &
+    incl |= (int)candidate.is_writable & (int)elem->is_writable &
+            (int)__CPROVER_same_object(elem->lb, candidate.lb) &
             (__CPROVER_POINTER_OFFSET(elem->lb) <=
              __CPROVER_POINTER_OFFSET(candidate.lb)) &
             (__CPROVER_POINTER_OFFSET(candidate.ub) <=
@@ -244,8 +248,13 @@ __CPROVER_HIDE:;
   // symex state from the number of object_bits/offset_bits
   // the number of object bits is determined by counting the number of leading
   // zeroes of the built-in constant __CPROVER_max_malloc_size;
+#if defined(_WIN32) && defined(_M_X64)
   int object_bits = __builtin_clzll(__CPROVER_max_malloc_size);
   __CPROVER_size_t nof_objects = 1ULL << object_bits;
+#else
+  int object_bits = __builtin_clzl(__CPROVER_max_malloc_size);
+  __CPROVER_size_t nof_objects = 1UL << object_bits;
+#endif
   *set = (__CPROVER_contracts_obj_set_t){
     .max_elems = nof_objects,
     .watermark = 0,
@@ -388,7 +397,6 @@ __CPROVER_HIDE:;
 /// \param[inout] set Pointer to the object to initialise
 /// \param[in] contract_assigns_size Max size of the assigns clause
 /// \param[in] contract_frees_size Max size of the frees clause
-/// \param[in] replacement True iff this write set is used to replace a contract
 /// \param[in] assume_requires_ctx True iff this write set is used to check side
 /// effects in a requires clause in contract checking mode
 /// \param[in] assert_requires_ctx True iff this write set is used to check side
@@ -397,15 +405,20 @@ __CPROVER_HIDE:;
 /// side effects in an ensures clause in contract replacement mode
 /// \param[in] assert_ensures_ctx True iff this write set is used to check for
 /// side effects in an ensures clause in contract checking mode
+/// \param[in] allow_allocate True iff the context gobally allows dynamic
+/// allocation.
+/// \param[in] allow_deallocate True iff the context gobally allows dynamic
+/// deallocation.
 void __CPROVER_contracts_write_set_create(
   __CPROVER_contracts_write_set_ptr_t set,
   __CPROVER_size_t contract_assigns_size,
   __CPROVER_size_t contract_frees_size,
-  __CPROVER_bool replacement,
   __CPROVER_bool assume_requires_ctx,
   __CPROVER_bool assert_requires_ctx,
   __CPROVER_bool assume_ensures_ctx,
-  __CPROVER_bool assert_ensures_ctx)
+  __CPROVER_bool assert_ensures_ctx,
+  __CPROVER_bool allow_allocate,
+  __CPROVER_bool allow_deallocate)
 {
 __CPROVER_HIDE:;
 #ifdef DFCC_DEBUG
@@ -417,16 +430,8 @@ __CPROVER_HIDE:;
     &(set->contract_assigns), contract_assigns_size);
   __CPROVER_contracts_obj_set_create_indexed_by_object_id(
     &(set->contract_frees));
-  set->replacement = replacement;
-  if(replacement)
-  {
-    __CPROVER_contracts_obj_set_create_append(
-      &(set->contract_frees_replacement), contract_frees_size);
-  }
-  else
-  {
-    set->contract_frees_replacement.elems = 0;
-  }
+  __CPROVER_contracts_obj_set_create_append(
+    &(set->contract_frees_append), contract_frees_size);
   __CPROVER_contracts_obj_set_create_indexed_by_object_id(&(set->allocated));
   __CPROVER_contracts_obj_set_create_indexed_by_object_id(&(set->deallocated));
   set->linked_is_fresh = 0;
@@ -436,6 +441,8 @@ __CPROVER_HIDE:;
   set->assert_requires_ctx = assert_requires_ctx;
   set->assume_ensures_ctx = assume_ensures_ctx;
   set->assert_ensures_ctx = assert_ensures_ctx;
+  set->allow_allocate = allow_allocate;
+  set->allow_deallocate = allow_deallocate;
 }
 
 /// \brief Releases resources used by \p set.
@@ -454,9 +461,8 @@ __CPROVER_HIDE:;
     __CPROVER_rw_ok(&(set->contract_frees.elems), 0),
     "contract_frees writable");
   __CPROVER_assert(
-    (set->replacement == 0) ||
-      __CPROVER_rw_ok(&(set->contract_frees_replacement.elems), 0),
-    "contract_frees_replacement writable");
+    __CPROVER_rw_ok(&(set->contract_frees_append.elems), 0),
+    "contract_frees_append writable");
   __CPROVER_assert(
     __CPROVER_rw_ok(&(set->allocated.elems), 0), "allocated writable");
   __CPROVER_assert(
@@ -464,10 +470,7 @@ __CPROVER_HIDE:;
 #endif
   __CPROVER_deallocate(set->contract_assigns.elems);
   __CPROVER_deallocate(set->contract_frees.elems);
-  if(set->replacement != 0)
-  {
-    __CPROVER_deallocate(set->contract_frees_replacement.elems);
-  }
+  __CPROVER_deallocate(set->contract_frees_append.elems);
   __CPROVER_deallocate(set->allocated.elems);
   __CPROVER_deallocate(set->deallocated.elems);
   // do not free set->linked_is_fresh->elems or set->deallocated_linked->elems
@@ -585,26 +588,41 @@ __CPROVER_HIDE:;
 
   // append pointer if available
 #ifdef DFCC_DEBUG
-  if(set->replacement)
-    __CPROVER_contracts_obj_set_append(&(set->contract_frees_replacement), ptr);
+  __CPROVER_contracts_obj_set_append(&(set->contract_frees_append), ptr);
 #else
-  if(set->replacement)
-  {
-    set->contract_frees_replacement.nof_elems =
-      set->contract_frees_replacement.watermark;
-    set->contract_frees_replacement
-      .elems[set->contract_frees_replacement.watermark] = ptr;
-    set->contract_frees_replacement.watermark += 1;
-    set->contract_frees_replacement.is_empty = 0;
-  }
+  set->contract_frees_append.nof_elems = set->contract_frees_append.watermark;
+  set->contract_frees_append.elems[set->contract_frees_append.watermark] = ptr;
+  set->contract_frees_append.watermark += 1;
+  set->contract_frees_append.is_empty = 0;
+#endif
+}
+
+/// \brief Adds the dynamically allocated pointer \p ptr to \p set->allocated.
+/// \param[inout] set The set to update
+/// \param[in] ptr Pointer to a dynamic object `x = __CPROVER_allocate(...)`.
+void __CPROVER_contracts_write_set_add_allocated(
+  __CPROVER_contracts_write_set_ptr_t set,
+  void *ptr)
+{
+__CPROVER_HIDE:;
+  __CPROVER_assert(set->allow_allocate, "dynamic allocation is allowed");
+#if DFCC_DEBUG
+  // call inlined below
+  __CPROVER_contracts_obj_set_add(&(set->allocated), ptr);
+#else
+  __CPROVER_size_t object_id = __CPROVER_POINTER_OBJECT(ptr);
+  set->allocated.nof_elems = (set->allocated.elems[object_id] != 0)
+                               ? set->allocated.nof_elems
+                               : set->allocated.nof_elems + 1;
+  set->allocated.elems[object_id] = ptr;
+  set->allocated.is_empty = 0;
 #endif
 }
 
 /// \brief Adds the pointer \p ptr to \p set->allocated.
 /// \param[inout] set The set to update
-/// \param[in] ptr Pointer to an object declared using a `DECL x` or
-/// `x = __CPROVER_allocate(...)` GOTO instruction.
-void __CPROVER_contracts_write_set_add_allocated(
+/// \param[in] ptr Pointer to an object declared using `DECL x`.
+void __CPROVER_contracts_write_set_add_decl(
   __CPROVER_contracts_write_set_ptr_t set,
   void *ptr)
 {
@@ -659,10 +677,6 @@ void __CPROVER_contracts_write_set_record_deallocated(
   void *ptr)
 {
 __CPROVER_HIDE:;
-#ifdef DFCC_DEBUG
-  __CPROVER_assert(set->replacement == 0, "!replacement");
-#endif
-
 #if DFCC_DEBUG
   // we record the deallocation to be able to evaluate was_freed post conditions
   __CPROVER_contracts_obj_set_add(&(set->deallocated), ptr);
@@ -735,7 +749,6 @@ __CPROVER_bool __CPROVER_contracts_write_set_check_assignment(
 // manually inlined below
 {
 __CPROVER_HIDE:;
-  __CPROVER_assert(set->replacement == 0, "!replacement");
   __CPROVER_assert(
     ((ptr == 0) | __CPROVER_rw_ok(ptr, size)),
     "ptr NULL or writable up to size");
@@ -775,20 +788,19 @@ __CPROVER_HIDE:;
   if(set->allocated.elems[__CPROVER_POINTER_OBJECT(ptr)] != 0)
     return 1;
 
-  // don't even drive symex into the rest of the function if the set is emtpy
+  // don't even drive symex into the rest of the function if the set is empty
   if(set->contract_assigns.max_elems == 0)
     return 0;
 
   // Compute the upper bound, perform inclusion check against contract-assigns
   __CPROVER_assert(
-    size < __CPROVER_max_malloc_size,
+    size <= __CPROVER_max_malloc_size,
     "CAR size is less than __CPROVER_max_malloc_size");
 
-  __CPROVER_ssize_t offset = __CPROVER_POINTER_OFFSET(ptr);
+  __CPROVER_size_t offset = __CPROVER_POINTER_OFFSET(ptr);
 
   __CPROVER_assert(
-    !(offset > 0) |
-      ((__CPROVER_size_t)offset + size < __CPROVER_max_malloc_size),
+    !(offset > 0) | (offset + size <= __CPROVER_max_malloc_size),
     "no offset bits overflow on CAR upper bound computation");
   void *ub = (void *)((char *)ptr + size);
   __CPROVER_contracts_car_t *elem = set->contract_assigns.elems;
@@ -799,7 +811,7 @@ SET_CHECK_ASSIGNMENT_LOOP:
   while(idx != 0)
   {
     incl |=
-      elem->is_writable & __CPROVER_same_object(elem->lb, ptr) &
+      (int)elem->is_writable & (int)__CPROVER_same_object(elem->lb, ptr) &
       (__CPROVER_POINTER_OFFSET(elem->lb) <= offset) &
       (__CPROVER_POINTER_OFFSET(ub) <= __CPROVER_POINTER_OFFSET(elem->ub));
     ++elem;
@@ -905,16 +917,13 @@ __CPROVER_HIDE:;
 /// \param[in] set Write set to check the deallocation against
 /// \param[in] ptr Deallocated pointer to check set to check the deallocation
 /// against
-/// \return True iff \p ptr is contained in \p set->contract_frees or
-/// \p set->allocated.
+/// \return True iff deallocation is allowed and \p ptr is contained in
+/// \p set->contract_frees or \p set->allocated.
 __CPROVER_bool __CPROVER_contracts_write_set_check_deallocate(
   __CPROVER_contracts_write_set_ptr_t set,
   void *ptr)
 {
 __CPROVER_HIDE:;
-#ifdef DFCC_DEBUG
-  __CPROVER_assert(set->replacement == 0, "!replacement");
-#endif
   __CPROVER_size_t object_id = __CPROVER_POINTER_OBJECT(ptr);
 
 #ifdef DFCC_DEBUG
@@ -925,16 +934,15 @@ __CPROVER_HIDE:;
     set->allocated.indexed_by_object_id,
     "set->allocated is indexed by object id");
 #endif
-  return (ptr == 0) | (set->contract_frees.elems[object_id] == ptr) |
-         (set->allocated.elems[object_id] == ptr);
+  return (set->allow_deallocate) &
+         ((ptr == 0) | (set->contract_frees.elems[object_id] == ptr) |
+          (set->allocated.elems[object_id] == ptr));
 }
 
 /// \brief Checks the inclusion of the \p candidate->contract_assigns elements
 /// in \p reference->contract_assigns or \p reference->allocated.
 ///
-/// \pre \p reference must not be in replacement mode.
-/// \pre \p candidate must be in replacement mode and \p candidate->allocated
-/// must be empty.
+/// \pre \p candidate->allocated must be empty.
 ///
 /// \param[in] reference Reference write set from a caller
 /// \param[in] candidate Candidate write set from a contract being replaced
@@ -945,11 +953,6 @@ __CPROVER_bool __CPROVER_contracts_write_set_check_assigns_clause_inclusion(
   __CPROVER_contracts_write_set_ptr_t candidate)
 {
 __CPROVER_HIDE:;
-#ifdef DFCC_DEBUG
-  __CPROVER_assert(
-    reference->replacement == 0, "reference set in !replacement");
-  __CPROVER_assert(candidate->replacement != 0, "candidate set in replacement");
-#endif
   __CPROVER_bool incl = 1;
   __CPROVER_contracts_car_t *current = candidate->contract_assigns.elems;
   __CPROVER_size_t idx = candidate->contract_assigns.max_elems;
@@ -970,9 +973,7 @@ SET_CHECK_ASSIGNS_CLAUSE_INCLUSION_LOOP:
 /// \brief Checks the inclusion of the \p candidate->contract_frees elements
 /// in \p reference->contract_frees or \p reference->allocated.
 ///
-/// \pre \p reference must not be in replacement mode.
-/// \pre \p candidate must be in replacement mode and \p candidate->allocated
-/// must be empty.
+/// \pre \p candidate->allocated must be empty.
 ///
 /// \param[in] reference Reference write set from a caller
 /// \param[in] candidate Candidate write set from a contract being replaced
@@ -985,9 +986,6 @@ __CPROVER_bool __CPROVER_contracts_write_set_check_frees_clause_inclusion(
 __CPROVER_HIDE:;
 #ifdef DFCC_DEBUG
   __CPROVER_assert(
-    reference->replacement == 0, "reference set in !replacement");
-  __CPROVER_assert(candidate->replacement != 0, "candidate set in replacement");
-  __CPROVER_assert(
     reference->contract_frees.indexed_by_object_id,
     "reference->contract_frees is indexed by object id");
   __CPROVER_assert(
@@ -995,8 +993,8 @@ __CPROVER_HIDE:;
     "reference->allocated is indexed by object id");
 #endif
   __CPROVER_bool all_incl = 1;
-  void **current = candidate->contract_frees_replacement.elems;
-  __CPROVER_size_t idx = candidate->contract_frees_replacement.max_elems;
+  void **current = candidate->contract_frees_append.elems;
+  __CPROVER_size_t idx = candidate->contract_frees_append.max_elems;
 
 SET_CHECK_FREES_CLAUSE_INCLUSION_LOOP:
   while(idx != 0)
@@ -1031,13 +1029,8 @@ void __CPROVER_contracts_write_set_deallocate_freeable(
   __CPROVER_contracts_write_set_ptr_t target)
 {
 __CPROVER_HIDE:;
-#ifdef DFCC_DEBUG
-  __CPROVER_assert(set->replacement == 1, "set is in replacement");
-  __CPROVER_assert(
-    (target == 0) | (target->replacement == 0), "target is in !replacement");
-#endif
-  void **current = set->contract_frees_replacement.elems;
-  __CPROVER_size_t idx = set->contract_frees_replacement.max_elems;
+  void **current = set->contract_frees_append.elems;
+  __CPROVER_size_t idx = set->contract_frees_append.max_elems;
 SET_DEALLOCATE_FREEABLE_LOOP:
   while(idx != 0)
   {
@@ -1046,13 +1039,14 @@ SET_DEALLOCATE_FREEABLE_LOOP:
     // call free only iff the pointer is valid preconditions are met
     // skip checks on r_ok, dynamic_object and pointer_offset
     __CPROVER_bool preconditions =
-      (ptr == 0) | (__CPROVER_r_ok(ptr, 0) & __CPROVER_DYNAMIC_OBJECT(ptr) &
-                    (__CPROVER_POINTER_OFFSET(ptr) == 0));
+      (ptr == 0) |
+      ((int)__CPROVER_r_ok(ptr, 0) & (int)__CPROVER_DYNAMIC_OBJECT(ptr) &
+       (__CPROVER_POINTER_OFFSET(ptr) == 0));
     // If there is aliasing between the pointers in the freeable set,
     // and we attempt to free again one of the already freed pointers,
     // the r_ok condition above will fail, preventing us to deallocate
     // the same pointer twice
-    if((ptr != 0) & preconditions & __VERIFIER_nondet_CPROVER_bool())
+    if((ptr != 0) & preconditions & __VERIFIER_nondet___CPROVER_bool())
     {
       __CPROVER_contracts_free(ptr, 0);
       __CPROVER_contracts_write_set_record_deallocated(set, ptr);
@@ -1190,12 +1184,41 @@ __CPROVER_HIDE:;
         (write_set->assert_ensures_ctx == 0),
       "only one context flag at a time");
 #endif
-    // pass a null write set pointer to the instrumented malloc
-    void *ptr = __CPROVER_contracts_malloc(size, 0);
+    if(
+      __CPROVER_malloc_failure_mode ==
+      __CPROVER_malloc_failure_mode_return_null)
+    {
+      // When --malloc-may-fail --malloc-fail-null
+      // add implicit assumption that the size is capped
+      __CPROVER_assume(size <= __CPROVER_max_malloc_size);
+    }
+    else if(
+      __CPROVER_malloc_failure_mode ==
+      __CPROVER_malloc_failure_mode_assert_then_assume)
+    {
+      // When --malloc-may-fail --malloc-fail-assert
+      // check if max allocation size is exceeded and
+      // add implicit assumption that the size is capped
+      __CPROVER_assert(
+        size <= __CPROVER_max_malloc_size,
+        "__CPROVER_is_fresh max allocation size exceeded");
+      __CPROVER_assume(size <= __CPROVER_max_malloc_size);
+    }
+
+    void *ptr = __CPROVER_allocate(size, 0);
     *elem = ptr;
-    if(!ptr)
-      return 0;
-      // record fresh object in the object set
+
+    // record the object size for non-determistic bounds checking
+    __CPROVER_bool record_malloc = __VERIFIER_nondet___CPROVER_bool();
+    __CPROVER_malloc_is_new_array =
+      record_malloc ? 0 : __CPROVER_malloc_is_new_array;
+
+    // do not detect memory leaks when assuming a precondition of a contract
+    // for contract checking
+    // __CPROVER_bool record_may_leak = __VERIFIER_nondet___CPROVER_bool();
+    // __CPROVER_memory_leak = record_may_leak ? ptr : __CPROVER_memory_leak;
+
+    // record fresh object in the object set
 #ifdef DFCC_DEBUG
     // manually inlined below
     __CPROVER_contracts_obj_set_add(write_set->linked_is_fresh, ptr);
@@ -1219,11 +1242,38 @@ __CPROVER_HIDE:;
         (write_set->assert_ensures_ctx == 0),
       "only one context flag at a time");
 #endif
-    void *ptr = __CPROVER_contracts_malloc(size, 0);
+    // fail if size is too big
+    if(
+      __CPROVER_malloc_failure_mode ==
+      __CPROVER_malloc_failure_mode_return_null)
+    {
+      __CPROVER_assume(size <= __CPROVER_max_malloc_size);
+    }
+    else if(
+      __CPROVER_malloc_failure_mode ==
+      __CPROVER_malloc_failure_mode_assert_then_assume)
+    {
+      __CPROVER_assert(
+        size <= __CPROVER_max_malloc_size,
+        "__CPROVER_is_fresh requires size <= __CPROVER_max_malloc_size");
+      __CPROVER_assume(size <= __CPROVER_max_malloc_size);
+    }
+
+    void *ptr = __CPROVER_allocate(size, 0);
     *elem = ptr;
-    if(!ptr)
-      return 0;
-      // record fresh object in the caller's write set
+
+    // record the object size for non-determistic bounds checking
+    __CPROVER_bool record_malloc = __VERIFIER_nondet___CPROVER_bool();
+    __CPROVER_malloc_is_new_array =
+      record_malloc ? 0 : __CPROVER_malloc_is_new_array;
+
+    // detect memory leaks when is_fresh is assumed in a post condition
+    // of a replaced contract to model a malloc performed by the function
+    // being abstracted by the contract
+    __CPROVER_bool record_may_leak = __VERIFIER_nondet___CPROVER_bool();
+    __CPROVER_memory_leak = record_may_leak ? ptr : __CPROVER_memory_leak;
+
+    // record fresh object in the caller's write set
 #ifdef DFCC_DEBUG
     __CPROVER_contracts_obj_set_add(write_set->linked_allocated, ptr);
 #else
@@ -1280,6 +1330,51 @@ __CPROVER_HIDE:;
       0, "__CPROVER_is_fresh is only called in requires or ensures clauses");
     __CPROVER_assume(0);
     return 0; // to silence libcheck
+  }
+}
+
+__CPROVER_bool __CPROVER_contracts_pointer_in_range_dfcc(
+  void *lb,
+  void **ptr,
+  void *ub,
+  __CPROVER_contracts_write_set_ptr_t write_set)
+{
+__CPROVER_HIDE:;
+  __CPROVER_assert(
+    (write_set != 0) & ((write_set->assume_requires_ctx == 1) |
+                        (write_set->assert_requires_ctx == 1) |
+                        (write_set->assume_ensures_ctx == 1) |
+                        (write_set->assert_ensures_ctx == 1)),
+    "__CPROVER_pointer_in_range_dfcc is used only in requires or ensures "
+    "clauses");
+  __CPROVER_assert(__CPROVER_r_ok(lb, 0), "lb pointer must be valid");
+  __CPROVER_assert(__CPROVER_r_ok(ub, 0), "ub pointer must be valid");
+  __CPROVER_assert(
+    __CPROVER_same_object(lb, ub),
+    "lb and ub pointers must have the same object");
+  __CPROVER_size_t lb_offset = __CPROVER_POINTER_OFFSET(lb);
+  __CPROVER_size_t ub_offset = __CPROVER_POINTER_OFFSET(ub);
+  __CPROVER_assert(
+    lb_offset <= ub_offset, "lb and ub pointers must be ordered");
+  if(write_set->assume_requires_ctx | write_set->assume_ensures_ctx)
+  {
+    if(__VERIFIER_nondet___CPROVER_bool())
+      return 0;
+
+    // add nondet offset
+    __CPROVER_size_t offset = __VERIFIER_nondet_size();
+
+    // this cast is safe because we prove that ub and lb are ordered
+    __CPROVER_size_t max_offset = ub_offset - lb_offset;
+    __CPROVER_assume(offset <= max_offset);
+    *ptr = (char *)lb + offset;
+    return 1;
+  }
+  else /* write_set->assert_requires_ctx | write_set->assert_ensures_ctx */
+  {
+    __CPROVER_size_t offset = __CPROVER_POINTER_OFFSET(*ptr);
+    return __CPROVER_same_object(lb, *ptr) && lb_offset <= offset &&
+           offset <= ub_offset;
   }
 }
 
@@ -1446,21 +1541,13 @@ __CPROVER_HIDE:;
     "__CPROVER_obeys_contract is used only in requires or ensures clauses");
   if((set->assume_requires_ctx == 1) | (set->assume_ensures_ctx == 1))
   {
-    // In assumption contexts, flip a coin to decide wehter the predicate
-    // shall hold or not
-    if(__VERIFIER_nondet_CPROVER_bool())
-    {
-      // if it must hold, assign the function pointer to the contract function
-      *function_pointer = contract;
-      return 1;
-    }
-    else
-    {
-      // if it must not hold do not modify the pointer value
-      // function_pointer will keep whatever bit pattern and value set it had
-      // before evaluating the predicate
+    // decide if predicate must hold
+    if(__VERIFIER_nondet___CPROVER_bool())
       return 0;
-    }
+
+    // must hold, assign the function pointer to the contract function
+    *function_pointer = contract;
+    return 1;
   }
   else
   {

@@ -51,8 +51,10 @@ bool has_char_array_subexpr(const exprt &expr, const namespacet &ns)
 std::string
 utf16_constant_array_to_java(const array_exprt &arr, std::size_t length)
 {
-  for(const auto &op : arr.operands())
-    PRECONDITION(op.id() == ID_constant);
+  PRECONDITION(std::all_of(
+    arr.operands().begin(),
+    arr.operands().end(),
+    can_cast_expr<constant_exprt>));
 
   std::wstring out(length, '?');
 
@@ -152,7 +154,7 @@ interval_sparse_arrayt::interval_sparse_arrayt(
   }
 }
 
-optionalt<interval_sparse_arrayt>
+std::optional<interval_sparse_arrayt>
 interval_sparse_arrayt::of_expr(const exprt &expr, const exprt &extra_value)
 {
   if(const auto &array_expr = expr_try_dynamic_cast<array_exprt>(expr))

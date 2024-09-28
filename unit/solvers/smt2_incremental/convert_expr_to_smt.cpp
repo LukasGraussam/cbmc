@@ -44,6 +44,8 @@ TEST_CASE("\"typet\" to smt sort conversion", "[core][smt2_incremental]")
   }
 }
 
+// 32bit GCC defines i386 as a macro (with value 1)
+#undef i386
 enum class test_archt
 {
   i386,
@@ -246,8 +248,11 @@ TEST_CASE(
     expr_to_smt_conversion_test_environmentt::make(test_archt::x86_64);
   const pointer_typet pointer_type = ::pointer_type(void_type());
   const std::size_t pointer_width = pointer_type.get_width();
+  static_assert(
+    sizeof(unsigned long long) >= 8,
+    "unsigned long long  must be 64bits or wider");
   const constant_exprt invalid_ptr{
-    integer2bvrep(1ul << (pointer_width - object_bits), pointer_width),
+    integer2bvrep(1ull << (pointer_width - object_bits), pointer_width),
     pointer_type};
   const is_invalid_pointer_exprt is_invalid_ptr{invalid_ptr};
   const smt_termt expected_smt_term = smt_core_theoryt::equal(
@@ -1209,10 +1214,11 @@ TEST_CASE(
           symbol_exprt{"foo", make_type(8)},
           symbol_exprt{"bar", make_type(32)});
         INFO("Input expr: " + input.pretty(2, 0));
-        const smt_termt expected_result = make_shift_term(
-          make_extension(24)(
-            smt_identifier_termt{"foo", smt_bit_vector_sortt{8}}),
-          smt_identifier_termt{"bar", smt_bit_vector_sortt{32}});
+        const smt_termt expected_result =
+          smt_bit_vector_theoryt::extract(7, 0)(make_shift_term(
+            make_extension(24)(
+              smt_identifier_termt{"foo", smt_bit_vector_sortt{8}}),
+            smt_identifier_termt{"bar", smt_bit_vector_sortt{32}}));
         CHECK(test.convert(input) == expected_result);
       }
     }
@@ -1323,13 +1329,12 @@ TEST_CASE(
       "Bit vector typed bounds",
       extractbits_exprt{
         symbol_exprt{"foo", operand_type},
-        from_integer(4, operand_type),
         from_integer(2, operand_type),
         unsignedbv_typet{3}}},
     rowt{
       "Constant integer bounds",
       extractbits_exprt{
-        symbol_exprt{"foo", operand_type}, 4, 2, unsignedbv_typet{3}}});
+        symbol_exprt{"foo", operand_type}, 2, unsignedbv_typet{3}}});
   const smt_termt expected_result = smt_bit_vector_theoryt::extract(4, 2)(
     smt_identifier_termt{"foo", smt_bit_vector_sortt{8}});
   SECTION(description)
@@ -1339,7 +1344,6 @@ TEST_CASE(
     const cbmc_invariants_should_throwt invariants_throw;
     CHECK_THROWS(test.convert(extractbits_exprt{
       symbol_exprt{"foo", operand_type},
-      symbol_exprt{"bar", operand_type},
       symbol_exprt{"bar", operand_type},
       unsignedbv_typet{3}}));
   }
@@ -1473,28 +1477,45 @@ TEST_CASE(
   const symbol_exprt bar{"bar", unsignedbv_typet{32}};
   SECTION("Address of symbol")
   {
-    const address_of_exprt address_of_foo{foo};
-    track_expression_objects(address_of_foo, ns, test.object_map);
-    INFO("Expression " + address_of_foo.pretty(1, 0));
-    SECTION("8 object bits")
+    SECTION("bit vector symbol")
+    {
+      const address_of_exprt address_of_foo{foo};
+      track_expression_objects(address_of_foo, ns, test.object_map);
+      INFO("Expression " + address_of_foo.pretty(1, 0));
+      SECTION("8 object bits")
+      {
+        config.bv_encoding.object_bits = 8;
+        const auto converted = test.convert(address_of_foo);
+        CHECK(test.object_map.at(foo).unique_id == 2);
+        CHECK(
+          converted == smt_bit_vector_theoryt::concat(
+                         smt_bit_vector_constant_termt{2, 8},
+                         smt_bit_vector_constant_termt{0, 56}));
+      }
+      SECTION("16 object bits")
+      {
+        config.bv_encoding.object_bits = 16;
+        const auto converted = test.convert(address_of_foo);
+        CHECK(test.object_map.at(foo).unique_id == 2);
+        CHECK(
+          converted == smt_bit_vector_theoryt::concat(
+                         smt_bit_vector_constant_termt{2, 16},
+                         smt_bit_vector_constant_termt{0, 48}));
+      }
+    }
+    SECTION("Code symbol")
     {
       config.bv_encoding.object_bits = 8;
-      const auto converted = test.convert(address_of_foo);
-      CHECK(test.object_map.at(foo).unique_id == 2);
+      const symbol_exprt function{"opaque", code_typet{{}, void_type()}};
+      const address_of_exprt function_pointer{function};
+      track_expression_objects(function_pointer, ns, test.object_map);
+      INFO("Expression " + function_pointer.pretty(1, 0));
+      const auto converted = test.convert(function_pointer);
+      CHECK(test.object_map.at(function).unique_id == 2);
       CHECK(
         converted == smt_bit_vector_theoryt::concat(
                        smt_bit_vector_constant_termt{2, 8},
                        smt_bit_vector_constant_termt{0, 56}));
-    }
-    SECTION("16 object bits")
-    {
-      config.bv_encoding.object_bits = 16;
-      const auto converted = test.convert(address_of_foo);
-      CHECK(test.object_map.at(foo).unique_id == 2);
-      CHECK(
-        converted == smt_bit_vector_theoryt::concat(
-                       smt_bit_vector_constant_termt{2, 16},
-                       smt_bit_vector_constant_termt{0, 48}));
     }
   }
   SECTION("Invariant checks")
@@ -1524,11 +1545,8 @@ TEST_CASE(
       const address_of_exprt address_of_foo{foo};
       track_expression_objects(address_of_foo, ns, test.object_map);
       test.object_map.at(foo).unique_id = 256;
-      REQUIRE_THROWS_MATCHES(
-        test.convert(address_of_exprt{foo}),
-        invariant_failedt,
-        invariant_failure_containing("There should be sufficient bits to "
-                                     "encode unique object identifier."));
+      REQUIRE_THROWS_AS(
+        test.convert(address_of_exprt{foo}), analysis_exceptiont);
     }
     SECTION("Pointer should be wide enough to encode offset")
     {
@@ -1536,11 +1554,8 @@ TEST_CASE(
       const address_of_exprt address_of_foo{foo};
       track_expression_objects(address_of_foo, ns, test.object_map);
       test.object_map.at(foo).unique_id = 256;
-      REQUIRE_THROWS_MATCHES(
-        test.convert(address_of_exprt{foo}),
-        invariant_failedt,
-        invariant_failure_containing("Pointer should be wider than object_bits "
-                                     "in order to allow for offset encoding."));
+      REQUIRE_THROWS_AS(
+        test.convert(address_of_exprt{foo}), analysis_exceptiont);
     }
   }
   SECTION("Comparison of address of operations.")
@@ -1632,7 +1647,7 @@ TEST_CASE("pointer_offset_exprt to SMT conversion", "[core][smt2_incremental]")
   {
     const auto converted = test.convert(pointer_offset);
     const auto expected =
-      smt_bit_vector_theoryt::zero_extend(8)(smt_bit_vector_theoryt::extract(
+      smt_bit_vector_theoryt::sign_extend(8)(smt_bit_vector_theoryt::extract(
         55, 0)(smt_identifier_termt("foo", smt_bit_vector_sortt(64))));
     CHECK(converted == expected);
   }

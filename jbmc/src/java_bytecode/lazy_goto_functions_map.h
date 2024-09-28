@@ -6,15 +6,16 @@
 #ifndef CPROVER_GOTO_PROGRAMS_LAZY_GOTO_FUNCTIONS_MAP_H
 #define CPROVER_GOTO_PROGRAMS_LAZY_GOTO_FUNCTIONS_MAP_H
 
-#include <unordered_set>
-
-#include <goto-programs/goto_convert_functions.h>
-#include <goto-programs/goto_functions.h>
-
-#include <langapi/language_file.h>
 #include <util/journalling_symbol_table.h>
 #include <util/message.h>
 #include <util/symbol_table_builder.h>
+
+#include <goto-programs/goto_functions.h>
+
+#include <ansi-c/goto-conversion/goto_convert_functions.h>
+#include <langapi/language_file.h>
+
+#include <unordered_set>
 
 /// Provides a wrapper for a map of lazily loaded goto_functiont.
 /// This incrementally builds a goto-functions object, while permitting
@@ -126,9 +127,12 @@ public:
            driver_program_can_generate_function_body(name);
   }
 
-  void unload(const key_type &name) const
+  /// Remove the function named \p name from the function map, if it exists.
+  /// \return Returns 0 when \p name was not present, and 1 when \p name was
+  ///   removed.
+  std::size_t unload(const key_type &name) const
   {
-    goto_functions.erase(name);
+    return goto_functions.erase(name);
   }
 
   void ensure_function_loaded(const key_type &name) const
@@ -173,7 +177,8 @@ private:
     symbol_table_baset &function_symbol_table) const
   {
     // Fill in symbol table entry body if not already done
-    language_files.convert_lazy_method(name, function_symbol_table);
+    language_files.convert_lazy_method(
+      name, function_symbol_table, message_handler);
 
     underlying_mapt::iterator it = goto_functions.find(name);
     if(it != goto_functions.end())

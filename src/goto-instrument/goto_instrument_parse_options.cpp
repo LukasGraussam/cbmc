@@ -13,19 +13,13 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include <util/exception_utils.h>
 #include <util/exit_codes.h>
+#include <util/help_formatter.h>
 #include <util/json.h>
 #include <util/options.h>
 #include <util/string2int.h>
 #include <util/string_utils.h>
+#include <util/unicode.h>
 #include <util/version.h>
-
-#include <fstream> // IWYU pragma: keep
-#include <iostream>
-#include <memory>
-
-#ifdef _MSC_VER
-#  include <util/unicode.h>
-#endif
 
 #include <goto-programs/class_hierarchy.h>
 #include <goto-programs/ensure_one_backedge_per_target.h>
@@ -33,8 +27,8 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <goto-programs/goto_inline.h>
 #include <goto-programs/interpreter.h>
 #include <goto-programs/label_function_pointer_call_sites.h>
-#include <goto-programs/link_to_library.h>
 #include <goto-programs/loop_ids.h>
+#include <goto-programs/mm_io.h>
 #include <goto-programs/parameter_assignments.h>
 #include <goto-programs/read_goto_binary.h>
 #include <goto-programs/remove_calls_no_body.h>
@@ -44,6 +38,7 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <goto-programs/remove_unused_functions.h>
 #include <goto-programs/remove_virtual_functions.h>
 #include <goto-programs/restrict_function_pointers.h>
+#include <goto-programs/rewrite_rw_ok.h>
 #include <goto-programs/rewrite_union.h>
 #include <goto-programs/set_properties.h>
 #include <goto-programs/show_properties.h>
@@ -58,6 +53,7 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <analyses/dependence_graph.h>
 #include <analyses/escape_analysis.h>
 #include <analyses/global_may_alias.h>
+#include <analyses/guard.h>
 #include <analyses/interval_analysis.h>
 #include <analyses/interval_domain.h>
 #include <analyses/is_threaded.h>
@@ -71,6 +67,7 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <ansi-c/c_object_factory_parameters.h>
 #include <ansi-c/cprover_library.h>
 #include <ansi-c/gcc_version.h>
+#include <ansi-c/goto-conversion/link_to_library.h>
 #include <assembler/remove_asm.h>
 #include <cpp/cprover_library.h>
 #include <pointer-analysis/add_failed_symbols.h>
@@ -95,7 +92,6 @@ Author: Daniel Kroening, kroening@kroening.com
 #include "nondet_volatile.h"
 #include "points_to.h"
 #include "race_check.h"
-#include "reachability_slicer.h"
 #include "remove_function.h"
 #include "rw_set.h"
 #include "show_locations.h"
@@ -107,8 +103,11 @@ Author: Daniel Kroening, kroening@kroening.com
 #include "unwind.h"
 #include "value_set_fi_fp_removal.h"
 
+#include <fstream> // IWYU pragma: keep
+#include <iostream>
+#include <memory>
+
 #include "accelerate/accelerate.h"
-#include "synthesizer/enumerative_loop_invariant_synthesizer.h"
 
 /// invoke main modules
 int goto_instrument_parse_optionst::doit()
@@ -126,7 +125,7 @@ int goto_instrument_parse_optionst::doit()
   }
 
   messaget::eval_verbosity(
-    cmdline.get_value("verbosity"), messaget::M_STATISTICS, ui_message_handler);
+    cmdline.get_value("verbosity"), messaget::M_STATUS, ui_message_handler);
 
   {
     register_languages();
@@ -153,6 +152,17 @@ int goto_instrument_parse_optionst::doit()
           return CPROVER_EXIT_SUCCESS;
         }
       }
+    }
+
+    // ignore default/user-specified initialization
+    // of matching variables with static lifetime
+    if(cmdline.isset("nondet-static-matching"))
+    {
+      log.status() << "Adding nondeterministic initialization "
+                      "of matching static/global variables"
+                   << messaget::eom;
+      nondet_static_matching(
+        goto_model, cmdline.get_value("nondet-static-matching"));
     }
 
     instrument_goto_program();
@@ -191,9 +201,11 @@ int goto_instrument_parse_optionst::doit()
             ui_message_handler);
         }
 
-        bool unwinding_assertions=cmdline.isset("unwinding-assertions");
-        bool partial_loops=cmdline.isset("partial-loops");
         bool continue_as_loops=cmdline.isset("continue-as-loops");
+        bool partial_loops = cmdline.isset("partial-loops");
+        bool unwinding_assertions = cmdline.isset("unwinding-assertions") ||
+                                    (!continue_as_loops && !partial_loops &&
+                                     !cmdline.isset("no-unwinding-assertions"));
         if(continue_as_loops)
         {
           if(unwinding_assertions)
@@ -236,11 +248,8 @@ int goto_instrument_parse_optionst::doit()
 
           if(have_file)
           {
-#ifdef _MSC_VER
-            std::ofstream of(widen(filename));
-#else
-            std::ofstream of(filename);
-#endif
+            std::ofstream of(widen_if_needed(filename));
+
             if(!of)
               throw "failed to open file "+filename;
 
@@ -308,7 +317,7 @@ int goto_instrument_parse_optionst::doit()
       log.status() << "Pointer Analysis" << messaget::eom;
       namespacet ns(goto_model.symbol_table);
       value_set_analysist value_set_analysis(ns);
-      value_set_analysis(goto_model.goto_functions);
+      value_set_analysis(goto_model);
       show_value_sets(
         ui_message_handler.get_ui(), goto_model, value_set_analysis);
       return CPROVER_EXIT_SUCCESS;
@@ -539,13 +548,13 @@ int goto_instrument_parse_optionst::doit()
 
       log.status() << "Pointer Analysis" << messaget::eom;
       value_set_analysist value_set_analysis(ns);
-      value_set_analysis(goto_model.goto_functions);
+      value_set_analysis(goto_model);
 
       const symbolt &symbol=ns.lookup(ID_main);
       symbol_exprt main(symbol.name, symbol.type);
 
-      std::cout <<
-        rw_set_functiont(value_set_analysis, goto_model, main);
+      std::cout << rw_set_functiont(
+        value_set_analysis, goto_model, main, ui_message_handler);
       return CPROVER_EXIT_SUCCESS;
     }
 
@@ -558,9 +567,10 @@ int goto_instrument_parse_optionst::doit()
     if(cmdline.isset("show-reaching-definitions"))
     {
       do_indirect_call_and_rtti_removal();
+      rewrite_rw_ok(goto_model);
 
       const namespacet ns(goto_model.symbol_table);
-      reaching_definitions_analysist rd_analysis(ns);
+      reaching_definitions_analysist rd_analysis(ns, ui_message_handler);
       rd_analysis(goto_model);
       rd_analysis.output(goto_model, std::cout);
 
@@ -570,9 +580,10 @@ int goto_instrument_parse_optionst::doit()
     if(cmdline.isset("show-dependence-graph"))
     {
       do_indirect_call_and_rtti_removal();
+      rewrite_rw_ok(goto_model);
 
       const namespacet ns(goto_model.symbol_table);
-      dependence_grapht dependence_graph(ns);
+      dependence_grapht dependence_graph(ns, ui_message_handler);
       dependence_graph(goto_model);
       dependence_graph.output(goto_model, std::cout);
       dependence_graph.output_dot(std::cout);
@@ -731,11 +742,8 @@ int goto_instrument_parse_optionst::doit()
 
       if(cmdline.args.size()==2)
       {
-        #ifdef _MSC_VER
-        std::ofstream out(widen(cmdline.args[1]));
-        #else
-        std::ofstream out(cmdline.args[1]);
-        #endif
+        std::ofstream out(widen_if_needed(cmdline.args[1]));
+
         if(!out)
         {
           log.error() << "failed to write to '" << cmdline.args[1] << "'";
@@ -830,11 +838,8 @@ int goto_instrument_parse_optionst::doit()
 
       if(cmdline.args.size()==2)
       {
-        #ifdef _MSC_VER
-        std::ofstream out(widen(cmdline.args[1]));
-        #else
-        std::ofstream out(cmdline.args[1]);
-        #endif
+        std::ofstream out(widen_if_needed(cmdline.args[1]));
+
         if(!out)
         {
           log.error() << "failed to write to " << cmdline.args[1] << "'";
@@ -877,11 +882,7 @@ int goto_instrument_parse_optionst::doit()
 
       if(cmdline.args.size()==2)
       {
-        #ifdef _MSC_VER
-        std::ofstream out(widen(cmdline.args[1]));
-        #else
-        std::ofstream out(cmdline.args[1]);
-        #endif
+        std::ofstream out(widen_if_needed(cmdline.args[1]));
 
         if(!out)
         {
@@ -901,6 +902,7 @@ int goto_instrument_parse_optionst::doit()
     if(cmdline.isset("drop-unused-functions"))
     {
       do_indirect_call_and_rtti_removal();
+      mm_io(goto_model, ui_message_handler);
 
       log.status() << "Removing unused functions" << messaget::eom;
       remove_unused_functions(goto_model.goto_functions, ui_message_handler);
@@ -951,7 +953,7 @@ void goto_instrument_parse_optionst::do_indirect_call_and_rtti_removal(
   log.status() << "Virtual function removal" << messaget::eom;
   remove_virtual_functions(goto_model);
   log.status() << "Cleaning inline assembler statements" << messaget::eom;
-  remove_asm(goto_model);
+  remove_asm(goto_model, log.get_message_handler());
 }
 
 /// Remove function pointers that can be resolved by analysing const variables
@@ -1067,7 +1069,7 @@ void goto_instrument_parse_optionst::instrument_goto_program()
 
     // remove inline assembler as that may yield further library function calls
     // that need to be resolved
-    remove_asm(goto_model);
+    remove_asm(goto_model, ui_message_handler);
 
     // add the library
     log.status() << "Adding CPROVER library (" << config.ansi_c.arch << ")"
@@ -1075,6 +1077,15 @@ void goto_instrument_parse_optionst::instrument_goto_program()
     link_to_library(
       goto_model, ui_message_handler, cprover_cpp_library_factory);
     link_to_library(goto_model, ui_message_handler, cprover_c_library_factory);
+    // library functions may introduce inline assembler
+    while(has_asm(goto_model))
+    {
+      remove_asm(goto_model, ui_message_handler);
+      link_to_library(
+        goto_model, ui_message_handler, cprover_cpp_library_factory);
+      link_to_library(
+        goto_model, ui_message_handler, cprover_c_library_factory);
+    }
   }
 
   {
@@ -1148,15 +1159,32 @@ void goto_instrument_parse_optionst::instrument_goto_program()
     goto_model.goto_functions.update();
   }
 
-  if(cmdline.isset("synthesize-loop-invariants"))
+  if(cmdline.isset("loop-contracts-file"))
   {
-    log.warning() << "Loop invariant synthesizer is still work in progress. "
-                     "It only generates TRUE as invariants."
-                  << messaget::eom;
+    const auto file_name = cmdline.get_value("loop-contracts-file");
+    contracts_wranglert contracts_wrangler(
+      goto_model, file_name, ui_message_handler);
+  }
 
-    // Synthesize loop invariants and annotate them into `goto_model`
-    enumerative_loop_invariant_synthesizert synthesizer(goto_model, log);
-    annotate_invariants(synthesizer.synthesize_all(), goto_model, log);
+  // Initialize loop contract config from cmdline.
+  loop_contract_configt loop_contract_config = {
+    cmdline.isset(FLAG_LOOP_CONTRACTS),
+    !cmdline.isset(FLAG_LOOP_CONTRACTS_NO_UNWIND),
+    !cmdline.isset(FLAG_DISABLE_SIDE_EFFECT_CHECK)};
+
+  if(
+    cmdline.isset(FLAG_LOOP_CONTRACTS) &&
+    cmdline.isset(FLAG_LOOP_CONTRACTS_NO_UNWIND))
+  {
+    // After instrumentation, all annotated loops will be transformed to
+    // loops execute exactly once. CBMC by default unwinds transformed loops
+    // by twice.
+    // Users may want to disable the default unwinding to avoid duplicate
+    // assertions.
+    log.warning() << "**** WARNING: transformed loops will not be unwound "
+                  << "after applying loop contracts. Note that transformed "
+                  << "loops require at least unwinding bounds 2 to pass "
+                  << "the unwinding assertions." << messaget::eom;
   }
 
   bool use_dfcc = cmdline.isset(FLAG_DFCC);
@@ -1170,15 +1198,9 @@ void goto_instrument_parse_optionst::instrument_goto_program()
         "Use a single " FLAG_DFCC " option");
     }
 
-    if(cmdline.isset(FLAG_LOOP_CONTRACTS))
-    {
-      throw invalid_command_line_argument_exceptiont(
-        "Incompatible options detected",
-        "--" FLAG_DFCC " and --" FLAG_LOOP_CONTRACTS,
-        "Use either --" FLAG_DFCC " or --" FLAG_LOOP_CONTRACTS);
-    }
-
     do_indirect_call_and_rtti_removal();
+    log.status() << "Trying to force one backedge per target" << messaget::eom;
+    ensure_one_backedge_per_target(goto_model);
 
     const irep_idt harness_id(cmdline.get_value(FLAG_DFCC));
 
@@ -1212,22 +1234,22 @@ void goto_instrument_parse_optionst::instrument_goto_program()
       options,
       goto_model,
       harness_id,
-      to_enforce.empty() ? optionalt<irep_idt>{}
-                         : optionalt<irep_idt>{to_enforce.front()},
+      to_enforce.empty() ? std::optional<irep_idt>{}
+                         : std::optional<irep_idt>{to_enforce.front()},
       allow_recursive_calls,
       to_replace,
-      false,
+      loop_contract_config,
       to_exclude_from_nondet_static,
       log.get_message_handler());
   }
-
-  if(
-    !use_dfcc &&
-    (cmdline.isset(FLAG_LOOP_CONTRACTS) || cmdline.isset(FLAG_REPLACE_CALL) ||
-     cmdline.isset(FLAG_ENFORCE_CONTRACT)))
+  else if((cmdline.isset(FLAG_LOOP_CONTRACTS) ||
+           cmdline.isset(FLAG_REPLACE_CALL) ||
+           cmdline.isset(FLAG_ENFORCE_CONTRACT)))
   {
     do_indirect_call_and_rtti_removal();
-    code_contractst contracts(goto_model, log);
+    log.status() << "Trying to force one backedge per target" << messaget::eom;
+    ensure_one_backedge_per_target(goto_model);
+    code_contractst contracts(goto_model, log, loop_contract_config);
 
     std::set<std::string> to_replace(
       cmdline.get_values(FLAG_REPLACE_CALL).begin(),
@@ -1241,7 +1263,7 @@ void goto_instrument_parse_optionst::instrument_goto_program()
       cmdline.get_values("nondet-static-exclude").begin(),
       cmdline.get_values("nondet-static-exclude").end());
 
-    // It’s important to keep the order of contracts instrumentation, i.e.,
+    // It's important to keep the order of contracts instrumentation, i.e.,
     // first replacement then enforcement. We rely on contract replacement
     // and inlining of sub-function calls to properly annotate all
     // assignments.
@@ -1249,7 +1271,9 @@ void goto_instrument_parse_optionst::instrument_goto_program()
     contracts.enforce_contracts(to_enforce, to_exclude_from_nondet_static);
 
     if(cmdline.isset(FLAG_LOOP_CONTRACTS))
+    {
       contracts.apply_loop_contracts(to_exclude_from_nondet_static);
+    }
   }
 
   if(cmdline.isset("value-set-fi-fp-removal"))
@@ -1303,11 +1327,8 @@ void goto_instrument_parse_optionst::instrument_goto_program()
 
       if(have_file)
       {
-#ifdef _MSC_VER
-        std::ofstream of(widen(filename));
-#else
-        std::ofstream of(filename);
-#endif
+        std::ofstream of(widen_if_needed(filename));
+
         if(!of)
           throw "failed to open file "+filename;
 
@@ -1473,6 +1494,8 @@ void goto_instrument_parse_optionst::instrument_goto_program()
 
   if(cmdline.isset("slice-global-inits"))
   {
+    do_indirect_call_and_rtti_removal();
+
     log.status() << "Slicing away initializations of unused global variables"
                  << messaget::eom;
     slice_global_inits(goto_model, ui_message_handler);
@@ -1500,19 +1523,19 @@ void goto_instrument_parse_optionst::instrument_goto_program()
     log.status() << "Pointer Analysis" << messaget::eom;
     const namespacet ns(goto_model.symbol_table);
     value_set_analysist value_set_analysis(ns);
-    value_set_analysis(goto_model.goto_functions);
+    value_set_analysis(goto_model);
 
     if(cmdline.isset("remove-pointers"))
     {
       // removing pointers
       log.status() << "Removing Pointers" << messaget::eom;
-      remove_pointers(goto_model, value_set_analysis);
+      remove_pointers(goto_model, value_set_analysis, ui_message_handler);
     }
 
     if(cmdline.isset("race-check"))
     {
       log.status() << "Adding Race Checks" << messaget::eom;
-      race_check(value_set_analysis, goto_model);
+      race_check(value_set_analysis, goto_model, ui_message_handler);
     }
 
     if(cmdline.isset("mm"))
@@ -1609,14 +1632,15 @@ void goto_instrument_parse_optionst::instrument_goto_program()
       interrupt(
         value_set_analysis,
         goto_model,
-        cmdline.get_value("isr"));
+        cmdline.get_value("isr"),
+        ui_message_handler);
     }
 
     // Memory-mapped I/O
     if(cmdline.isset("mmio"))
     {
       log.status() << "Instrumenting memory-mapped I/O" << messaget::eom;
-      mmio(value_set_analysis, goto_model);
+      mmio(value_set_analysis, goto_model, ui_message_handler);
     }
 
     if(cmdline.isset("concurrency"))
@@ -1733,15 +1757,21 @@ void goto_instrument_parse_optionst::instrument_goto_program()
   {
     do_indirect_call_and_rtti_removal();
     do_remove_returns();
+    rewrite_rw_ok(goto_model);
+    // full_slicer requires that the model has unique location numbers:
+    goto_model.goto_functions.update();
 
+    log.warning() << "**** WARNING: Experimental option --full-slice, "
+                  << "analysis results may be unsound. See "
+                  << "https://github.com/diffblue/cbmc/issues/260"
+                  << messaget::eom;
     log.status() << "Performing a full slice" << messaget::eom;
     if(cmdline.isset("property"))
-      property_slicer(goto_model, cmdline.get_values("property"));
+      property_slicer(
+        goto_model, cmdline.get_values("property"), ui_message_handler);
     else
     {
-      // full_slicer requires that the model has unique location numbers:
-      goto_model.goto_functions.update();
-      full_slicer(goto_model);
+      full_slicer(goto_model, ui_message_handler);
     }
   }
 
@@ -1819,177 +1849,201 @@ void goto_instrument_parse_optionst::instrument_goto_program()
 /// display command line help
 void goto_instrument_parse_optionst::help()
 {
-  // clang-format off
-  std::cout << '\n' << banner_string("Goto-Instrument", CBMC_VERSION) << '\n'
+  std::cout << '\n'
+            << banner_string("Goto-Instrument", CBMC_VERSION) << '\n'
             << align_center_with_border("Copyright (C) 2008-2013") << '\n'
             << align_center_with_border("Daniel Kroening") << '\n'
-            << align_center_with_border("kroening@kroening.com") << '\n'
-            <<
+            << align_center_with_border("kroening@kroening.com") << '\n';
+
+  // clang-format off
+  std::cout << help_formatter(
     "\n"
-    "Usage:                       Purpose:\n"
+    "Usage:                     \tPurpose:\n"
     "\n"
-    " goto-instrument [-?] [-h] [--help]  show help\n"
-    " goto-instrument --version           show version and exit\n"
-    " goto-instrument [options] in [out]  perform analysis or instrumentation\n"
+    " {bgoto-instrument} [{y-?}] [{y-h}] [{y--help}] \t show this help\n"
+    " {bgoto-instrument} {y--version} \t show version and exit\n"
+    " {bgoto-instrument} [options] {uin} [{uout}] \t perform analysis or"
+    " instrumentation\n"
     "\n"
     "Dump Source:\n"
     HELP_DUMP_C
-    " --horn                       print program as constrained horn clauses\n"
+    " {y--horn} \t print program as constrained horn clauses\n"
     "\n"
     "Diagnosis:\n"
     HELP_SHOW_PROPERTIES
     HELP_DOCUMENT_PROPERTIES
-    " --show-symbol-table          show loaded symbol table\n"
-    " --list-symbols               list symbols with type information\n"
+    " {y--show-symbol-table} \t show loaded symbol table\n"
+    " {y--list-symbols} \t list symbols with type information\n"
     HELP_SHOW_GOTO_FUNCTIONS
     HELP_GOTO_PROGRAM_STATS
-    " --show-locations             show all source locations\n"
-    " --dot                        generate CFG graph in DOT format\n"
-    " --print-internal-representation\n" // NOLINTNEXTLINE(*)
-    "                              show verbose internal representation of the program\n"
-    " --list-undefined-functions   list functions without body\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --list-calls-args            list all function calls with their arguments\n"
-    " --call-graph                 show graph of function calls\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --reachable-call-graph       show graph of function calls potentially reachable from main function\n"
+    " {y--show-locations} \t show all source locations\n"
+    " {y--dot} \t generate CFG graph in DOT format\n"
+    " {y--print-internal-representation} \t show verbose internal"
+    " representation of the program\n"
+    " {y--list-undefined-functions} \t list functions without body\n"
+    " {y--list-calls-args} \t list all function calls with their arguments\n"
+    " {y--call-graph} \t show graph of function calls\n"
+    " {y--reachable-call-graph} \t show graph of function calls potentially"
+    " reachable from main function\n"
     HELP_SHOW_CLASS_HIERARCHY
     HELP_VALIDATE
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --validate-goto-binary       check the well-formedness of the passed in goto\n"
-    "                              binary and then exit\n"
-    " --interpreter                do concrete execution\n"
+    " {y--validate-goto-binary} \t check the well-formedness of the passed in"
+    " goto binary and then exit\n"
+    " {y--interpreter} \t do concrete execution\n"
     "\n"
     "Data-flow analyses:\n"
-    " --show-struct-alignment      show struct members that might be concurrently accessed\n" // NOLINT(*)
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --show-threaded              show instructions that may be executed by more than one thread\n"
-    " --show-local-safe-pointers   show pointer expressions that are trivially dominated by a not-null check\n" // NOLINT(*)
-    " --show-safe-dereferences     show pointer expressions that are trivially dominated by a not-null check\n" // NOLINT(*)
-    "                              *and* used as a dereference operand\n" // NOLINT(*)
-    " --show-value-sets            show points-to information (using value sets)\n" // NOLINT(*)
-    " --show-global-may-alias      show may-alias information over globals\n"
-    " --show-local-bitvector-analysis\n"
-    "                              show procedure-local pointer analysis\n"
-    " --escape-analysis            perform escape analysis\n"
-    " --show-escape-analysis       show results of escape analysis\n"
-    " --custom-bitvector-analysis  perform configurable bitvector analysis\n"
-    " --show-custom-bitvector-analysis\n"
-    "                              show results of configurable bitvector analysis\n" // NOLINT(*)
-    " --interval-analysis          perform interval analysis\n"
-    " --show-intervals             show results of interval analysis\n"
-    " --show-uninitialized         show maybe-uninitialized variables\n"
-    " --show-points-to             show points-to information\n"
-    " --show-rw-set                show read-write sets\n"
-    " --show-call-sequences        show function call sequences\n"
-    " --show-reaching-definitions  show reaching definitions\n"
-    " --show-dependence-graph      show program-dependence graph\n"
-    " --show-sese-regions          show single-entry-single-exit regions\n"
+    " {y--show-struct-alignment} \t show struct members that might be"
+    " concurrently accessed\n"
+    " {y--show-threaded} \t show instructions that may be executed by more than"
+    " one thread\n"
+    " {y--show-local-safe-pointers} \t show pointer expressions that are"
+    " trivially dominated by a not-null check\n"
+    " {y--show-safe-dereferences} \t show pointer expressions that are"
+    " trivially dominated by a not-null check *and* used as a dereference"
+    " operand\n"
+    " {y--show-value-sets} \t show points-to information (using value sets)\n"
+    " {y--show-global-may-alias} \t show may-alias information over globals\n"
+    " {y--show-local-bitvector-analysis} \t show procedure-local pointer"
+    " analysis\n"
+    " {y--escape-analysis} \t perform escape analysis\n"
+    " {y--show-escape-analysis} \t show results of escape analysis\n"
+    " {y--custom-bitvector-analysis} \t perform configurable bitvector"
+    " analysis\n"
+    " {y--show-custom-bitvector-analysis} \t show results of configurable"
+    " bitvector analysis\n"
+    " {y--interval-analysis} \t perform interval analysis\n"
+    " {y--show-intervals} \t show results of interval analysis\n"
+    " {y--show-uninitialized} \t show maybe-uninitialized variables\n"
+    " {y--show-points-to} \t show points-to information\n"
+    " {y--show-rw-set} \t show read-write sets\n"
+    " {y--show-call-sequences} \t show function call sequences\n"
+    " {y--show-reaching-definitions} \t show reaching definitions\n"
+    " {y--show-dependence-graph} \t show program-dependence graph\n"
+    " {y--show-sese-regions} \t show single-entry-single-exit regions\n"
     "\n"
     "Safety checks:\n"
-    " --no-assertions              ignore user assertions\n"
+    " {y--no-assertions} \t ignore user assertions\n"
     HELP_GOTO_CHECK
     HELP_UNINITIALIZED_CHECK
-    " --stack-depth n              add check that call stack size of non-inlined functions never exceeds n\n" // NOLINT(*)
-    " --race-check                 add floating-point data race checks\n"
+    " {y--stack-depth} {un} \t add check that call stack size of non-inlined"
+    " functions never exceeds {un}\n"
+    " {y--race-check} \t add floating-point data race checks\n"
     "\n"
     "Semantic transformations:\n"
-    << HELP_NONDET_VOLATILE <<
-    " --isr <function>             instruments an interrupt service routine\n"
-    " --mmio                       instruments memory-mapped I/O\n"
-    " --nondet-static              add nondeterministic initialization of variables with static lifetime\n" // NOLINT(*)
-    " --nondet-static-exclude e    same as nondet-static except for the variable e\n" //NOLINT(*)
-    "                              (use multiple times if required)\n"
-    " --function-enter <f>, --function-exit <f>, --branch <f>\n"
-    "                              instruments a call to <f> at the beginning,\n" // NOLINT(*)
-    "                              the exit, or a branch point, respectively\n"
-    " --splice-call caller,callee  prepends a call to callee in the body of caller\n"  // NOLINT(*)
-    " --check-call-sequence <seq>  instruments checks to assert that all call\n"
-    "                              sequences match <seq>\n"
-    " --undefined-function-is-assume-false\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    "                              convert each call to an undefined function to assume(false)\n"
+    HELP_NONDET_VOLATILE
+    " {y--isr} {ufunction} \t instruments an interrupt service routine\n"
+    " {y--mmio} \t instruments memory-mapped I/O\n"
+    " {y--nondet-static} \t add nondeterministic initialization of variables"
+    " with static lifetime\n"
+    " {y--nondet-static-exclude} {ue} \t same as nondet-static except for the"
+    " variable {ue} (use multiple times if required)\n"
+    " {y--nondet-static-matching} {ur} \t add nondeterministic initialization"
+    " of variables with static lifetime matching regex {ur}\n"
+    " {y--function-enter} {uf}, {y--function-exit} {uf}, {y--branch} {uf} \t"
+    " instruments a call to {uf} at the beginning, the exit, or a branch point,"
+    " respectively\n"
+    " {y--splice-call} {ucaller},{ucallee} \t prepends a call to {ucallee} in"
+    " the body of {ucaller}\n"
+    " {y--check-call-sequence} {useq} \t instruments checks to assert that all"
+    " call sequences match {useq}\n"
+    " {y--undefined-function-is-assume-false} \t convert each call to an"
+    " undefined function to assume(false)\n"
     HELP_INSERT_FINAL_ASSERT_FALSE
     HELP_REPLACE_FUNCTION_BODY
     HELP_RESTRICT_FUNCTION_POINTER
     HELP_REMOVE_CALLS_NO_BODY
-    " --add-library                add models of C library functions\n"
+    " {y--add-library} \t add models of C library functions\n"
     HELP_CONFIG_LIBRARY
-    " --model-argc-argv <n>        model up to <n> command line arguments\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --remove-function-body <f>   remove the implementation of function <f> (may be repeated)\n"
+    " {y--model-argc-argv} {un} \t model up to {un} command line arguments\n"
+    " {y--remove-function-body} {uf} remove the implementation of function {uf}"
+    " (may be repeated)\n"
     HELP_REPLACE_CALLS
     HELP_ANSI_C_LANGUAGE
     "\n"
     "Semantics-preserving transformations:\n"
-    " --ensure-one-backedge-per-target\n"
-    "                              transform loop bodies such that there is a\n"
-    "                              single edge back to the loop head\n"
-    " --drop-unused-functions      drop functions trivially unreachable from main function\n" // NOLINT(*)
+    " {y--ensure-one-backedge-per-target} \t transform loop bodies such that"
+    " there is a single edge back to the loop head\n"
+    " {y--drop-unused-functions} \t drop functions trivially unreachable from"
+    " main function\n"
     HELP_REMOVE_POINTERS
-    " --constant-propagator        propagate constants and simplify expressions\n" // NOLINT(*)
-    " --inline                     perform full inlining\n"
-    " --partial-inline             perform partial inlining\n"
-    " --function-inline <function> transitively inline all calls <function> makes\n" // NOLINT(*)
-    " --no-caching                 disable caching of intermediate results during transitive function inlining\n" // NOLINT(*)
-    " --log <file>                 log in json format which code segments were inlined, use with --function-inline\n" // NOLINT(*)
-    " --remove-function-pointers   replace function pointers by case statement over function calls\n" // NOLINT(*)
+    " {y--constant-propagator} \t propagate constants and simplify"
+    " expressions\n"
+    " {y--inline} \t perform full inlining\n"
+    " {y--partial-inline} \t perform partial inlining\n"
+    " {y--function-inline} {ufunction} \t transitively inline all calls"
+    " {ufunction} makes\n"
+    " {y--no-caching} \t disable caching of intermediate results during"
+    " transitive function inlining\n"
+    " {y--log} {ufile} \t log in JSON format which code segments were inlined,"
+    " use with {y--function-inline}\n"
+    " {y--remove-function-pointers} \t replace function pointers by case"
+    " statement over function calls\n"
     HELP_REMOVE_CONST_FUNCTION_POINTERS
-    " --value-set-fi-fp-removal    build flow-insensitive value set and replace function pointers by a case statement\n" // NOLINT(*)
-    "                              over the possible assignments. If the set of possible assignments is empty the function pointer\n" // NOLINT(*)
-    "                              is removed using the standard remove-function-pointers pass. \n" // NOLINT(*)
+    " {y--value-set-fi-fp-removal} \t build flow-insensitive value set and"
+    " replace function pointers by a case statement over the possible"
+    " assignments. If the set of possible assignments is empty the function"
+    " pointer is removed using the standard remove-function-pointers pass.\n"
     "\n"
     "Loop information and transformations:\n"
     HELP_UNWINDSET
-    " --unwindset-file <file>      read unwindset from file\n"
-    " --partial-loops              permit paths with partial loops\n"
-    " --unwinding-assertions       generate unwinding assertions\n"
-    " --continue-as-loops          add loop for remaining iterations after unwound part\n" // NOLINT(*)
-    " --k-induction <k>            check loops with k-induction\n"
-    " --step-case                  k-induction: do step-case\n"
-    " --base-case                  k-induction: do base-case\n"
-    " --havoc-loops                over-approximate all loops\n"
-    " --accelerate                 add loop accelerators\n"
-    " --z3                         use Z3 when computing loop accelerators\n"
-    " --skip-loops <loop-ids>      add gotos to skip selected loops during execution\n" // NOLINT(*)
-    " --show-lexical-loops         show single-entry-single-back-edge loops\n"
-    " --show-natural-loops         show natural loop heads\n"
+    " {y--unwindset-file_<file>} \t read unwindset from file\n"
+    " {y--partial-loops} \t permit paths with partial loops\n"
+    " {y--unwinding-assertions} \t generate unwinding assertions"
+    " (enabled by default)\n"
+    " {y--no-unwinding-assertions} \t do not generate unwinding assertions\n"
+    " {y--continue-as-loops} \t add loop for remaining iterations after"
+    " unwound part\n"
+    " {y--k-induction} {uk} \t check loops with k-induction\n"
+    " {y--step-case} \t k-induction: do step-case\n"
+    " {y--base-case} \t k-induction: do base-case\n"
+    " {y--havoc-loops} \t over-approximate all loops\n"
+    " {y--accelerate} \t add loop accelerators\n"
+    " {y--z3} \t use Z3 when computing loop accelerators\n"
+    " {y--skip-loops {uloop-ids} \t add gotos to skip selected loops during"
+    " execution\n"
+    " {y--show-lexical-loops} \t show single-entry-single-back-edge loops\n"
+    " {y--show-natural-loops} \t show natural loop heads\n"
     "\n"
     "Memory model instrumentations:\n"
     HELP_WMM_FULL
     "\n"
     "Slicing:\n"
     HELP_REACHABILITY_SLICER
-    " --full-slice                 slice away instructions that don't affect assertions\n" // NOLINT(*)
-    " --property id                slice with respect to specific property only\n" // NOLINT(*)
-    " --slice-global-inits         slice away initializations of unused global variables\n" // NOLINT(*)
-    " --aggressive-slice           remove bodies of any functions not on the shortest path between\n" // NOLINT(*)
-    "                              the start function and the function containing the property(s)\n" // NOLINT(*)
-    " --aggressive-slice-call-depth <n>\n"
-    "                              used with aggressive-slice, preserves all functions within <n> function calls\n" // NOLINT(*)
-    "                              of the functions on the shortest path\n"
-    " --aggressive-slice-preserve-function <f>\n"
-    "                             force the aggressive slicer to preserve function <f>\n" // NOLINT(*)
-    " --aggressive-slice-preserve-functions-containing <f>\n"
-    "                              force the aggressive slicer to preserve all functions with names containing <f>\n" // NOLINT(*)
-    " --aggressive-slice-preserve-all-direct-paths \n"
-    "                             force aggressive slicer to preserve all direct paths\n" // NOLINT(*)
+    HELP_FP_REACHABILITY_SLICER
+    " {y--full-slice} \t slice away instructions that don't affect assertions\n"
+    " {y--property} {uid} \t slice with respect to specific property only\n"
+    " {y--slice-global-inits} \t slice away initializations of unused global"
+    " variables\n"
+    " {y--aggressive-slice} \t remove bodies of any functions not on the"
+    " shortest path between the start function and the function containing the"
+    " property/properties\n"
+    " {y--aggressive-slice-call-depth} {un} \t used with aggressive-slice,"
+    " preserves all functions within {un} function calls of the functions on"
+    " the shortest path\n"
+    " {y--aggressive-slice-preserve-function} {uf} \t force the aggressive"
+    " slicer to preserve function {uf}\n"
+    " {y--aggressive-slice-preserve-functions-containing} {uf} \t force the"
+    " aggressive slicer to preserve all functions with names containing {uf}\n"
+    " {y--aggressive-slice-preserve-all-direct-paths} \t force aggressive"
+    " slicer to preserve all direct paths\n"
     "\n"
     "Code contracts:\n"
     HELP_DFCC
     HELP_LOOP_CONTRACTS
-    HELP_LOOP_INVARIANT_SYNTHESIZER
+    HELP_DISABLE_SIDE_EFFECT_CHECK
+    HELP_LOOP_CONTRACTS_NO_UNWIND
+    HELP_LOOP_CONTRACTS_FILE
     HELP_REPLACE_CALL
     HELP_ENFORCE_CONTRACT
     HELP_ENFORCE_CONTRACT_REC
     "\n"
     "User-interface options:\n"
     HELP_FLUSH
-    " --xml                        output files in XML where supported\n"
-    " --xml-ui                     use XML-formatted output\n"
-    " --json-ui                    use JSON-formatted output\n"
-    " --verbosity #                verbosity level\n"
+    " {y--xml} \t output files in XML where supported\n"
+    " {y--xml-ui} \t use XML-formatted output\n"
+    " {y--json-ui} \t use JSON-formatted output\n"
+    " {y--verbosity} {u#} \t verbosity level\n"
     HELP_TIMESTAMP
-    "\n";
+    "\n");
   // clang-format on
 }

@@ -83,24 +83,24 @@ void dump_ct::operator()(std::ostream &os)
   // add copies of struct types when ID_C_transparent_union is only
   // annotated to parameter
   symbol_tablet additional_symbols;
-  for(const auto &named_symbol : copied_symbol_table.symbols)
+  for(auto it = copied_symbol_table.begin(); it != copied_symbol_table.end();
+      ++it)
   {
-    const symbolt &symbol=named_symbol.second;
+    const symbolt &symbol = it->second;
 
     if(
       (symbol.type.id() == ID_union || symbol.type.id() == ID_struct) &&
       !symbol.is_type)
     {
-      type_symbolt ts{symbol.type};
-      ts.mode = symbol.mode;
+      std::string tag_name;
       if(mode == ID_C)
-        ts.name = "tag-" + type2name(symbol.type, ns);
+        tag_name = "tag-" + type2name(symbol.type, ns);
       else if(mode == ID_cpp)
-        ts.name = "tag-" + cpp_type2name(symbol.type);
+        tag_name = "tag-" + cpp_type2name(symbol.type);
       else
         UNREACHABLE;
-      typet &type =
-        copied_symbol_table.get_writeable_ref(named_symbol.first).type;
+      type_symbolt ts{tag_name, symbol.type, symbol.mode};
+      typet &type = it.get_writeable_symbol().type;
       if(ts.type.id() == ID_union)
         type = union_tag_typet{ts.name};
       else
@@ -111,8 +111,7 @@ void dump_ct::operator()(std::ostream &os)
     if(symbol.type.id()!=ID_code)
       continue;
 
-    code_typet &code_type=to_code_type(
-      copied_symbol_table.get_writeable_ref(named_symbol.first).type);
+    code_typet &code_type = to_code_type(it.get_writeable_symbol().type);
     code_typet::parameterst &parameters=code_type.parameters();
 
     for(code_typet::parameterst::iterator
@@ -149,9 +148,10 @@ void dump_ct::operator()(std::ostream &os)
   // add tags to anonymous union/struct/enum,
   // and prepare lexicographic order
   std::set<std::string> symbols_sorted;
-  for(const auto &named_symbol : copied_symbol_table.symbols)
+  for(auto it = copied_symbol_table.begin(); it != copied_symbol_table.end();
+      ++it)
   {
-    symbolt &symbol = copied_symbol_table.get_writeable_ref(named_symbol.first);
+    symbolt &symbol = it.get_writeable_symbol();
     bool tag_added=false;
 
     // TODO we could get rid of some of the ID_anonymous by looking up
@@ -172,7 +172,7 @@ void dump_ct::operator()(std::ostream &os)
       tag_added=true;
     }
 
-    const std::string name_str=id2string(named_symbol.first);
+    const std::string name_str = id2string(it->first);
     if(symbol.is_type &&
        (symbol.type.id()==ID_union ||
         symbol.type.id()==ID_struct ||
@@ -208,10 +208,14 @@ void dump_ct::operator()(std::ostream &os)
 
     // we don't want to dump in full all definitions; in particular
     // do not dump anonymous types that are defined in system headers
-    if((!tag_added || symbol.is_type) &&
-       system_symbols.is_symbol_internal_symbol(symbol, system_headers) &&
-       symbol.name!=goto_functions.entry_point())
+    if(
+      (!tag_added || symbol.is_type) &&
+      system_symbols.is_symbol_internal_symbol(symbol, system_headers) &&
+      symbol.name != goto_functions.entry_point() &&
+      symbol.name != CPROVER_PREFIX "arg_string") // model for argc/argv
+    {
       continue;
+    }
 
     bool inserted=symbols_sorted.insert(name_str).second;
     CHECK_RETURN(inserted);
@@ -326,10 +330,13 @@ void dump_ct::operator()(std::ostream &os)
 
     if(
       symbol.is_type &&
-      (symbol.type.id() == ID_struct || symbol.type.id() == ID_union))
+      (symbol.type.id() == ID_struct || symbol.type.id() == ID_union) &&
+      !to_struct_union_type(symbol.type).is_incomplete())
+    {
       convert_compound_declaration(
           symbol,
           compound_body_stream);
+    }
   }
 
   // Dump the code to the target stream;
@@ -566,7 +573,10 @@ void dump_ct::convert_compound(
     typet comp_type_to_use = comp.type();
     if(is_anon)
     {
-      comp_type_to_use = ns.follow(comp.type());
+      comp_type_to_use =
+        (comp.type().id() == ID_struct_tag || comp.type().id() == ID_union_tag)
+          ? ns.follow_tag(to_struct_or_union_tag_type(comp.type()))
+          : comp.type();
       comp_type_to_use.remove(ID_tag);
       if(
         recursive && (comp_type_to_use.id() == ID_struct ||
@@ -725,7 +735,7 @@ void dump_ct::cleanup_decl(
   goto_programt tmp;
   tmp.add(goto_programt::make_decl(decl.symbol()));
 
-  if(optionalt<exprt> value = decl.initial_value())
+  if(std::optional<exprt> value = decl.initial_value())
   {
     decl.set_initial_value({});
     tmp.add(goto_programt::make_assignment(decl.symbol(), std::move(*value)));
@@ -1346,8 +1356,9 @@ void dump_ct::cleanup_expr(exprt &expr)
 
   if(expr.id()==ID_struct)
   {
-    struct_typet type=
-      to_struct_type(ns.follow(expr.type()));
+    struct_typet type = expr.type().id() == ID_struct_tag
+                          ? ns.follow_tag(to_struct_tag_type(expr.type()))
+                          : to_struct_type(expr.type());
 
     struct_union_typet::componentst old_components;
     old_components.swap(type.components());
@@ -1375,7 +1386,9 @@ void dump_ct::cleanup_expr(exprt &expr)
   else if(expr.id()==ID_union)
   {
     union_exprt &u=to_union_expr(expr);
-    const union_typet &u_type_f=to_union_type(ns.follow(u.type()));
+    const union_typet &u_type_f = u.type().id() == ID_union_tag
+                                    ? ns.follow_tag(to_union_tag_type(u.type()))
+                                    : to_union_type(u.type());
 
     if(!u.type().get_bool(ID_C_transparent_union) &&
        !u_type_f.get_bool(ID_C_transparent_union))
@@ -1386,7 +1399,7 @@ void dump_ct::cleanup_expr(exprt &expr)
     }
     // add a typecast for NULL
     else if(
-      u.op().id() == ID_constant && is_null_pointer(to_constant_expr(u.op())) &&
+      u.op().is_constant() && to_constant_expr(u.op()).is_null_pointer() &&
       to_pointer_type(u.op().type()).base_type().id() == ID_empty)
     {
       const struct_union_typet::componentt &comp=
@@ -1433,7 +1446,10 @@ void dump_ct::cleanup_expr(exprt &expr)
         code_typet::parameterst::const_iterator it=parameters.begin();
         for(auto &argument : arguments)
         {
-          const typet &type=ns.follow(it->type());
+          const typet &type = it->type().id() == ID_union_tag
+                                ? static_cast<const typet &>(ns.follow_tag(
+                                    to_union_tag_type(it->type())))
+                                : it->type();
           if(type.id()==ID_union &&
              type.get_bool(ID_C_transparent_union))
           {
@@ -1442,8 +1458,8 @@ void dump_ct::cleanup_expr(exprt &expr)
 
             // add a typecast for NULL or 0
             if(
-              argument.id() == ID_constant &&
-              is_null_pointer(to_constant_expr(argument)))
+              argument.is_constant() &&
+              to_constant_expr(argument).is_null_pointer())
             {
               const typet &comp_type=
                 to_union_type(type).components().front().type();
@@ -1458,8 +1474,7 @@ void dump_ct::cleanup_expr(exprt &expr)
       }
     }
   }
-  else if(expr.id()==ID_constant &&
-          expr.type().id()==ID_signedbv)
+  else if(expr.is_constant() && expr.type().id() == ID_signedbv)
   {
     #if 0
     const irep_idt &cformat=expr.get(ID_C_cformat);
@@ -1488,7 +1503,9 @@ void dump_ct::cleanup_expr(exprt &expr)
     {
       const union_exprt &union_expr = to_union_expr(bu.op());
       const union_typet &union_type =
-        to_union_type(ns.follow(union_expr.type()));
+        union_expr.type().id() == ID_union_tag
+          ? ns.follow_tag(to_union_tag_type(union_expr.type()))
+          : to_union_type(union_expr.type());
 
       for(const auto &comp : union_type.components())
       {
@@ -1518,9 +1535,14 @@ void dump_ct::cleanup_expr(exprt &expr)
     else if(
       bu.op().id() == ID_side_effect &&
       to_side_effect_expr(bu.op()).get_statement() == ID_nondet &&
-      ns.follow(bu.op().type()).id() == ID_union && bu.offset().is_zero())
+      (bu.op().type().id() == ID_union ||
+       bu.op().type().id() == ID_union_tag) &&
+      bu.offset().is_zero())
     {
-      const union_typet &union_type = to_union_type(ns.follow(bu.op().type()));
+      const union_typet &union_type =
+        bu.op().type().id() == ID_union_tag
+          ? ns.follow_tag(to_union_tag_type(bu.op().type()))
+          : to_union_type(bu.op().type());
 
       for(const auto &comp : union_type.components())
       {
@@ -1534,9 +1556,9 @@ void dump_ct::cleanup_expr(exprt &expr)
       }
     }
 
-    optionalt<exprt> clean_init;
+    std::optional<exprt> clean_init;
     if(
-      ns.follow(bu.type()).id() == ID_union &&
+      (bu.type().id() == ID_union || bu.type().id() == ID_union_tag) &&
       bu.source_location().get_function().empty())
     {
       clean_init = zero_initializer(bu.op().type(), source_locationt{}, ns)
@@ -1547,7 +1569,10 @@ void dump_ct::cleanup_expr(exprt &expr)
 
     if(clean_init.has_value() && bu.op() == *clean_init)
     {
-      const union_typet &union_type = to_union_type(ns.follow(bu.type()));
+      const union_typet &union_type =
+        bu.type().id() == ID_union_tag
+          ? ns.follow_tag(to_union_tag_type(bu.type()))
+          : to_union_type(bu.type());
 
       for(const auto &comp : union_type.components())
       {

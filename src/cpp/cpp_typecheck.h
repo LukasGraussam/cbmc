@@ -25,6 +25,9 @@ Author: Daniel Kroening, kroening@cs.cmu.edu
 #include <set>
 #include <unordered_set>
 
+class pointer_typet;
+class reference_typet;
+
 bool cpp_typecheck(
   cpp_parse_treet &cpp_parse_tree,
   symbol_table_baset &symbol_table,
@@ -43,32 +46,14 @@ public:
     cpp_parse_treet &_cpp_parse_tree,
     symbol_table_baset &_symbol_table,
     const std::string &_module,
-    message_handlert &message_handler)
-    : c_typecheck_baset(_symbol_table, _module, message_handler),
-      cpp_parse_tree(_cpp_parse_tree),
-      template_counter(0),
-      anon_counter(0),
-      disable_access_control(false)
-  {
-  }
+    message_handlert &message_handler);
 
   cpp_typecheckt(
     cpp_parse_treet &_cpp_parse_tree,
     symbol_table_baset &_symbol_table1,
     const symbol_table_baset &_symbol_table2,
     const std::string &_module,
-    message_handlert &message_handler)
-    : c_typecheck_baset(
-        _symbol_table1,
-        _symbol_table2,
-        _module,
-        message_handler),
-      cpp_parse_tree(_cpp_parse_tree),
-      template_counter(0),
-      anon_counter(0),
-      disable_access_control(false)
-  {
-  }
+    message_handlert &message_handler);
 
   ~cpp_typecheckt() override
   {
@@ -98,7 +83,7 @@ public:
 
   bool cpp_is_pod(const typet &type) const;
 
-  optionalt<codet> cpp_constructor(
+  std::optional<codet> cpp_constructor(
     const source_locationt &source_location,
     const exprt &object,
     const exprt::operandst &operands);
@@ -343,7 +328,7 @@ protected:
 
   void add_method_body(symbolt *_method_symbol);
 
-  bool builtin_factory(const irep_idt &);
+  bool builtin_factory(const irep_idt &) override;
 
   // types
 
@@ -430,7 +415,7 @@ protected:
 
   const struct_typet &this_struct_type();
 
-  optionalt<codet>
+  std::optional<codet>
   cpp_destructor(const source_locationt &source_location, const exprt &object);
 
   // expressions
@@ -524,14 +509,18 @@ public:
   bool user_defined_conversion_sequence(
     const exprt &expr, const typet &type, exprt &new_expr, unsigned &rank);
 
-  bool reference_related(
-    const exprt &expr, const typet &type) const;
+  bool reference_related(const exprt &expr, const reference_typet &type) const;
 
   bool reference_compatible(
-    const exprt &expr, const typet &type, unsigned &rank) const;
+    const exprt &expr,
+    const reference_typet &type,
+    unsigned &rank) const;
 
   bool reference_binding(
-    exprt expr, const typet &type, exprt &new_expr, unsigned &rank);
+    exprt expr,
+    const reference_typet &type,
+    exprt &new_expr,
+    unsigned &rank);
 
   bool implicit_conversion_sequence(
     const exprt &expr, const typet &type, exprt &new_expr, unsigned &rank);
@@ -542,7 +531,7 @@ public:
   bool implicit_conversion_sequence(
     const exprt &expr, const typet &type, exprt &new_expr);
 
-  void reference_initializer(exprt &expr, const typet &type);
+  void reference_initializer(exprt &expr, const reference_typet &type);
 
   void implicit_typecast(exprt &expr, const typet &type) override;
 
@@ -556,9 +545,7 @@ public:
     const struct_typet &from,
     const struct_typet &to) const;
 
-  void make_ptr_typecast(
-    exprt &expr,
-    const typet &dest_type);
+  void make_ptr_typecast(exprt &expr, const pointer_typet &dest_type);
 
   // the C++ typecasts
 
@@ -591,6 +578,7 @@ private:
   dynamic_initializationst dynamic_initializations;
   bool disable_access_control;           // Disable protect and private
   std::unordered_set<irep_idt> deferred_typechecking;
+  bool support_float16_type;
 };
 
 #endif // CPROVER_CPP_CPP_TYPECHECK_H

@@ -12,12 +12,12 @@ Author: Diffblue Ltd
 #ifndef CPROVER_UTIL_DENSE_INTEGER_MAP_H
 #define CPROVER_UTIL_DENSE_INTEGER_MAP_H
 
+#include <util/invariant.h>
+
+#include <cstdint>
 #include <limits>
 #include <unordered_set>
 #include <vector>
-
-#include <util/invariant.h>
-#include <util/optional.h>
 
 /// Identity functor. When we use C++20 this can be replaced with std::identity.
 class identity_functort
@@ -41,10 +41,11 @@ public:
 ///
 /// The type is optimised for fast lookups at the expense of flexibility.
 /// It makes one compromise on the iterface of std::map / unordered_map: the
-/// iterator refers to a pair<key, optionalt<value>>, where the value optional
-/// will always be defined. This is because the backing store uses optionalt
-/// this way and we don't want to impose the price of copying the key and value
-/// each time we move the iterator just so we have a <const K, V> & to give out.
+/// iterator refers to a pair<key, std::optional<value>>, where the value
+/// optional will always be defined. This is because the backing store uses
+/// std::optional this way and we don't want to impose the price of copying the
+/// key and value each time we move the iterator just so we have a
+/// <const K, V> & to give out.
 ///
 /// Undocumented functions with matching names have the same semantics as
 /// std::map equivalents (including perfect iterator stability, with ordering
@@ -71,8 +72,8 @@ private:
 
   // Indicates whether a given position in \ref map's value has been set, and
   // therefore whether our iterators should stop at a given location. We use
-  // this auxiliary structure rather than `pair<K, optionalt<V>>` in \ref map
-  // because this way we can more easily return a std::map-like
+  // this auxiliary structure rather than `pair<K, std::optional<V>>` in
+  // \ref map because this way we can more easily return a std::map-like
   // std::pair<const K, V> & from the iterator.
   std::vector<bool> value_set;
 
@@ -116,17 +117,21 @@ private:
   // operator++ that skips unset values.
   template <class UnderlyingIterator, class UnderlyingValue>
   class iterator_templatet
-    : public std::iterator<std::forward_iterator_tag, UnderlyingValue>
   {
-    // Type of the std::iterator support class we inherit
-    typedef std::iterator<std::forward_iterator_tag, UnderlyingValue>
-      base_typet;
     // Type of this template instantiation
     typedef iterator_templatet<UnderlyingIterator, UnderlyingValue> self_typet;
     // Type of our containing \ref dense_integer_mapt
     typedef dense_integer_mapt<K, V, KeyToDenseInteger> map_typet;
 
   public:
+    // These types are defined such that the class is compatible with being
+    // treated as an STL iterator. For this to work, they must not be renamed.
+    using iterator_category = std::forward_iterator_tag;
+    using value_type = UnderlyingValue;
+    using difference_type = std::ptrdiff_t;
+    using pointer = UnderlyingValue *;
+    using reference = UnderlyingValue &;
+
     iterator_templatet(UnderlyingIterator it, const map_typet &underlying_map)
       : underlying_iterator(it), underlying_map(underlying_map)
     {
@@ -153,11 +158,11 @@ private:
       underlying_iterator = advance(underlying_iterator);
       return *this;
     }
-    typename base_typet::reference operator*() const
+    reference operator*() const
     {
       return *underlying_iterator;
     }
-    typename base_typet::pointer operator->() const
+    pointer operator->() const
     {
       return &*underlying_iterator;
     }

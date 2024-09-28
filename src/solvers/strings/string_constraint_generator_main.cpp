@@ -166,7 +166,7 @@ string_constraint_generatort::add_axioms_for_constrain_characters(
   const auto &args = f.arguments();
   PRECONDITION(3 <= args.size() && args.size() <= 5);
   PRECONDITION(args[2].type().id() == ID_string);
-  PRECONDITION(args[2].id() == ID_constant);
+  PRECONDITION(args[2].is_constant());
 
   const array_string_exprt s = array_pool.find(args[1], args[0]);
   const irep_idt &char_set_string = to_constant_expr(args[2]).get_value();
@@ -192,7 +192,8 @@ static irep_idt get_function_name(const function_application_exprt &expr)
   return to_symbol_expr(name).get_identifier();
 }
 
-optionalt<exprt> string_constraint_generatort::make_array_pointer_association(
+std::optional<exprt>
+string_constraint_generatort::make_array_pointer_association(
   const exprt &return_code,
   const function_application_exprt &expr)
 {
@@ -365,7 +366,7 @@ string_constraint_generatort::add_axioms_for_char_literal(
   {
     const string_constantt &s = to_string_constant(
       to_binary_expr(to_unary_expr(to_unary_expr(arg).op()).op()).op0());
-    const std::string &sval = id2string(s.get_value());
+    const std::string &sval = id2string(s.value());
     CHECK_RETURN(sval.size() == 1);
     return {from_integer(unsigned(sval[0]), arg.type()), {}};
   }

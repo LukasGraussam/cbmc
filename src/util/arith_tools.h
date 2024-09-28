@@ -12,7 +12,6 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include "invariant.h"
 #include "mp_arith.h"
-#include "optional.h"
 #include "std_expr.h"
 
 #include <limits>
@@ -37,15 +36,15 @@ struct numeric_castt final
 template <>
 struct numeric_castt<mp_integer> final
 {
-  optionalt<mp_integer> operator()(const exprt &expr) const
+  std::optional<mp_integer> operator()(const exprt &expr) const
   {
-    if(expr.id() != ID_constant)
+    if(!expr.is_constant())
       return {};
     else
       return operator()(to_constant_expr(expr));
   }
 
-  optionalt<mp_integer> operator()(const constant_exprt &expr) const
+  std::optional<mp_integer> operator()(const constant_exprt &expr) const
   {
     mp_integer out;
     if(to_integer(expr, out))
@@ -79,7 +78,7 @@ private:
 
 public:
   // Conversion from mp_integer to integral type T
-  optionalt<T> operator()(const mp_integer &mpi) const
+  std::optional<T> operator()(const mp_integer &mpi) const
   {
     static_assert(
       std::numeric_limits<T>::max() <=
@@ -94,25 +93,25 @@ public:
       // to_long converts to long long which is the largest signed numeric type
       return static_cast<T>(get_val(mpi));
     else
-      return {};
+      return std::nullopt;
   }
 
   // Conversion from expression
-  optionalt<T> operator()(const exprt &expr) const
+  std::optional<T> operator()(const exprt &expr) const
   {
-    if(expr.id() == ID_constant)
+    if(expr.is_constant())
       return numeric_castt<T>{}(to_constant_expr(expr));
     else
-      return {};
+      return std::nullopt;
   }
 
   // Conversion from expression
-  optionalt<T> operator()(const constant_exprt &expr) const
+  std::optional<T> operator()(const constant_exprt &expr) const
   {
     if(auto mpi_opt = numeric_castt<mp_integer>{}(expr))
       return numeric_castt<T>{}(*mpi_opt);
     else
-      return {};
+      return std::nullopt;
   }
 };
 
@@ -122,7 +121,7 @@ public:
 /// \return optional integer of type Target if conversion is possible, empty
 ///   optional otherwise.
 template <typename Target>
-optionalt<Target> numeric_cast(const exprt &arg)
+std::optional<Target> numeric_cast(const exprt &arg)
 {
   return numeric_castt<Target>{}(arg);
 }

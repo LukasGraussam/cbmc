@@ -74,7 +74,7 @@ exprt remove_const_function_pointerst::replace_const_symbols(
     {
       const symbolt &symbol =
         symbol_table.lookup_ref(to_symbol_expr(expression).get_identifier());
-      if(symbol.type.id()!=ID_code)
+      if(symbol.type.id() != ID_code && symbol.value.is_not_nil())
       {
         const exprt &symbol_value=symbol.value;
         return replace_const_symbols(symbol_value);
@@ -168,7 +168,7 @@ bool remove_const_function_pointerst::try_resolve_function_call(
       resolved=false;
     }
   }
-  else if(simplified_expr.id()==ID_constant)
+  else if(simplified_expr.is_constant())
   {
     if(simplified_expr.is_zero())
     {
@@ -470,8 +470,9 @@ bool remove_const_function_pointerst::try_resolve_index_value(
   bool resolved=try_resolve_expression(expr, index_value_expressions, is_const);
   if(resolved)
   {
-    if(index_value_expressions.size()==1 &&
-       index_value_expressions.front().id()==ID_constant)
+    if(
+      index_value_expressions.size() == 1 &&
+      index_value_expressions.front().is_constant())
     {
       const constant_exprt &constant_expr=
         to_constant_expr(index_value_expressions.front());
@@ -799,7 +800,8 @@ bool remove_const_function_pointerst::is_const_type(const typet &type) const
 exprt remove_const_function_pointerst::get_component_value(
   const struct_exprt &struct_expr, const member_exprt &member_expr)
 {
-  const struct_typet &struct_type=to_struct_type(ns.follow(struct_expr.type()));
+  const struct_typet &struct_type =
+    ns.follow_tag(to_struct_tag_type(struct_expr.type()));
   size_t component_number=
     struct_type.component_number(member_expr.get_component_name());
 

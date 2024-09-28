@@ -6,7 +6,11 @@ where taken at the time they were, so that future maintainers
 can more easily identify constraints that shaped the architecture
 of the system and the surrounding infrastructure.
 
+## Symex ready goto form
+\subpage symex-ready-goto
+
 ## Release & Packaging
 
 * \subpage release-process
 * \subpage homebrew-tap-instructions
+* \subpage cpp-api-and-modularisation

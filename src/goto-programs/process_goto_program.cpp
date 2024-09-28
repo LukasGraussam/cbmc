@@ -23,11 +23,12 @@ Author: Martin Brain, martin.brain@cs.ox.ac.uk
 #include <goto-programs/remove_function_pointers.h>
 #include <goto-programs/remove_returns.h>
 #include <goto-programs/remove_vector.h>
+#include <goto-programs/rewrite_rw_ok.h>
 #include <goto-programs/rewrite_union.h>
 #include <goto-programs/string_abstraction.h>
-#include <goto-programs/string_instrumentation.h>
 
-#include <ansi-c/goto_check_c.h>
+#include <ansi-c/goto-conversion/goto_check_c.h>
+#include <ansi-c/goto-conversion/string_instrumentation.h>
 
 #include "goto_check.h"
 
@@ -44,7 +45,7 @@ bool process_goto_program(
                << messaget::eom;
   remove_function_pointers(log.get_message_handler(), goto_model, false);
 
-  mm_io(goto_model);
+  mm_io(goto_model, log.get_message_handler());
 
   // instrument library preconditions
   instrument_preconditions(goto_model);
@@ -69,6 +70,9 @@ bool process_goto_program(
 
   if(options.get_bool_option("rewrite-union"))
     rewrite_union(goto_model);
+
+  if(options.get_bool_option("rewrite-rw-ok"))
+    rewrite_rw_ok(goto_model);
 
   // add generic checks
   log.status() << "Generic Property Instrumentation" << messaget::eom;

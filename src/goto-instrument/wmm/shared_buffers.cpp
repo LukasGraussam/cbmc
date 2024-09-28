@@ -939,14 +939,12 @@ bool shared_bufferst::is_buffered(
 {
   const irep_idt &identifier=symbol_expr.get_identifier();
 
-  if(identifier==CPROVER_PREFIX "alloc" ||
-     identifier==CPROVER_PREFIX "alloc_size" ||
-     identifier=="stdin" ||
-     identifier=="stdout" ||
-     identifier=="stderr" ||
-     identifier=="sys_nerr" ||
-     has_prefix(id2string(identifier), "__unbuffered_") ||
-     has_prefix(id2string(identifier), "__CPROVER"))
+  if(
+    identifier == CPROVER_PREFIX "alloc" ||
+    identifier == CPROVER_PREFIX "alloc_size" || identifier == "stdin" ||
+    identifier == "stdout" || identifier == "stderr" ||
+    identifier == "sys_nerr" || identifier.starts_with("__unbuffered_") ||
+    identifier.starts_with("__CPROVER"))
     return false; // not buffered
 
   const symbolt &symbol=ns.lookup(identifier);
@@ -1023,12 +1021,11 @@ void shared_bufferst::affected_by_delay(
         ns,
         value_sets,
         gf_entry.first,
-        i_it
+        i_it,
 #ifdef LOCAL_MAY
-        ,
-        local_may
+        local_may,
 #endif
-      ); // NOLINT(whitespace/parens)
+        message.get_message_handler()); // NOLINT(whitespace/parens)
       for(const auto &w_entry : rw_set.w_entries)
       {
         for(const auto &r_entry : rw_set.r_entries)
@@ -1090,12 +1087,12 @@ void shared_bufferst::cfg_visitort::weak_memory(
           ns,
           value_sets,
           function_id,
-          i_it
+          i_it,
 #ifdef LOCAL_MAY
-          ,
-          local_may
+          local_may,
 #endif
-        ); // NOLINT(whitespace/parens)
+          shared_buffers.message
+            .get_message_handler()); // NOLINT(whitespace/parens)
 
         if(rw_set.empty())
           continue;

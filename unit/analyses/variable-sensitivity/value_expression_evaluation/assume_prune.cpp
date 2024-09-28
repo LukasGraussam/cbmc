@@ -33,7 +33,7 @@ static void ASSUME_TRUE(
   auto assumption = env.do_assume(binary_relation_exprt(x, id, y), ns);
 
   REQUIRE(assumption.id() != ID_nil);
-  REQUIRE(assumption.type().id() == ID_bool);
+  REQUIRE(assumption.is_boolean());
   REQUIRE(assumption.is_true());
 }
 
@@ -338,7 +338,8 @@ SCENARIO(
     {
       ASSUME_TRUE(x, ID_lt, y, environment, ns);
 
-      EXPECT_RESULT(x, min_exprt(type), val5, y, val1, val5, environment, ns);
+      EXPECT_RESULT(
+        x, min_value_exprt(type), val5, y, val1, val5, environment, ns);
     }
   }
 
@@ -352,7 +353,8 @@ SCENARIO(
     {
       ASSUME_TRUE(x, ID_lt, y, environment, ns);
 
-      EXPECT_RESULT(x, val1, val5, y, val1, max_exprt(type), environment, ns);
+      EXPECT_RESULT(
+        x, val1, val5, y, val1, max_value_exprt(type), environment, ns);
     }
   }
 

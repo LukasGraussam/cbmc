@@ -65,6 +65,7 @@ public:
 
   virtual void typecheck()=0;
   virtual void typecheck_expr(exprt &expr);
+  virtual void typecheck_spec_assigns(exprt::operandst &targets);
 
 protected:
   symbol_table_baset &symbol_table;
@@ -160,7 +161,6 @@ protected:
   /// is found in expr.
   virtual void check_was_freed(const exprt &expr, std::string &clause_type);
 
-  virtual void typecheck_spec_assigns(exprt::operandst &targets);
   virtual void typecheck_spec_frees(exprt::operandst &targets);
   virtual void typecheck_conditional_targets(
     exprt::operandst &targets,
@@ -196,7 +196,7 @@ protected:
   virtual void typecheck_expr_binary_arithmetic(exprt &expr);
   virtual void typecheck_expr_shifts(shift_exprt &expr);
   virtual void typecheck_expr_pointer_arithmetic(exprt &expr);
-  virtual void typecheck_arithmetic_pointer(const exprt &expr);
+  virtual void typecheck_arithmetic_pointer(exprt &expr);
   virtual void typecheck_expr_binary_boolean(exprt &expr);
   virtual void typecheck_expr_trinary(if_exprt &expr);
   virtual void typecheck_expr_address_of(exprt &expr);
@@ -228,13 +228,15 @@ protected:
     const irep_idt &arith_op);
   exprt
   typecheck_saturating_arithmetic(const side_effect_expr_function_callt &expr);
-  virtual optionalt<symbol_exprt> typecheck_gcc_polymorphic_builtin(
+  virtual std::optional<symbol_exprt> typecheck_gcc_polymorphic_builtin(
     const irep_idt &identifier,
     const exprt::operandst &arguments,
     const source_locationt &source_location);
   virtual code_blockt instantiate_gcc_polymorphic_builtin(
     const irep_idt &identifier,
     const symbol_exprt &function_symbol);
+  virtual std::optional<symbol_exprt>
+  typecheck_shadow_memory_builtin(const side_effect_expr_function_callt &expr);
   virtual exprt
   typecheck_shuffle_vector(const side_effect_expr_function_callt &expr);
   void disallow_subexpr_by_id(
@@ -247,6 +249,8 @@ protected:
   virtual void make_constant_index(exprt &expr);
 
   virtual bool gcc_types_compatible_p(const typet &, const typet &);
+
+  virtual bool builtin_factory(const irep_idt &);
 
   // types
   virtual void typecheck_type(typet &type);

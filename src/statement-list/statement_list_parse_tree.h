@@ -15,6 +15,8 @@ Author: Matthias Weiss, matthias.weiss@diffblue.com
 #include <util/std_code_base.h>
 #include <util/std_expr.h>
 
+#include <list>
+
 /// Intermediate representation of a parsed Statement List file before
 /// converting it into a goto program. Contains all data structures that are
 /// necessary for describing Statement List functions and function blocks.
@@ -31,7 +33,7 @@ public:
     /// Representation of the variable, including identifier and type.
     symbol_exprt variable;
     /// Optional default value of the variable.
-    optionalt<exprt> default_value;
+    std::optional<exprt> default_value;
 
     /// Creates a new. variable declaration.
     /// \param symbol: The variable, including type and name.
@@ -58,7 +60,7 @@ public:
   /// and may contain zero or more instructions.
   struct networkt
   {
-    optionalt<std::string> title;
+    std::optional<std::string> title;
     instructionst instructions;
 
     /// Sets the title of the network to a specific value.

@@ -1,5 +1,9 @@
 cmake_minimum_required(VERSION 3.8)
 
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED true)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 # Compile with /usr/bin/clang on MacOS
 # See https://github.com/diffblue/cbmc/issues/4956
 #
@@ -40,10 +44,13 @@ endif()
 # filenames)
 file(
   STRINGS src/config.inc CBMC_VERSION
-  REGEX "CBMC_VERSION = (.*)")
-string(REGEX REPLACE "CBMC_VERSION = (.*)" "\\1" CBMC_VERSION ${CBMC_VERSION})
+  REGEX "CBMC_VERSION = ([0-9.]+).*")
+string(REGEX REPLACE "CBMC_VERSION = ([0-9.]+).*" "\\1" CBMC_VERSION ${CBMC_VERSION})
+message(STATUS "Building CBMC version ${CBMC_VERSION}")
 
 project(CBMC VERSION ${CBMC_VERSION})
+
+set(CBMC_ROOT_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 # when config.inc changes we’ll need to reconfigure to check if the version changed
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/config.inc")
@@ -64,15 +71,22 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR
-   "${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang" OR
-   "${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU"
-)
+if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
     #   Ensure NDEBUG is not set for release builds
     set(CMAKE_CXX_FLAGS_RELEASE "-O2")
     set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
     #   Enable lots of warnings
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wpedantic -Werror -Wno-deprecated-declarations -Wswitch-enum")
+    set(CMAKE_CXX_FLAGS
+        "${CMAKE_CXX_FLAGS} -Wall -Wpedantic -Werror -Wswitch-enum \
+         -Wno-deprecated-declarations -Wno-maybe-uninitialized")
+elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR
+       "${CMAKE_CXX_COMPILER_ID}" STREQUAL "AppleClang")
+    #   Ensure NDEBUG is not set for release builds
+    set(CMAKE_CXX_FLAGS_RELEASE "-O2")
+    set(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O2 -g")
+    #   Enable lots of warnings
+    set(CMAKE_CXX_FLAGS
+        "${CMAKE_CXX_FLAGS} -Wall -Wpedantic -Werror -Wswitch-enum -Wno-deprecated-declarations")
 elseif("${CMAKE_CXX_COMPILER_ID}" STREQUAL "MSVC")
     # This would be the place to enable warnings for Windows builds, although
     # config.inc doesn't seem to do that currently
@@ -157,6 +171,8 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR
               "$<TARGET_FILE:goto-cc>"
               "$<TARGET_FILE:goto-diff>"
               "$<TARGET_FILE:goto-instrument>"
+              "$<TARGET_FILE:goto-inspect>"
+              "$<TARGET_FILE:goto-synthesizer>"
               "$<TARGET_FILE:janalyzer>"
               "$<TARGET_FILE:jbmc>"
               "$<TARGET_FILE:jdiff>"
@@ -181,8 +197,9 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang" OR
 endif()
 
 function(cprover_default_properties)
-    set(CBMC_CXX_STANDARD 11)
-    set(CBMC_CXX_STANDARD_REQUIRED true)
+    set(CBMC_CXX_STANDARD ${CMAKE_CXX_STANDARD})
+    set(CBMC_CXX_STANDARD_REQUIRED ${CMAKE_CXX_STANDARD_REQUIRED})
+    set(CBMC_CXX_EXTENSIONS ${CMAKE_CXX_EXTENSIONS})
     set(CBMC_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY
             "Developer ID Application: Daniel Kroening")
 
@@ -194,7 +211,9 @@ function(cprover_default_properties)
      XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY ${CBMC_XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY})
 endfunction()
 
-if(CMAKE_SYSTEM_NAME STREQUAL Linux)
+if(CMAKE_SYSTEM_NAME STREQUAL Linux AND
+    (CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64" OR
+     CMAKE_SYSTEM_PROCESSOR STREQUAL "i386"))
 set(WITH_MEMORY_ANALYZER_DEFAULT ON)
 else()
 set(WITH_MEMORY_ANALYZER_DEFAULT OFF)
@@ -215,6 +234,7 @@ cprover_default_properties(
     cbmc
     cbmc-lib
     cpp
+    cprover-api-cpp
     cprover
     cprover-lib
     crangler
@@ -222,20 +242,24 @@ cprover_default_properties(
     driver
     goto-analyzer
     goto-analyzer-lib
+    goto-bmc
     goto-cc
     goto-cc-lib
     goto-checker
     goto-diff
     goto-diff-lib
+    goto-inspect
     goto-harness
     goto-instrument
     goto-instrument-lib
     goto-programs
     goto-symex
-    jsil
+    goto-synthesizer
+    goto-synthesizer-lib
     json
     json-symtab-language
     langapi
+    lib-unit
     linking
     pointer-analysis
     solvers

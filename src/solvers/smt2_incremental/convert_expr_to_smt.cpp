@@ -1,5 +1,4 @@
 // Author: Diffblue Ltd.
-
 #include <util/arith_tools.h>
 #include <util/bitvector_expr.h>
 #include <util/byte_operators.h>
@@ -7,7 +6,6 @@
 #include <util/config.h>
 #include <util/expr.h>
 #include <util/expr_cast.h>
-#include <util/expr_util.h>
 #include <util/floatbv_expr.h>
 #include <util/mathematical_expr.h>
 #include <util/pointer_expr.h>
@@ -22,8 +20,10 @@
 #include <solvers/smt2_incremental/theories/smt_bit_vector_theory.h>
 #include <solvers/smt2_incremental/theories/smt_core_theory.h>
 
+#include <algorithm>
 #include <functional>
 #include <numeric>
+#include <stack>
 
 /// Post order visitation is used in order to construct the the smt terms bottom
 /// upwards without using recursion to traverse the input `exprt`. Therefore
@@ -34,8 +34,7 @@
 ///   * avoiding the deeply nested call stacks associated with recursion.
 ///   * supporting wider scope for the conversion of specific types of `exprt`,
 ///     without inflating the parameter list / scope for all conversions.
-using sub_expression_mapt =
-  std::unordered_map<exprt, smt_termt, irep_full_hash>;
+using sub_expression_mapt = std::unordered_map<exprt, smt_termt, irep_hash>;
 
 /// \brief Converts operator expressions with 2 or more operands to terms
 ///   expressed as binary operator application.
@@ -164,6 +163,10 @@ extension_for_type(const typet &type)
     return smt_bit_vector_theoryt::sign_extend;
   if(can_cast_type<unsignedbv_typet>(type))
     return smt_bit_vector_theoryt::zero_extend;
+  if(can_cast_type<bv_typet>(type))
+    return smt_bit_vector_theoryt::zero_extend;
+  if(can_cast_type<pointer_typet>(type))
+    return smt_bit_vector_theoryt::zero_extend;
   UNREACHABLE;
 }
 
@@ -202,7 +205,7 @@ struct sort_based_cast_to_bit_vector_convertert final
   const smt_termt &from_term;
   const typet &from_type;
   const bitvector_typet &to_type;
-  optionalt<smt_termt> result;
+  std::optional<smt_termt> result;
 
   sort_based_cast_to_bit_vector_convertert(
     const smt_termt &from_term,
@@ -295,7 +298,7 @@ static smt_termt convert_expr_to_smt(
 struct sort_based_literal_convertert : public smt_sort_const_downcast_visitort
 {
   const constant_exprt &member_input;
-  optionalt<smt_termt> result;
+  std::optional<smt_termt> result;
 
   explicit sort_based_literal_convertert(const constant_exprt &input)
     : member_input{input}
@@ -325,7 +328,7 @@ struct sort_based_literal_convertert : public smt_sort_const_downcast_visitort
 
 static smt_termt convert_expr_to_smt(const constant_exprt &constant_literal)
 {
-  if(is_null_pointer(constant_literal))
+  if(constant_literal.is_null_pointer())
   {
     const size_t bit_width =
       type_checked_cast<pointer_typet>(constant_literal.type()).get_width();
@@ -587,7 +590,7 @@ static smt_termt convert_relational_to_smt(
     binary_relation.pretty());
 }
 
-static optionalt<smt_termt> try_relational_conversion(
+static std::optional<smt_termt> try_relational_conversion(
   const exprt &expr,
   const sub_expression_mapt &converted)
 {
@@ -852,15 +855,6 @@ static smt_termt convert_expr_to_smt(
   }
 }
 
-#ifndef CPROVER_INVARIANT_DO_NOT_CHECK
-static mp_integer power2(unsigned exponent)
-{
-  mp_integer result;
-  result.setPower2(exponent);
-  return result;
-}
-#endif
-
 /// \details
 /// This conversion constructs a bit vector representation of the memory
 /// address. This address is composed of 2 concatenated bit vector components.
@@ -882,16 +876,23 @@ static smt_termt convert_expr_to_smt(
     object != object_map.end(),
     "Objects should be tracked before converting their address to SMT terms");
   const std::size_t object_id = object->second.unique_id;
-  INVARIANT(
-    object_id < power2(config.bv_encoding.object_bits),
-    "There should be sufficient bits to encode unique object identifier.");
+  const std::size_t object_bits = config.bv_encoding.object_bits;
+  const std::size_t max_objects = std::size_t(1) << object_bits;
+  if(object_id >= max_objects)
+  {
+    throw analysis_exceptiont{
+      "too many addressed objects: maximum number of objects is set to 2^n=" +
+      std::to_string(max_objects) + " (with n=" + std::to_string(object_bits) +
+      "); " +
+      "use the `--object-bits n` option to increase the maximum number"};
+  }
   const smt_termt object_bit_vector =
-    smt_bit_vector_constant_termt{object_id, config.bv_encoding.object_bits};
+    smt_bit_vector_constant_termt{object_id, object_bits};
   INVARIANT(
-    type->get_width() > config.bv_encoding.object_bits,
+    type->get_width() > object_bits,
     "Pointer should be wider than object_bits in order to allow for offset "
     "encoding.");
-  const size_t offset_bits = type->get_width() - config.bv_encoding.object_bits;
+  const size_t offset_bits = type->get_width() - object_bits;
   if(
     const auto symbol =
       expr_try_dynamic_cast<symbol_exprt>(address_of.object()))
@@ -947,6 +948,9 @@ static smt_termt convert_to_smt_shift(
   INVARIANT(
     first_bit_vector_sort && second_bit_vector_sort,
     "Shift expressions are expected to have bit vector operands.");
+  INVARIANT(
+    shift.type() == shift.op0().type(),
+    "Shift expression type must be equals to first operand type.");
   const std::size_t first_width = first_bit_vector_sort->bit_width();
   const std::size_t second_width = second_bit_vector_sort->bit_width();
   if(first_width > second_width)
@@ -958,10 +962,11 @@ static smt_termt convert_to_smt_shift(
   }
   else if(first_width < second_width)
   {
-    return factory(
+    const auto result = factory(
       extension_for_type(shift.op0().type())(second_width - first_width)(
         first_operand),
       second_operand);
+    return smt_bit_vector_theoryt::extract(first_width - 1, 0)(result);
   }
   else
   {
@@ -1105,10 +1110,14 @@ static smt_termt convert_expr_to_smt(
   const sub_expression_mapt &converted)
 {
   const smt_termt &from = converted.at(extract_bits.src());
-  const auto upper_value = numeric_cast<std::size_t>(extract_bits.upper());
-  const auto lower_value = numeric_cast<std::size_t>(extract_bits.lower());
-  if(upper_value && lower_value)
-    return smt_bit_vector_theoryt::extract(*upper_value, *lower_value)(from);
+  const auto bit_vector_sort =
+    convert_type_to_smt_sort(extract_bits.type()).cast<smt_bit_vector_sortt>();
+  INVARIANT(
+    bit_vector_sort, "Extract can only be applied to bit vector terms.");
+  const auto index_value = numeric_cast<std::size_t>(extract_bits.index());
+  if(index_value)
+    return smt_bit_vector_theoryt::extract(
+      *index_value + bit_vector_sort->bit_width() - 1, *index_value)(from);
   UNIMPLEMENTED_FEATURE(
     "Generation of SMT formula for extract bits expression: " +
     extract_bits.pretty());
@@ -1345,7 +1354,7 @@ static smt_termt convert_expr_to_smt(
     smt_bit_vector_theoryt::extract(offset_bits - 1, 0)(converted_expr);
   if(width > offset_bits)
   {
-    return smt_bit_vector_theoryt::zero_extend(width - offset_bits)(extract_op);
+    return smt_bit_vector_theoryt::sign_extend(width - offset_bits)(extract_op);
   }
   return extract_op;
 }
@@ -1456,8 +1465,26 @@ static smt_termt convert_expr_to_smt(
   const sub_expression_mapt &converted)
 {
   UNIMPLEMENTED_FEATURE(
-    "Generation of SMT formula for byte swap expression: " +
+    "Generation of SMT formula for count trailing zeros expression: " +
     count_trailing_zeros.pretty());
+}
+
+static smt_termt convert_expr_to_smt(
+  const prophecy_r_or_w_ok_exprt &prophecy_r_or_w_ok,
+  const sub_expression_mapt &converted)
+{
+  UNREACHABLE_BECAUSE(
+    "prophecy_r_or_w_ok expression should have been lowered by the decision "
+    "procedure before conversion to smt terms");
+}
+
+static smt_termt convert_expr_to_smt(
+  const prophecy_pointer_in_range_exprt &prophecy_pointer_in_range,
+  const sub_expression_mapt &converted)
+{
+  UNREACHABLE_BECAUSE(
+    "prophecy_pointer_in_range expression should have been lowered by the "
+    "decision procedure before conversion to smt terms");
 }
 
 static smt_termt dispatch_expr_to_smt_conversion(
@@ -1795,6 +1822,18 @@ static smt_termt dispatch_expr_to_smt_conversion(
   {
     return convert_expr_to_smt(*count_trailing_zeros, converted);
   }
+  if(
+    const auto prophecy_r_or_w_ok =
+      expr_try_dynamic_cast<prophecy_r_or_w_ok_exprt>(expr))
+  {
+    return convert_expr_to_smt(*prophecy_r_or_w_ok, converted);
+  }
+  if(
+    const auto prophecy_pointer_in_range =
+      expr_try_dynamic_cast<prophecy_pointer_in_range_exprt>(expr))
+  {
+    return convert_expr_to_smt(*prophecy_pointer_in_range, converted);
+  }
 
   UNIMPLEMENTED_FEATURE(
     "Generation of SMT formula for unknown kind of expression: " +
@@ -1842,6 +1881,46 @@ exprt lower_address_of_array_index(exprt expr)
   return expr;
 }
 
+/// Post order traversal where the children of a node are only visited if
+/// applying the \p filter function to that node returns true. Note that this
+/// function is based on the `visit_post_template` function.
+void filtered_visit_post(
+  const exprt &_expr,
+  std::function<bool(const exprt &)> filter,
+  std::function<void(const exprt &)> visitor)
+{
+  struct stack_entryt
+  {
+    const exprt *e;
+    bool operands_pushed;
+    explicit stack_entryt(const exprt *_e) : e(_e), operands_pushed(false)
+    {
+    }
+  };
+
+  std::stack<stack_entryt> stack;
+
+  stack.emplace(&_expr);
+
+  while(!stack.empty())
+  {
+    auto &top = stack.top();
+    if(top.operands_pushed)
+    {
+      visitor(*top.e);
+      stack.pop();
+    }
+    else
+    {
+      // do modification of 'top' before pushing in case 'top' isn't stable
+      top.operands_pushed = true;
+      if(filter(*top.e))
+        for(auto &op : top.e->operands())
+          stack.emplace(&op);
+    }
+  }
+}
+
 smt_termt convert_expr_to_smt(
   const exprt &expr,
   const smt_object_mapt &object_map,
@@ -1861,18 +1940,30 @@ smt_termt convert_expr_to_smt(
 #endif
   sub_expression_mapt sub_expression_map;
   const auto lowered_expr = lower_address_of_array_index(expr);
-  lowered_expr.visit_post([&](const exprt &expr) {
-    const auto find_result = sub_expression_map.find(expr);
-    if(find_result != sub_expression_map.cend())
-      return;
-    smt_termt term = dispatch_expr_to_smt_conversion(
-      expr,
-      sub_expression_map,
-      object_map,
-      pointer_sizes,
-      object_size,
-      is_dynamic_object);
-    sub_expression_map.emplace_hint(find_result, expr, std::move(term));
-  });
+  filtered_visit_post(
+    lowered_expr,
+    [](const exprt &expr) {
+      // Code values inside "address of" expressions do not need to be converted
+      // as the "address of" conversion only depends on the object identifier.
+      // Avoiding the conversion side steps a need to convert arbitrary code to
+      // SMT terms.
+      const auto address_of = expr_try_dynamic_cast<address_of_exprt>(expr);
+      if(!address_of)
+        return true;
+      return !can_cast_type<code_typet>(address_of->object().type());
+    },
+    [&](const exprt &expr) {
+      const auto find_result = sub_expression_map.find(expr);
+      if(find_result != sub_expression_map.cend())
+        return;
+      smt_termt term = dispatch_expr_to_smt_conversion(
+        expr,
+        sub_expression_map,
+        object_map,
+        pointer_sizes,
+        object_size,
+        is_dynamic_object);
+      sub_expression_map.emplace_hint(find_result, expr, std::move(term));
+    });
   return std::move(sub_expression_map.at(lowered_expr));
 }

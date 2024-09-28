@@ -24,8 +24,12 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <util/std_code.h>
 
 class annotated_pointer_constant_exprt;
-class qualifierst;
+class c_qualifierst;
 class namespacet;
+class r_or_w_ok_exprt;
+class pointer_in_range_exprt;
+class prophecy_r_or_w_ok_exprt;
+class prophecy_pointer_in_range_exprt;
 
 class expr2ct
 {
@@ -53,7 +57,7 @@ protected:
 
   virtual std::string convert_rec(
     const typet &src,
-    const qualifierst &qualifiers,
+    const c_qualifierst &qualifiers,
     const std::string &declarator);
 
   virtual std::string convert_struct_type(
@@ -70,12 +74,12 @@ protected:
 
   virtual std::string convert_array_type(
     const typet &src,
-    const qualifierst &qualifiers,
+    const c_qualifierst &qualifiers,
     const std::string &declarator_str);
 
   std::string convert_array_type(
     const typet &src,
-    const qualifierst &qualifiers,
+    const c_qualifierst &qualifiers,
     const std::string &declarator_str,
     bool inc_size_if_possible);
 
@@ -181,7 +185,7 @@ protected:
 
   /// Returns a string if \p src is a function with a known conversion, else
   /// returns nullopt.
-  optionalt<std::string> convert_function(const exprt &src);
+  std::optional<std::string> convert_function(const exprt &src);
   std::string convert_function(const exprt &src, const std::string &symbol);
 
   std::string convert_complex(
@@ -281,6 +285,12 @@ protected:
 
   std::string convert_conditional_target_group(const exprt &src);
   std::string convert_bitreverse(const bitreverse_exprt &src);
+
+  std::string convert_r_or_w_ok(const r_or_w_ok_exprt &src);
+  std::string convert_prophecy_r_or_w_ok(const prophecy_r_or_w_ok_exprt &src);
+  std::string convert_pointer_in_range(const pointer_in_range_exprt &src);
+  std::string
+  convert_prophecy_pointer_in_range(const prophecy_pointer_in_range_exprt &src);
 };
 
 #endif // CPROVER_ANSI_C_EXPR2C_CLASS_H

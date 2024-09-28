@@ -6,21 +6,17 @@ void __CPROVER_precondition(__CPROVER_bool precondition, const char *description
 void __CPROVER_postcondition(__CPROVER_bool assertion, const char *description);
 void __CPROVER_havoc_object(void *);
 void __CPROVER_havoc_slice(void *, __CPROVER_size_t);
-__CPROVER_bool __CPROVER_equal();
 __CPROVER_bool __CPROVER_same_object(const void *, const void *);
 __CPROVER_bool __CPROVER_is_invalid_pointer(const void *);
 _Bool __CPROVER_is_zero_string(const void *);
 __CPROVER_size_t __CPROVER_zero_string_length(const void *);
 __CPROVER_size_t __CPROVER_buffer_size(const void *);
-__CPROVER_bool __CPROVER_r_ok();
-__CPROVER_bool __CPROVER_w_ok();
-__CPROVER_bool __CPROVER_rw_ok();
 
 // experimental features for CHC encodings -- do not use
-__CPROVER_bool __CPROVER_is_list(); // a singly-linked null-terminated dynamically-allocated list
-__CPROVER_bool __CPROVER_is_dll();
-__CPROVER_bool __CPROVER_is_cyclic_dll();
-__CPROVER_bool __CPROVER_is_sentinel_dll();
+__CPROVER_bool __CPROVER_is_list(const void *); // a singly-linked null-terminated dynamically-allocated list
+__CPROVER_bool __CPROVER_is_dll(const void *);
+__CPROVER_bool __CPROVER_is_cyclic_dll(const void *);
+__CPROVER_bool __CPROVER_is_sentinel_dll(const void *, ...);
 __CPROVER_bool __CPROVER_is_cstring(const char *);
 __CPROVER_size_t __CPROVER_cstrlen(const char *);
 __CPROVER_bool __CPROVER_separate(const void *, const void *, ...);
@@ -44,8 +40,8 @@ void __CPROVER_observation_begin(); // LUGR: for wcnf option (fault localization
 void __CPROVER_observation_end(); // LUGR: for wcnf option (fault localization)
 
 // concurrency-related
-void __CPROVER_atomic_begin();
-void __CPROVER_atomic_end();
+void __CPROVER_atomic_begin(void);
+void __CPROVER_atomic_end(void);
 void __CPROVER_fence(const char *kind, ...);
 
 // contract-related functions
@@ -53,6 +49,8 @@ __CPROVER_bool __CPROVER_is_freeable(const void *mem);
 __CPROVER_bool __CPROVER_was_freed(const void *mem);
 __CPROVER_bool __CPROVER_is_fresh(const void *mem, __CPROVER_size_t size);
 __CPROVER_bool __CPROVER_obeys_contract(void (*)(void), void (*)(void));
+// same as pointer_in_range with experimental support in contracts
+__CPROVER_bool __CPROVER_pointer_in_range_dfcc(void *lb, void *ptr, void *ub);
 void __CPROVER_old(const void *);
 void __CPROVER_loop_entry(const void *);
 
@@ -60,7 +58,7 @@ void __CPROVER_loop_entry(const void *);
 __CPROVER_bool __CPROVER_LIVE_OBJECT(const void *);
 __CPROVER_bool __CPROVER_WRITEABLE_OBJECT(const void *);
 __CPROVER_size_t __CPROVER_POINTER_OBJECT(const void *);
-__CPROVER_ssize_t __CPROVER_POINTER_OFFSET(const void *);
+__CPROVER_size_t __CPROVER_POINTER_OFFSET(const void *);
 __CPROVER_size_t __CPROVER_OBJECT_SIZE(const void *);
 __CPROVER_bool __CPROVER_DYNAMIC_OBJECT(const void *);
 __CPROVER_bool __CPROVER_pointer_in_range(const void *, const void *, const void *);
@@ -125,21 +123,10 @@ void __CPROVER_array_replace(const void *dest, const void *src);
 void __CPROVER_array_set(const void *dest, ...);
 
 // k-induction
-void __CPROVER_k_induction_hint(unsigned min, unsigned max, 
-  unsigned step, unsigned loop_free);
+void __CPROVER_k_induction_hint(unsigned min, unsigned max, unsigned step, unsigned loop_free);
 
 // format string-related
 int __CPROVER_scanf(const char *, ...);
-
-// detect overflow
-__CPROVER_bool __CPROVER_overflow_minus();
-__CPROVER_bool __CPROVER_overflow_mult();
-__CPROVER_bool __CPROVER_overflow_plus();
-__CPROVER_bool __CPROVER_overflow_shl();
-__CPROVER_bool __CPROVER_overflow_unary_minus();
-
-// enumerations
-__CPROVER_bool __CPROVER_enum_is_in_range();
 
 // contracts
 void __CPROVER_assignable(void *ptr, __CPROVER_size_t size,

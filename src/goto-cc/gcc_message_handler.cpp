@@ -8,9 +8,7 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include "gcc_message_handler.h"
 
-#ifdef _MSC_VER
-#  include <util/unicode.h>
-#endif
+#include <util/unicode.h>
 
 #include <fstream> // IWYU pragma: keep
 #include <iostream>
@@ -55,8 +53,12 @@ void gcc_message_handlert::print(
       else
         out << column << ": ";
 
-      if(level == messaget::M_ERROR)
+      if(
+        level == messaget::M_ERROR ||
+        (level == messaget::M_WARNING && warnings_are_errors))
+      {
         out << string(messaget::red) << "error: ";
+      }
       else if(level == messaget::M_WARNING)
         out << string(messaget::bright_magenta) << "warning: ";
 
@@ -68,11 +70,8 @@ void gcc_message_handlert::print(
     const auto file_name = location.full_path();
     if(file_name.has_value() && !line.empty())
     {
-#ifdef _MSC_VER
-      std::ifstream in(widen(file_name.value()));
-#else
-      std::ifstream in(file_name.value());
-#endif
+      std::ifstream in(widen_if_needed(file_name.value()));
+
       if(in)
       {
         const auto line_number = std::stoull(id2string(line));

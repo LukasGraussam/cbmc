@@ -285,7 +285,7 @@ exprt smt2_parsert::quantifier_expression(irep_idt id)
 {
   auto binding = this->binding(id);
 
-  if(binding.second.type().id() != ID_bool)
+  if(!binding.second.is_boolean())
     throw error() << id << " expects a boolean term";
 
   return quantifier_exprt(id, binding.first, binding.second);
@@ -557,7 +557,7 @@ exprt smt2_parsert::function_application()
         if(smt2_tokenizer.get_buffer() == "named")
         {
           // 'named terms' must be Boolean
-          if(term.type().id() != ID_bool)
+          if(!term.is_boolean())
             throw error("named terms must be Boolean");
 
           if(next_token() == smt2_tokenizert::SYMBOL)
@@ -638,15 +638,14 @@ exprt smt2_parsert::function_application()
           if(op.size()!=1)
             throw error("extract takes one operand");
 
-          auto upper_e=from_integer(upper, integer_typet());
-          auto lower_e=from_integer(lower, integer_typet());
-
           if(upper<lower)
             throw error("extract got bad indices");
 
+          auto lower_e = from_integer(lower, integer_typet());
+
           unsignedbv_typet t(upper-lower+1);
 
-          return extractbits_exprt(op[0], upper_e, lower_e, t);
+          return extractbits_exprt(op[0], lower_e, t);
         }
         else if(id=="rotate_left" ||
                 id=="rotate_right" ||
@@ -742,7 +741,7 @@ exprt smt2_parsert::function_application()
           {
             // For now, we can only do this when
             // the source operand is a constant.
-            if(source_op.id() == ID_constant)
+            if(source_op.is_constant())
             {
               mp_integer significand, exponent;
 
@@ -1207,7 +1206,7 @@ void smt2_parsert::setup_expressions()
 
     // add the widths
     auto op_width = make_range(op).map(
-      [](const exprt &o) { return to_unsignedbv_type(o.type()).get_width(); });
+      [](const exprt &o) { return to_bitvector_type(o.type()).get_width(); });
 
     const std::size_t total_width =
       std::accumulate(op_width.begin(), op_width.end(), 0);
@@ -1242,7 +1241,7 @@ void smt2_parsert::setup_expressions()
     if(op.size() != 3)
       throw error("ite takes three operands");
 
-    if(op[0].type().id() != ID_bool)
+    if(!op[0].is_boolean())
       throw error("ite takes a boolean as first operand");
 
     if(op[1].type() != op[2].type())

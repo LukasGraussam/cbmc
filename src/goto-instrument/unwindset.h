@@ -13,10 +13,10 @@ Author: Daniel Kroening, kroening@kroening.com
 #define CPROVER_GOTO_INSTRUMENT_UNWINDSET_H
 
 #include <util/irep.h>
-#include <util/optional.h>
 
 #include <list>
 #include <map>
+#include <optional>
 #include <string>
 
 class abstract_goto_modelt;
@@ -43,7 +43,8 @@ public:
     message_handlert &message_handler);
 
   // queries
-  optionalt<unsigned> get_limit(const irep_idt &loop, unsigned thread_id) const;
+  std::optional<unsigned>
+  get_limit(const irep_idt &loop, unsigned thread_id) const;
 
   // read unwindset directives from a file
   void parse_unwindset_file(
@@ -53,16 +54,16 @@ public:
 protected:
   abstract_goto_modelt &goto_model;
 
-  optionalt<unsigned> global_limit;
+  std::optional<unsigned> global_limit;
 
   // Limit for all instances of a loop.
   // This may have 'no value'.
-  typedef std::map<irep_idt, optionalt<unsigned>> loop_mapt;
+  typedef std::map<irep_idt, std::optional<unsigned>> loop_mapt;
   loop_mapt loop_map;
 
   // separate limits per thread
   using thread_loop_mapt =
-    std::map<std::pair<irep_idt, unsigned>, optionalt<unsigned>>;
+    std::map<std::pair<irep_idt, unsigned>, std::optional<unsigned>>;
   thread_loop_mapt thread_loop_map;
 
   void parse_unwindset_one_loop(
@@ -76,10 +77,10 @@ protected:
   "(unwindset):"
 
 #define HELP_UNWINDSET                                                         \
-  " --show-loops                 show the loops in the program\n"              \
-  " --unwind nr                  unwind nr times\n"                            \
-  " --unwindset [T:]L:B,...      unwind loop L with a bound of B\n"            \
-  "                              (optionally restricted to thread T)\n"        \
-  "                              (use --show-loops to get the loop IDs)\n"
+  " {y--show-loops} \t show the loops in the program\n"                        \
+  " {y--unwind} {unr} \t unwind loops {unr} times\n"                           \
+  " {y--unwindset} [{uT}{y:}]{uL}{y:}{uB},... \t "                             \
+  "unwind loop {uL} with a bound of {uB} (optionally restricted to thread "    \
+  "{uT}) (use {y--show-loops} to get the loop IDs)\n"
 
 #endif // CPROVER_GOTO_INSTRUMENT_UNWINDSET_H

@@ -13,11 +13,10 @@ Date: August 2022
 #ifndef CPROVER_GOTO_INSTRUMENT_CONTRACTS_DYNAMIC_FRAMES_DFCC_CONTRACT_HANDLER_H
 #define CPROVER_GOTO_INSTRUMENT_CONTRACTS_DYNAMIC_FRAMES_DFCC_CONTRACT_HANDLER_H
 
-#include <goto-programs/goto_convert_class.h>
+#include <ansi-c/goto-conversion/goto_convert_class.h>
 
 #include <util/message.h>
 #include <util/namespace.h>
-#include <util/optional.h>
 #include <util/std_expr.h>
 
 #include "dfcc_contract_functions.h"
@@ -27,9 +26,10 @@ Date: August 2022
 class goto_modelt;
 class message_handlert;
 class dfcc_libraryt;
-class dfcc_utilst;
 class dfcc_instrumentt;
+class dfcc_lift_memory_predicatest;
 class dfcc_spec_functionst;
+class dfcc_contract_clauses_codegent;
 class code_with_contract_typet;
 class conditional_target_group_exprt;
 
@@ -67,10 +67,11 @@ public:
   dfcc_contract_handlert(
     goto_modelt &goto_model,
     message_handlert &message_handler,
-    dfcc_utilst &utils,
     dfcc_libraryt &library,
     dfcc_instrumentt &instrument,
-    dfcc_spec_functionst &spec_functions);
+    dfcc_lift_memory_predicatest &memory_predicates,
+    dfcc_spec_functionst &spec_functions,
+    dfcc_contract_clauses_codegent &contract_clauses_codegen);
 
   /// Adds instructions in `dest` modeling contract checking, assuming
   /// that `ret_t wrapper_id(params)` is the function receiving
@@ -99,27 +100,27 @@ public:
   const std::size_t get_assigns_clause_size(const irep_idt &contract_id);
 
   /// Searches for a symbol named "contract::contract_id" in the symbol table.
-  ///
-  /// If a symbol "contract::contract_id" was found and its type signature is
-  /// compatible with that of "contract_id" a reference to the symbol is
-  /// returned.
-  ///
-  /// If a symbol "contract::contract_id" was found but its type signature is
-  /// not compatible with that of "contract_id" an exception is thrown.
-  ///
-  /// If a symbol "contract::contract_id" was found, a fresh symbol representing
-  /// a contract with empty clauses is inserted in the symbol table and a
-  /// reference to that symbol is returned.
-  const symbolt &get_pure_contract_symbol(const irep_idt &contract_id);
+  /// If the "contract::contract_id" is found and \p function_id_opt is present,
+  /// type signature compatibility is checked between the contract and
+  /// the function, and an exception is thrown if they are incompatible.
+  /// If the symbol was not found and \p function_id_opt was provided,
+  /// the function is used as a template to derive a new default contract with
+  /// empty requires, empty assigns, empty frees, empty ensures clauses.
+  /// If the symbol was not found and \p function_id_opt was not provided, a
+  /// PRECONDITION is triggered.
+  const symbolt &get_pure_contract_symbol(
+    const irep_idt &contract_id,
+    const std::optional<irep_idt> function_id_opt = {});
 
 protected:
   goto_modelt &goto_model;
   message_handlert &message_handler;
   messaget log;
-  dfcc_utilst &utils;
   dfcc_libraryt &library;
   dfcc_instrumentt &instrument;
+  dfcc_lift_memory_predicatest &memory_predicates;
   dfcc_spec_functionst &spec_functions;
+  dfcc_contract_clauses_codegent &contract_clauses_codegen;
   namespacet ns;
 
   // Caches the functions generated from contracts

@@ -59,6 +59,7 @@ void code_contractst::check_apply_loop_contracts(
   const irep_idt &mode)
 {
   const auto loop_head_location = loop_head->source_location();
+  const auto loop_number = loop_end->loop_number;
 
   // Vector representing a (possibly multidimensional) decreases clause
   const auto &decreases_clause_exprs = decreases_clause.operands();
@@ -66,10 +67,6 @@ void code_contractst::check_apply_loop_contracts(
   // Temporary variables for storing the multidimensional decreases clause
   // at the start of and end of a loop body
   std::vector<symbol_exprt> old_decreases_vars, new_decreases_vars;
-
-  // replace bound variables by fresh instances
-  if(has_subexpr(invariant, ID_exists) || has_subexpr(invariant, ID_forall))
-    add_quantified_variable(symbol_table, invariant, mode);
 
   // instrument
   //
@@ -95,10 +92,12 @@ void code_contractst::check_apply_loop_contracts(
   //                        |    STEP:
   //                  --.   |      assert (initial_invariant_val);
   // loop assigns check |   |      in_base_case = false;
-  //  - not applicable   >=======  havoc (assigns_set);
-  // func assigns check |   |      assume (invariant_expr);
-  //  + deferred        |   `-     old_variant_val = decreases_clause_expr;
-  //                  --'      * HEAD:
+  //  - not applicable   >=======  in_loop_havoc_block = true;
+  // func assigns check |   |      havoc (assigns_set);
+  //  + deferred        |   |      in_loop_havoc_block = false;
+  //                  --'   |      assume (invariant_expr);
+  //                        `-     old_variant_val = decreases_clause_expr;
+  //                           * HEAD:
   // loop assigns check     ,-     ... eval guard ...
   //  + assertions added    |      if (!guard)
   // func assigns check     |        goto EXIT;
@@ -122,27 +121,27 @@ void code_contractst::check_apply_loop_contracts(
   //
   // Assertions for assigns clause checking are inserted in the loop body.
 
-  // an intermediate goto_program to store generated instructions
-  // to be inserted before the loop head
-  goto_programt pre_loop_head_instrs;
-
   // Process "loop_entry" history variables.
   // We find and replace all "__CPROVER_loop_entry" subexpressions in invariant.
-  std::map<exprt, exprt> history_var_map;
-  replace_history_parameter(
-    symbol_table,
-    invariant,
-    history_var_map,
-    loop_head_location,
-    mode,
-    pre_loop_head_instrs,
-    ID_loop_entry);
+  auto replace_history_result = replace_history_loop_entry(
+    symbol_table, invariant, loop_head_location, mode);
+  invariant.swap(replace_history_result.expression_after_replacement);
+  const auto &history_var_map = replace_history_result.parameter_to_history;
+  // an intermediate goto_program to store generated instructions
+  // to be inserted before the loop head
+  goto_programt &pre_loop_head_instrs =
+    replace_history_result.history_construction;
 
   // Create a temporary to track if we entered the loop,
   // i.e., the loop guard was satisfied.
   const auto entered_loop =
-    new_tmp_symbol(
-      bool_typet(), loop_head_location, mode, symbol_table, "__entered_loop")
+    get_fresh_aux_symbol(
+      bool_typet(),
+      id2string(loop_head_location.get_function()),
+      std::string(ENTERED_LOOP) + "__" + std::to_string(loop_number),
+      loop_head_location,
+      mode,
+      symbol_table)
       .symbol_expr();
   pre_loop_head_instrs.add(
     goto_programt::make_decl(entered_loop, loop_head_location));
@@ -152,8 +151,13 @@ void code_contractst::check_apply_loop_contracts(
   // Create a snapshot of the invariant so that we can check the base case,
   // if the loop is not vacuous and must be abstracted with contracts.
   const auto initial_invariant_val =
-    new_tmp_symbol(
-      bool_typet(), loop_head_location, mode, symbol_table, "__init_invariant")
+    get_fresh_aux_symbol(
+      bool_typet(),
+      id2string(loop_head_location.get_function()),
+      INIT_INVARIANT,
+      loop_head_location,
+      mode,
+      symbol_table)
       .symbol_expr();
   pre_loop_head_instrs.add(
     goto_programt::make_decl(initial_invariant_val, loop_head_location));
@@ -165,16 +169,22 @@ void code_contractst::check_apply_loop_contracts(
       initial_invariant_val, invariant};
     initial_invariant_value_assignment.add_source_location() =
       loop_head_location;
+
+    goto_convertt converter(symbol_table, log.get_message_handler());
     converter.goto_convert(
       initial_invariant_value_assignment, pre_loop_head_instrs, mode);
   }
 
   // Create a temporary variable to track base case vs inductive case
   // instrumentation of the loop.
-  const auto in_base_case =
-    new_tmp_symbol(
-      bool_typet(), loop_head_location, mode, symbol_table, "__in_base_case")
-      .symbol_expr();
+  const auto in_base_case = get_fresh_aux_symbol(
+                              bool_typet(),
+                              id2string(loop_head_location.get_function()),
+                              "__in_base_case",
+                              loop_head_location,
+                              mode,
+                              symbol_table)
+                              .symbol_expr();
   pre_loop_head_instrs.add(
     goto_programt::make_decl(in_base_case, loop_head_location));
   pre_loop_head_instrs.add(
@@ -206,14 +216,14 @@ void code_contractst::check_apply_loop_contracts(
     // and the inferred aliasing relation.
     try
     {
-      get_assigns(local_may_alias, loop, to_havoc);
+      infer_loop_assigns(local_may_alias, loop, to_havoc);
 
       // remove loop-local symbols from the inferred set
       cfg_info.erase_locals(to_havoc);
 
       // If the set contains pairs (i, a[i]),
       // we widen them to (i, __CPROVER_POINTER_OBJECT(a))
-      widen_assigns(to_havoc);
+      widen_assigns(to_havoc, ns);
 
       log.debug() << "No loop assigns clause provided. Inferred targets: {";
       // Add inferred targets to the loop assigns clause.
@@ -281,6 +291,8 @@ void code_contractst::check_apply_loop_contracts(
     assertion.add_source_location() = loop_head_location;
     assertion.add_source_location().set_comment(
       "Check loop invariant before entry");
+
+    goto_convertt converter(symbol_table, log.get_message_handler());
     converter.goto_convert(assertion, pre_loop_head_instrs, mode);
   }
 
@@ -292,8 +304,27 @@ void code_contractst::check_apply_loop_contracts(
     loop_head, add_pragma_disable_assigns_check(pre_loop_head_instrs));
 
   // Generate havocing code for assignment targets.
-  havoc_assigns_targetst havoc_gen(to_havoc, ns);
+  // ASSIGN in_loop_havoc_block = true;
+  // havoc (assigns_set);
+  // ASSIGN in_loop_havoc_block = false;
+  const auto in_loop_havoc_block =
+    get_fresh_aux_symbol(
+      bool_typet(),
+      id2string(loop_head_location.get_function()),
+      std::string(IN_LOOP_HAVOC_BLOCK) + +"__" + std::to_string(loop_number),
+      loop_head_location,
+      mode,
+      symbol_table)
+      .symbol_expr();
+  pre_loop_head_instrs.add(
+    goto_programt::make_decl(in_loop_havoc_block, loop_head_location));
+  pre_loop_head_instrs.add(
+    goto_programt::make_assignment(in_loop_havoc_block, true_exprt{}));
+  havoc_assigns_targetst havoc_gen(
+    to_havoc, symbol_table, log.get_message_handler(), mode);
   havoc_gen.append_full_havoc_code(loop_head_location, pre_loop_head_instrs);
+  pre_loop_head_instrs.add(
+    goto_programt::make_assignment(in_loop_havoc_block, false_exprt{}));
 
   // Insert the second block of pre_loop_head_instrs: the havocing code.
   // We do not `add_pragma_disable_assigns_check`,
@@ -307,6 +338,8 @@ void code_contractst::check_apply_loop_contracts(
   {
     code_assumet assumption{invariant};
     assumption.add_source_location() = loop_head_location;
+
+    goto_convertt converter(symbol_table, log.get_message_handler());
     converter.goto_convert(assumption, pre_loop_head_instrs, mode);
   }
 
@@ -315,14 +348,26 @@ void code_contractst::check_apply_loop_contracts(
   for(const auto &clause : decreases_clause.operands())
   {
     const auto old_decreases_var =
-      new_tmp_symbol(clause.type(), loop_head_location, mode, symbol_table)
+      get_fresh_aux_symbol(
+        clause.type(),
+        id2string(loop_head_location.get_function()),
+        "tmp_cc",
+        loop_head_location,
+        mode,
+        symbol_table)
         .symbol_expr();
     pre_loop_head_instrs.add(
       goto_programt::make_decl(old_decreases_var, loop_head_location));
     old_decreases_vars.push_back(old_decreases_var);
 
     const auto new_decreases_var =
-      new_tmp_symbol(clause.type(), loop_head_location, mode, symbol_table)
+      get_fresh_aux_symbol(
+        clause.type(),
+        id2string(loop_head_location.get_function()),
+        "tmp_cc",
+        loop_head_location,
+        mode,
+        symbol_table)
         .symbol_expr();
     pre_loop_head_instrs.add(
       goto_programt::make_decl(new_decreases_var, loop_head_location));
@@ -350,6 +395,8 @@ void code_contractst::check_apply_loop_contracts(
       code_assignt old_decreases_assignment{
         old_decreases_vars[i], decreases_clause_exprs[i]};
       old_decreases_assignment.add_source_location() = loop_head_location;
+
+      goto_convertt converter(symbol_table, log.get_message_handler());
       converter.goto_convert(
         old_decreases_assignment, pre_loop_head_instrs, mode);
     }
@@ -398,6 +445,8 @@ void code_contractst::check_apply_loop_contracts(
     assertion.add_source_location() = loop_head_location;
     assertion.add_source_location().set_comment(
       "Check that loop invariant is preserved");
+
+    goto_convertt converter(symbol_table, log.get_message_handler());
     converter.goto_convert(assertion, pre_loop_end_instrs, mode);
   }
 
@@ -410,6 +459,8 @@ void code_contractst::check_apply_loop_contracts(
       code_assignt new_decreases_assignment{
         new_decreases_vars[i], decreases_clause_exprs[i]};
       new_decreases_assignment.add_source_location() = loop_head_location;
+
+      goto_convertt converter(symbol_table, log.get_message_handler());
       converter.goto_convert(
         new_decreases_assignment, pre_loop_end_instrs, mode);
     }
@@ -422,6 +473,8 @@ void code_contractst::check_apply_loop_contracts(
     monotonic_decreasing_assertion.add_source_location() = loop_head_location;
     monotonic_decreasing_assertion.add_source_location().set_comment(
       "Check decreases clause on loop iteration");
+
+    goto_convertt converter(symbol_table, log.get_message_handler());
     converter.goto_convert(
       monotonic_decreasing_assertion, pre_loop_end_instrs, mode);
 
@@ -444,7 +497,8 @@ void code_contractst::check_apply_loop_contracts(
   loop_end->turn_into_assume();
   loop_end->condition_nonconst() = boolean_negate(loop_end->condition());
 
-  std::set<goto_programt::targett> seen_targets;
+  std::set<goto_programt::targett, goto_programt::target_less_than>
+    seen_targets;
   // Find all exit points of the loop, make temporary variables `DEAD`,
   // and check that step case was checked for non-vacuous loops.
   for(const auto &t : loop)
@@ -513,23 +567,19 @@ static void generate_contract_constraints(
   goto_programt &program,
   const source_locationt &location)
 {
-  if(
-    has_subexpr(instantiated_clause, ID_exists) ||
-    has_subexpr(instantiated_clause, ID_forall))
-  {
-    add_quantified_variable(symbol_table, instantiated_clause, mode);
-  }
-
   goto_programt constraint;
   if(location.get_property_class() == ID_assume)
   {
-    converter.goto_convert(code_assumet(instantiated_clause), constraint, mode);
+    code_assumet assumption(instantiated_clause);
+    assumption.add_source_location() = location;
+    converter.goto_convert(assumption, constraint, mode);
   }
   else
   {
-    converter.goto_convert(code_assertt(instantiated_clause), constraint, mode);
+    code_assertt assertion(instantiated_clause);
+    assertion.add_source_location() = location;
+    converter.goto_convert(assertion, constraint, mode);
   }
-  constraint.instructions.back().source_location_nonconst() = location;
   is_fresh_update(constraint);
   throw_on_unsupported(constraint);
   program.destructive_append(constraint);
@@ -549,11 +599,9 @@ get_contract(const irep_idt &function, const namespacet &ns)
   }
 
   const auto &type = to_code_with_contract_type(contract_sym->type);
-  if(type != function_symbol.type)
-  {
-    throw invalid_input_exceptiont(
-      "Contract of '" + function_str + "' has different signature.");
-  }
+  DATA_INVARIANT(
+    type == function_symbol.type,
+    "front-end should have rejected re-declarations with a different type");
 
   return type;
 }
@@ -583,7 +631,7 @@ void code_contractst::apply_function_contract(
   exprt::operandst instantiation_values;
 
   // keep track of the call's return expression to make it nondet later
-  optionalt<exprt> call_ret_opt = {};
+  std::optional<exprt> call_ret_opt = {};
 
   // if true, the call return variable variable was created during replacement
   bool call_ret_is_fresh_var = false;
@@ -606,7 +654,9 @@ void code_contractst::apply_function_contract(
       // If the function does return a value, but the return value is
       // disregarded, check if the postcondition includes the return value.
       if(std::any_of(
-           type.ensures().begin(), type.ensures().end(), [](const exprt &e) {
+           type.c_ensures().begin(),
+           type.c_ensures().end(),
+           [](const exprt &e) {
              return has_symbol_expr(
                to_lambda_expr(e).where(), CPROVER_PREFIX "return_value", true);
            }))
@@ -645,12 +695,13 @@ void code_contractst::apply_function_contract(
   // new program where all contract-derived instructions are added
   goto_programt new_program;
 
-  is_fresh_replacet is_fresh(*this, log, target_function);
+  is_fresh_replacet is_fresh(
+    goto_model, log.get_message_handler(), target_function);
   is_fresh.create_declarations();
   is_fresh.add_memory_map_decl(new_program);
 
   // Generate: assert(requires)
-  for(const auto &clause : type.requires())
+  for(const auto &clause : type.c_requires())
   {
     auto instantiated_clause =
       to_lambda_expr(clause).application(instantiation_values);
@@ -661,13 +712,14 @@ void code_contractst::apply_function_contract(
                             .append(" in ")
                             .append(function.c_str()));
     _location.set_property_class(ID_precondition);
+    goto_convertt converter(symbol_table, log.get_message_handler());
     generate_contract_constraints(
       symbol_table,
       converter,
       instantiated_clause,
       mode,
-      [&is_fresh](goto_programt &requires) {
-        is_fresh.update_requires(requires);
+      [&is_fresh](goto_programt &c_requires) {
+        is_fresh.update_requires(c_requires);
       },
       new_program,
       _location);
@@ -675,7 +727,7 @@ void code_contractst::apply_function_contract(
 
   // Generate all the instructions required to initialize history variables
   exprt::operandst instantiated_ensures_clauses;
-  for(auto clause : type.ensures())
+  for(auto clause : type.c_ensures())
   {
     auto instantiated_clause =
       to_lambda_expr(clause).application(instantiation_values);
@@ -688,7 +740,7 @@ void code_contractst::apply_function_contract(
   // ASSIGNS clause should not refer to any quantified variables,
   // and only refer to the common symbols to be replaced.
   exprt::operandst targets;
-  for(auto &target : type.assigns())
+  for(auto &target : type.c_assigns())
     targets.push_back(to_lambda_expr(target).application(instantiation_values));
 
   // Create a sequence of non-deterministic assignments ...
@@ -740,6 +792,8 @@ void code_contractst::apply_function_contract(
     source_locationt _location = clause.source_location();
     _location.set_comment("Assume ensures clause");
     _location.set_property_class(ID_assume);
+
+    goto_convertt converter(symbol_table, log.get_message_handler());
     generate_contract_constraints(
       symbol_table,
       converter,
@@ -843,17 +897,24 @@ void code_contractst::apply_loop_contract(
 
   std::list<size_t> to_check_contracts_on_children;
 
+  std::map<
+    goto_programt::targett,
+    std::pair<goto_programt::targett, natural_loops_mutablet::loopt>,
+    goto_programt::target_less_than>
+    loop_head_ends;
+
   for(const auto &loop_head_and_content : natural_loops.loop_map)
   {
-    const auto &loop_content = loop_head_and_content.second;
-    if(loop_content.empty())
+    const auto &loop_body = loop_head_and_content.second;
+    // Skip empty loops and self-looped node.
+    if(loop_body.size() <= 1)
       continue;
 
     auto loop_head = loop_head_and_content.first;
     auto loop_end = loop_head;
 
     // Find the last back edge to `loop_head`
-    for(const auto &t : loop_content)
+    for(const auto &t : loop_body)
     {
       if(
         t->is_goto() && t->get_target() == loop_head &&
@@ -868,12 +929,57 @@ void code_contractst::apply_loop_contract(
       throw 0;
     }
 
-    exprt assigns_clause =
-      static_cast<const exprt &>(loop_end->condition().find(ID_C_spec_assigns));
-    exprt invariant = static_cast<const exprt &>(
-      loop_end->condition().find(ID_C_spec_loop_invariant));
-    exprt decreases_clause = static_cast<const exprt &>(
-      loop_end->condition().find(ID_C_spec_decreases));
+    // By definition the `loop_body` is a set of instructions computed
+    // by `natural_loops` based on the CFG.
+    // Since we perform assigns clause instrumentation by sequentially
+    // traversing instructions from `loop_head` to `loop_end`,
+    // here we ensure that all instructions in `loop_body` belong within
+    // the [loop_head, loop_end] target range.
+
+    // Check 1. (i \in loop_body) ==> loop_head <= i <= loop_end
+    for(const auto &i : loop_body)
+    {
+      if(
+        loop_head->location_number > i->location_number ||
+        i->location_number > loop_end->location_number)
+      {
+        log.conditional_output(
+          log.error(), [&i, &loop_head](messaget::mstreamt &mstream) {
+            mstream << "Computed loop at " << loop_head->source_location()
+                    << "contains an instruction beyond [loop_head, loop_end]:"
+                    << messaget::eom;
+            i->output(mstream);
+            mstream << messaget::eom;
+          });
+        throw 0;
+      }
+    }
+
+    if(!loop_head_ends.emplace(loop_head, std::make_pair(loop_end, loop_body))
+          .second)
+      UNREACHABLE;
+  }
+
+  for(auto &loop_head_end : loop_head_ends)
+  {
+    auto loop_head = loop_head_end.first;
+    auto loop_end = loop_head_end.second.first;
+    // After loop-contract instrumentation, jumps to the `loop_head` will skip
+    // some instrumented instructions. So we want to make sure that there is
+    // only one jump targeting `loop_head` from `loop_end` before loop-contract
+    // instrumentation.
+    // Add a skip before `loop_head` and let all jumps (except for the
+    // `loop_end`) that target to the `loop_head` target to the skip
+    // instead.
+    insert_before_and_update_jumps(
+      goto_function.body, loop_head, goto_programt::make_skip());
+    loop_end->set_target(loop_head);
+
+    exprt assigns_clause = get_loop_assigns(loop_end);
+    exprt invariant =
+      get_loop_invariants(loop_end, loop_contract_config.check_side_effect);
+    exprt decreases_clause =
+      get_loop_decreases(loop_end, loop_contract_config.check_side_effect);
 
     if(invariant.is_nil())
     {
@@ -904,7 +1010,7 @@ void code_contractst::apply_loop_contract(
     }
 
     const auto idx = loop_nesting_graph.add_node(
-      loop_content,
+      loop_head_end.second.second,
       loop_head,
       loop_end,
       assigns_clause,
@@ -917,30 +1023,6 @@ void code_contractst::apply_loop_contract(
       continue;
 
     to_check_contracts_on_children.push_back(idx);
-
-    // By definition the `loop_content` is a set of instructions computed
-    // by `natural_loops` based on the CFG.
-    // Since we perform assigns clause instrumentation by sequentially
-    // traversing instructions from `loop_head` to `loop_end`,
-    // here we ensure that all instructions in `loop_content` belong within
-    // the [loop_head, loop_end] target range
-
-    // Check 1. (i \in loop_content) ==> loop_head <= i <= loop_end
-    for(const auto &i : loop_content)
-    {
-      if(std::distance(loop_head, i) < 0 || std::distance(i, loop_end) < 0)
-      {
-        log.conditional_output(
-          log.error(), [&i, &loop_head](messaget::mstreamt &mstream) {
-            mstream << "Computed loop at " << loop_head->source_location()
-                    << "contains an instruction beyond [loop_head, loop_end]:"
-                    << messaget::eom;
-            i->output(mstream);
-            mstream << messaget::eom;
-          });
-        throw 0;
-      }
-    }
   }
 
   for(size_t outer = 0; outer < loop_nesting_graph.size(); ++outer)
@@ -1037,16 +1119,6 @@ void code_contractst::apply_loop_contract(
   }
 }
 
-symbol_tablet &code_contractst::get_symbol_table()
-{
-  return symbol_table;
-}
-
-goto_functionst &code_contractst::get_goto_functions()
-{
-  return goto_functions;
-}
-
 void code_contractst::check_frame_conditions_function(const irep_idt &function)
 {
   // Get the function object before instrumentation.
@@ -1112,7 +1184,7 @@ void code_contractst::check_frame_conditions_function(const irep_idt &function)
     instantiation_values.push_back(
       ns.lookup(param.get_identifier()).symbol_expr());
   }
-  for(auto &target : get_contract(function, ns).assigns())
+  for(auto &target : get_contract(function, ns).c_assigns())
   {
     goto_programt payload;
     instrument_spec_assigns.track_spec_target(
@@ -1159,12 +1231,14 @@ void code_contractst::enforce_contract(const irep_idt &function)
   goto_functions.function_map.erase(old_function);
 
   // Place a new symbol with the mangled name into the symbol table
-  symbolt mangled_sym;
+  source_locationt sl;
+  sl.set_file("instrumented for code contracts");
+  sl.set_line("0");
   const symbolt *original_sym = symbol_table.lookup(original);
-  mangled_sym = *original_sym;
+  symbolt mangled_sym = *original_sym;
   mangled_sym.name = mangled;
   mangled_sym.base_name = mangled;
-  mangled_sym.location = original_sym->location;
+  mangled_sym.location = sl;
   const auto mangled_found = symbol_table.insert(std::move(mangled_sym));
   INVARIANT(
     mangled_found.second,
@@ -1223,11 +1297,13 @@ void code_contractst::add_contract_check(
   source_location.set_function(wrapper_function);
 
   // decl ret
-  optionalt<code_returnt> return_stmt;
+  std::optional<code_returnt> return_stmt;
   if(code_type.return_type() != empty_typet())
   {
-    symbol_exprt r = new_tmp_symbol(
+    symbol_exprt r = get_fresh_aux_symbol(
                        code_type.return_type(),
+                       id2string(source_location.get_function()),
+                       "tmp_cc",
                        source_location,
                        function_symbol.mode,
                        symbol_table)
@@ -1250,8 +1326,10 @@ void code_contractst::add_contract_check(
   {
     PRECONDITION(!parameter.empty());
     const symbolt &parameter_symbol = ns.lookup(parameter);
-    symbol_exprt p = new_tmp_symbol(
+    symbol_exprt p = get_fresh_aux_symbol(
                        parameter_symbol.type,
+                       id2string(source_location.get_function()),
+                       "tmp_cc",
                        source_location,
                        parameter_symbol.mode,
                        symbol_table)
@@ -1265,12 +1343,13 @@ void code_contractst::add_contract_check(
     instantiation_values.push_back(p);
   }
 
-  is_fresh_enforcet visitor(*this, log, wrapper_function);
+  is_fresh_enforcet visitor(
+    goto_model, log.get_message_handler(), wrapper_function);
   visitor.create_declarations();
   visitor.add_memory_map_decl(check);
 
   // Generate: assume(requires)
-  for(const auto &clause : code_type.requires())
+  for(const auto &clause : code_type.c_requires())
   {
     auto instantiated_clause =
       to_lambda_expr(clause).application(instantiation_values);
@@ -1284,13 +1363,14 @@ void code_contractst::add_contract_check(
     source_locationt _location = clause.source_location();
     _location.set_comment("Assume requires clause");
     _location.set_property_class(ID_assume);
+    goto_convertt converter(symbol_table, log.get_message_handler());
     generate_contract_constraints(
       symbol_table,
       converter,
       instantiated_clause,
       function_symbol.mode,
-      [&visitor](goto_programt &requires) {
-        visitor.update_requires(requires);
+      [&visitor](goto_programt &c_requires) {
+        visitor.update_requires(c_requires);
       },
       check,
       _location);
@@ -1298,7 +1378,7 @@ void code_contractst::add_contract_check(
 
   // Generate all the instructions required to initialize history variables
   exprt::operandst instantiated_ensures_clauses;
-  for(auto clause : code_type.ensures())
+  for(auto clause : code_type.c_ensures())
   {
     auto instantiated_clause =
       to_lambda_expr(clause).application(instantiation_values);
@@ -1317,6 +1397,7 @@ void code_contractst::add_contract_check(
     source_locationt _location = clause.source_location();
     _location.set_comment("Check ensures clause");
     _location.set_property_class(ID_postcondition);
+    goto_convertt converter(symbol_table, log.get_message_handler());
     generate_contract_constraints(
       symbol_table,
       converter,
@@ -1410,10 +1491,73 @@ void code_contractst::apply_loop_contracts(
   nondet_static(goto_model, to_exclude_from_nondet_init);
 
   // unwind all transformed loops twice.
-  unwindsett unwindset{goto_model};
-  unwindset.parse_unwindset(loop_names, log.get_message_handler());
-  goto_unwindt goto_unwind;
-  goto_unwind(goto_model, unwindset, goto_unwindt::unwind_strategyt::ASSUME);
+  if(loop_contract_config.unwind_transformed_loops)
+  {
+    unwindsett unwindset{goto_model};
+    unwindset.parse_unwindset(loop_names, log.get_message_handler());
+    goto_unwindt goto_unwind;
+    goto_unwind(goto_model, unwindset, goto_unwindt::unwind_strategyt::ASSUME);
+  }
+
+  remove_skip(goto_model);
+
+  // Record original loop number for some instrumented instructions.
+  for(auto &goto_function_entry : goto_functions.function_map)
+  {
+    auto &goto_function = goto_function_entry.second;
+    bool is_in_loop_havoc_block = false;
+
+    unsigned loop_number_of_loop_havoc = 0;
+    for(goto_programt::const_targett it_instr =
+          goto_function.body.instructions.begin();
+        it_instr != goto_function.body.instructions.end();
+        it_instr++)
+    {
+      // Don't override original loop numbers.
+      if(original_loop_number_map.count(it_instr) != 0)
+        continue;
+
+      // Store loop number for two type of instrumented instructions.
+      // ASSIGN ENTERED_LOOP = false  ---   head of transformed loops.
+      // ASSIGN ENTERED_LOOP = true   ---   end of transformed loops.
+      if(
+        is_transformed_loop_end(it_instr) || is_transformed_loop_head(it_instr))
+      {
+        const auto &assign_lhs =
+          expr_try_dynamic_cast<symbol_exprt>(it_instr->assign_lhs());
+        original_loop_number_map[it_instr] = get_suffix_unsigned(
+          id2string(assign_lhs->get_identifier()),
+          std::string(ENTERED_LOOP) + "__");
+        continue;
+      }
+
+      // Loop havocs are assignments between
+      // ASSIGN IN_LOOP_HAVOC_BLOCK = true
+      // and
+      // ASSIGN IN_LOOP_HAVOC_BLOCK = false
+
+      // Entering the loop-havoc block.
+      if(is_assignment_to_instrumented_variable(it_instr, IN_LOOP_HAVOC_BLOCK))
+      {
+        is_in_loop_havoc_block = it_instr->assign_rhs() == true_exprt();
+        const auto &assign_lhs =
+          expr_try_dynamic_cast<symbol_exprt>(it_instr->assign_lhs());
+        loop_number_of_loop_havoc = get_suffix_unsigned(
+          id2string(assign_lhs->get_identifier()),
+          std::string(IN_LOOP_HAVOC_BLOCK) + "__");
+        continue;
+      }
+
+      // Assignments in loop-havoc block are loop havocs.
+      if(is_in_loop_havoc_block && it_instr->is_assign())
+      {
+        loop_havoc_set.emplace(it_instr);
+
+        // Store loop number for loop havoc.
+        original_loop_number_map[it_instr] = loop_number_of_loop_havoc;
+      }
+    }
+  }
 }
 
 void code_contractst::enforce_contracts(

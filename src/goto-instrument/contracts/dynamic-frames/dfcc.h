@@ -29,15 +29,17 @@ Author: Remi Delmas, delmasrd@amazon.com
 #ifndef CPROVER_GOTO_INSTRUMENT_CONTRACTS_DYNAMIC_FRAMES_DFCC_H
 #define CPROVER_GOTO_INSTRUMENT_CONTRACTS_DYNAMIC_FRAMES_DFCC_H
 
+#include <util/exception_utils.h>
 #include <util/irep.h>
 #include <util/message.h>
 
+#include "dfcc_contract_clauses_codegen.h"
 #include "dfcc_contract_handler.h"
 #include "dfcc_instrument.h"
 #include "dfcc_library.h"
+#include "dfcc_lift_memory_predicates.h"
 #include "dfcc_spec_functions.h"
 #include "dfcc_swap_and_wrap.h"
-#include "dfcc_utils.h"
 
 #include <map>
 #include <set>
@@ -47,26 +49,37 @@ class messaget;
 class message_handlert;
 class symbolt;
 class conditional_target_group_exprt;
-class cfg_infot;
 class optionst;
 
 #define FLAG_DFCC "dfcc"
 #define OPT_DFCC "(" FLAG_DFCC "):"
 
-// clang-format off
 #define HELP_DFCC                                                              \
-  "--dfcc             activate dynamic frame condition checking for function\n"\
-  "                   contracts using given function as entry point"
-// clang-format on
+  " {y--dfcc} {uharness} \t "                                                  \
+  "activate dynamic frame condition checking for contracts using the given "   \
+  "harness as entry point\n"
 
-// clang-format off
 #define FLAG_ENFORCE_CONTRACT_REC "enforce-contract-rec"
 #define OPT_ENFORCE_CONTRACT_REC "(" FLAG_ENFORCE_CONTRACT_REC "):"
 #define HELP_ENFORCE_CONTRACT_REC                                              \
-  " --enforce-contract-rec <fun>  wrap fun with an assertion of its contract\n"\
-  "                               and assume recursive calls to fun satisfy \n"\
-  "                               the contract"
-// clang-format on
+  " {y--enforce-contract-rec} {ufunction}[{y/}{ucontract}] \t "                \
+  "wrap {ufunction} with an assertion of the contract and assume recursive "   \
+  "calls to "                                                                  \
+  "{ufunction} satisfy the contract\n"
+
+/// Exception thrown for bad function/contract specification pairs passed on
+/// the CLI.
+class invalid_function_contract_pair_exceptiont : public cprover_exception_baset
+{
+public:
+  explicit invalid_function_contract_pair_exceptiont(
+    std::string reason,
+    std::string correct_format = "");
+
+  std::string what() const override;
+
+  std::string correct_format;
+};
 
 /// \ingroup dfcc-module
 /// \brief Applies function contracts transformation to GOTO model,
@@ -82,7 +95,7 @@ class optionst;
 /// \param to_check function to check against its contract
 /// \param allow_recursive_calls Allow the checked function to be recursive
 /// \param to_replace set of functions to replace with their contract
-/// \param apply_loop_contracts apply loop contract transformations iff true
+/// \param loop_contract_config configuration for applying loop contracts
 /// \param to_exclude_from_nondet_static set of symbols to exclude when havocing
 /// static program symbols.
 /// \param message_handler used for debug/warning/error messages
@@ -90,40 +103,10 @@ void dfcc(
   const optionst &options,
   goto_modelt &goto_model,
   const irep_idt &harness_id,
-  const optionalt<irep_idt> &to_check,
+  const std::optional<irep_idt> &to_check,
   const bool allow_recursive_calls,
   const std::set<irep_idt> &to_replace,
-  const bool apply_loop_contracts,
-  const std::set<std::string> &to_exclude_from_nondet_static,
-  message_handlert &message_handler);
-
-/// \ingroup dfcc-module
-/// \brief Applies function contracts and loop contracts transformation to GOTO
-/// model, using the dynamic frame condition checking approach.
-///
-/// Functions to check/replace are explicitly mapped to contracts.
-/// When checking function `foo` against contract `bar`, we require the
-/// actual contract symbol to exist as `contract::bar` in the symbol table.
-///
-/// \param options CLI options (used to lookup options for language config when
-/// re-defining the model's entry point)
-/// \param goto_model GOTO model to transform
-/// \param harness_id Proof harness name, must be the entry point of the model
-/// \param to_check (function,contract) pair for contract checking
-/// \param allow_recursive_calls Allow the checked function to be recursive
-/// \param to_replace Functions-to-contract mapping for replacement
-/// \param apply_loop_contracts Spply loop contract transformations iff true
-/// \param to_exclude_from_nondet_static Set of symbols to exclude when havocing
-/// static program symbols.
-/// \param message_handler used for debug/warning/error messages
-void dfcc(
-  const optionst &options,
-  goto_modelt &goto_model,
-  const irep_idt &harness_id,
-  const optionalt<std::pair<irep_idt, irep_idt>> &to_check,
-  const bool allow_recursive_calls,
-  const std::map<irep_idt, irep_idt> &to_replace,
-  const bool apply_loop_contracts,
+  const loop_contract_configt loop_contract_config,
   const std::set<std::string> &to_exclude_from_nondet_static,
   message_handlert &message_handler);
 
@@ -140,18 +123,17 @@ public:
   /// \param to_check (function,contract) pair for contract checking
   /// \param allow_recursive_calls Allow the checked function to be recursive
   /// \param to_replace functions-to-contract mapping for replacement
-  /// \param apply_loop_contracts apply loop contract transformations iff true
-  /// havocing static program symbols.
+  /// \param loop_contract_config configuration for applying loop contracts
   /// \param message_handler used for debug/warning/error messages
   /// \param to_exclude_from_nondet_static set of symbols to exclude when
   dfcct(
     const optionst &options,
     goto_modelt &goto_model,
     const irep_idt &harness_id,
-    const optionalt<std::pair<irep_idt, irep_idt>> &to_check,
+    const std::optional<std::pair<irep_idt, irep_idt>> &to_check,
     const bool allow_recursive_calls,
     const std::map<irep_idt, irep_idt> &to_replace,
-    const bool apply_loop_contracts,
+    const loop_contract_configt loop_contract_config,
     message_handlert &message_handler,
     const std::set<std::string> &to_exclude_from_nondet_static);
 
@@ -177,7 +159,7 @@ public:
   ///   (replacement mode)
   /// - instrument all remaining functions GOTO model
   /// - (this includes standard library functions).
-  /// - specialise the instrumentation functions by unwiding loops they contain
+  /// - specialise the instrumentation functions by unwinding loops they contain
   /// to the maximum size of any assigns clause involved in the model.
   void transform_goto_model();
 
@@ -185,20 +167,22 @@ protected:
   const optionst &options;
   goto_modelt &goto_model;
   const irep_idt &harness_id;
-  const optionalt<std::pair<irep_idt, irep_idt>> &to_check;
+  const std::optional<std::pair<irep_idt, irep_idt>> &to_check;
   const bool allow_recursive_calls;
   const std::map<irep_idt, irep_idt> &to_replace;
-  const bool apply_loop_contracts;
+  const loop_contract_configt loop_contract_config;
   const std::set<std::string> &to_exclude_from_nondet_static;
   message_handlert &message_handler;
   messaget log;
 
-  // hold the global state of the transformation (caches etc.)
-  dfcc_utilst utils;
+  // Singletons that hold the global state of the program transformation
+  // (caches etc.)
   dfcc_libraryt library;
   namespacet ns;
-  dfcc_instrumentt instrument;
   dfcc_spec_functionst spec_functions;
+  dfcc_contract_clauses_codegent contract_clauses_codegen;
+  dfcc_instrumentt instrument;
+  dfcc_lift_memory_predicatest memory_predicates;
   dfcc_contract_handlert contract_handler;
   dfcc_swap_and_wrapt swap_and_wrap;
 
@@ -235,6 +219,7 @@ protected:
 
   void link_model_and_load_dfcc_library();
   void instrument_harness_function();
+  void lift_memory_predicates();
   void wrap_checked_function();
   void wrap_replaced_functions();
   void wrap_discovered_function_pointer_contracts();
@@ -256,7 +241,7 @@ protected:
   /// for each instrumented function
   ///
   /// A call to `nondet_static` will re-generate the initialize function with
-  /// nondet values. The intrumentation statics will not get nondet initialised
+  /// nondet values. The instrumentation statics will not get nondet initialised
   /// by virtue of being tagged with ID_C_no_nondet_initialization.
   ///
   /// However, nondet_static expects instructions to be either function calls

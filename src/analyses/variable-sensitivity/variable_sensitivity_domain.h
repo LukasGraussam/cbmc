@@ -80,26 +80,25 @@
   "(vsd-unions):"                                                              \
   "(vsd-flow-insensitive)"                                                     \
   "(vsd-data-dependencies)"                                                    \
-  "(vsd-liveness)"                                                             \
-                                                                               \
-    // clang-format off
-#define HELP_VSD                                                               \
-  " --vsd-values                 value tracking - "                            \
-  "constants|intervals|set-of-constants\n" /* NOLINT(whitespace/line_length) */\
-  " --vsd-structs                struct field sensitive analysis - "           \
-  "top-bottom|every-field\n" /* NOLINT(whitespace/line_length) */              \
-  " --vsd-arrays                 array entry sensitive analysis - "            \
-  "top-bottom|smash|up-to-n-elements|every-element\n" /* NOLINT(whitespace/line_length) */ \
-  " --vsd-array-max-elements     the n in --vsd-arrays up-to-n-elements - "    \
-  "defaults to 10 if not given\n" /* NOLINT(whitespace/line_length) */         \
-  " --vsd-pointers               pointer sensitive analysis - "                \
-  "top-bottom|constants|value-set\n" /* NOLINT(whitespace/line_length) */      \
-  " --vsd-unions                 union sensitive analysis - top-bottom\n"      \
-  " --vsd-data-dependencies      track data dependencies\n"                    \
-  " --vsd-liveness               track variable liveness\n"                    \
-  " --vsd-flow-insensitive       disables flow sensitivity\n"                  \
+  "(vsd-liveness)"
 
-// cland-format on
+#define HELP_VSD                                                               \
+  " {y--vsd-values} [{yconstants}|{yintervals}|{yset-of-constants}] \t "       \
+  "value tracking\n"                                                           \
+  " {y--vsd-structs} [{ytop-bottom}|{yevery-field}] \t "                       \
+  "struct field sensitive analysis\n"                                          \
+  " {y--vsd-arrays} [{ytop-bottom}|{ysmash}|{yup-to-n-elements}|"              \
+  "{yevery-element}] \t "                                                      \
+  "array entry sensitive analysis\n"                                           \
+  " {y--vsd-array-max-elements} {uN} \t "                                      \
+  "set the {un} in {y--vsd-arrays} {yup-to-n-elements} (defaults to 10 if "    \
+  "not given)\n"                                                               \
+  " {y--vsd-pointers} [{ytop-bottom}|{yconstants}|{yvalue-set}] \t "           \
+  "pointer sensitive analysis\n"                                               \
+  " {y--vsd-unions} [{ytop-bottom}] \t union sensitive analysis\n"             \
+  " {y--vsd-data-dependencies} \t track data dependencies\n"                   \
+  " {y--vsd-liveness} \t track variable liveness\n"                            \
+  " {y--vsd-flow-insensitive} \t disables flow sensitivity\n"
 
 #define PARSE_OPTIONS_VSD(cmdline, options)                                    \
   options.set_option("values", cmdline.get_value("vsd-values"));               \
@@ -146,9 +145,6 @@ public:
   /// Sets the domain to top (all states).
   void make_top() override;
 
-  /// Set up a reasonable entry-point state
-  void make_entry() override;
-
   /// Basic text output of the abstract domain
   ///
   /// \param out: the output stream
@@ -176,18 +172,17 @@ public:
   virtual bool
   merge(const variable_sensitivity_domaint &b, trace_ptrt from, trace_ptrt to);
 
-  /// Perform a context aware merge of the changes that have been applied
-  /// between function_start and the current state. Anything that has not been
-  /// modified will be taken from the \p function_call domain.
-  /// \param function_call: The local of the merge - values from here will be
-  ///   taken if they have not been modified
-  /// \param function_start: The base of the merge - changes that have been made
+  /// Merges just the things that have changes between
+  /// "function_start" and "function_end" into "this".
+  /// To be used correctly "this" must be derived from the function
+  /// call site.  Anything that is not modified in the function (such
+  /// as globals) will not be changed.
+  /// \param function_start: The base of the diff - changes that have been made
   ///   between here and the end will be retained.
   /// \param function_end: The end of the merge - changes that have been made
   ///   between the start and here will be retained.
   /// \param ns: The global namespace
   virtual void merge_three_way_function_return(
-    const ai_domain_baset &function_call,
     const ai_domain_baset &function_start,
     const ai_domain_baset &function_end,
     const namespacet &ns);
@@ -245,22 +240,6 @@ private:
   /// \return Returns true if the function should be ignored
   bool ignore_function_call_transform(const irep_idt &function_id) const;
 
-  /// Get symbols that have been modified since this domain and other
-  /// \param other: The domain that things may have been modified in
-  /// \return A list of symbols whose write location is different
-  std::vector<irep_idt>
-  get_modified_symbols(const variable_sensitivity_domaint &other) const;
-
-  /// Given a domain and some symbols, apply those symbols values
-  /// to the current domain
-  /// \param modified_symbols: The symbols to write
-  /// \param target: The domain to take the values from
-  /// \param ns: The global namespace
-  void apply_domain(
-    std::vector<symbol_exprt> modified_symbols,
-    const variable_sensitivity_domaint &target,
-    const namespacet &ns);
-
   void assume(exprt expr, namespacet ns);
 
   abstract_environmentt abstract_state;
@@ -285,7 +264,7 @@ public:
 
   std::unique_ptr<statet> make(locationt l) const override
   {
-    auto d = util_make_unique<variable_sensitivity_domaint>(
+    auto d = std::make_unique<variable_sensitivity_domaint>(
       object_factory, configuration);
     CHECK_RETURN(d->is_bottom());
     return std::unique_ptr<statet>(d.release());

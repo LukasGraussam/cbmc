@@ -1,7 +1,8 @@
 # For the best possible utilisation of multiple cores when
 # running tests in parallel, it is important that these directories are
 # listed with decreasing runtimes (i.e. longest running at the top)
-DIRS = cbmc \
+DIRS = cbmc-shadow-memory \
+       cbmc \
        cbmc-library \
        cprover \
        crangler \
@@ -21,6 +22,7 @@ DIRS = cbmc \
        goto-instrument-json \
        goto-instrument-wmm-core \
        goto-instrument-typedef \
+       goto-inspect \
        smt2_solver \
        smt2_strings \
        strings \
@@ -28,10 +30,12 @@ DIRS = cbmc \
        goto-diff \
        test-script \
        goto-analyzer-taint \
+       goto-bmc/goto-bmc-symex-ready-goto \
+       goto-bmc/goto-bmc-non-symex-ready-goto \
+       goto-bmc \
        goto-gcc \
        goto-cl \
        goto-cc-cbmc \
-       goto-cc-cbmc-shared-options \
        cbmc-cpp \
        goto-cc-goto-analyzer \
        goto-analyzer-simplify \
@@ -39,11 +43,13 @@ DIRS = cbmc \
        systemc \
        contracts \
        contracts-dfcc \
+       goto-synthesizer \
        acceleration \
        k-induction \
        goto-harness \
        goto-harness-multi-file-project \
        goto-cc-file-local \
+       goto-cc-multi-file \
        goto-cc-regression-gh-issue-5380 \
        linking-goto-binaries \
        symtab2gb \
@@ -56,18 +62,21 @@ DIRS = cbmc \
        cbmc-sequentialization \
        cpp-linter \
        catch-framework \
+       libcprover-cpp \
+       book-examples \
        # Empty last line
 
-ifeq ($(OS),Windows_NT)
-    detected_OS := Windows
-else
+ifndef WITH_MEMORY_ANALYZER
+  ifeq ($(OS),Windows_NT)
+    WITH_MEMORY_ANALYZER = 0
+  else
     detected_OS := $(shell sh -c 'uname 2>/dev/null || echo Unknown')
-endif
-
-ifeq ($(detected_OS),Linux)
-  ifneq ($(WITH_MEMORY_ANALYZER),0)
-    # only set if it wasn't explicitly unset
-    WITH_MEMORY_ANALYZER=1
+    detected_ARCH := $(shell sh -c 'uname -m 2>/dev/null || echo Unknown')
+    ifeq ($(filter-out Linux_x86_64 Linux_i386,$(detected_OS)_$(detected_ARCH)),)
+      WITH_MEMORY_ANALYZER = 1
+    else
+      WITH_MEMORY_ANALYZER = 0
+    endif
   endif
 endif
 
@@ -107,9 +116,7 @@ test-parallel:
 
 .PHONY: clean
 clean:
-	@for dir in *; do \
-		if [ -d "$$dir" ]; then \
-			$(MAKE) -C "$$dir" clean; \
-		fi; \
+	@for dir in $(DIRS); do \
+		$(MAKE) -C "$$dir" clean; \
 	done;
 	$(RM) tests.log

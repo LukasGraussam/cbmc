@@ -32,9 +32,11 @@ static bool have_to_rewrite_union(const exprt &expr)
   else if(expr.id()==ID_union)
     return true;
 
-  forall_operands(it, expr)
-    if(have_to_rewrite_union(*it))
+  for(const auto &op : expr.operands())
+  {
+    if(have_to_rewrite_union(op))
       return true;
+  }
 
   return false;
 }
@@ -137,7 +139,10 @@ static bool restore_union_rec(exprt &expr, const namespacet &ns)
     byte_extract_exprt &be = to_byte_extract_expr(expr);
     if(be.op().type().id() == ID_union || be.op().type().id() == ID_union_tag)
     {
-      const union_typet &union_type = to_union_type(ns.follow(be.op().type()));
+      const union_typet &union_type =
+        be.op().type().id() == ID_union_tag
+          ? ns.follow_tag(to_union_tag_type(be.op().type()))
+          : to_union_type(be.op().type());
 
       for(const auto &comp : union_type.components())
       {
@@ -150,7 +155,7 @@ static bool restore_union_rec(exprt &expr, const namespacet &ns)
           comp.type().id() == ID_array || comp.type().id() == ID_struct ||
           comp.type().id() == ID_struct_tag)
         {
-          optionalt<exprt> result = get_subexpression_at_offset(
+          std::optional<exprt> result = get_subexpression_at_offset(
             member_exprt{be.op(), comp.get_name(), comp.type()},
             be.offset(),
             be.type(),

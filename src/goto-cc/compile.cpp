@@ -13,39 +13,33 @@ Date: June 2006
 
 #include "compile.h"
 
-#include <cstring>
-#include <fstream>
-#include <iostream>
-
 #include <util/cmdline.h>
 #include <util/config.h>
-#include <util/file_util.h>
 #include <util/get_base_name.h>
-#include <util/prefix.h>
 #include <util/run.h>
 #include <util/symbol_table_builder.h>
 #include <util/tempdir.h>
 #include <util/tempfile.h>
+#include <util/unicode.h>
 #include <util/version.h>
 
-#ifdef _MSC_VER
-#  include <util/unicode.h>
-#endif
-
-#include <ansi-c/ansi_c_entry_point.h>
-#include <ansi-c/c_object_factory_parameters.h>
-
-#include <goto-programs/goto_convert_functions.h>
 #include <goto-programs/name_mangler.h>
 #include <goto-programs/read_goto_binary.h>
 #include <goto-programs/write_goto_binary.h>
 
+#include <ansi-c/ansi_c_entry_point.h>
+#include <ansi-c/c_object_factory_parameters.h>
+#include <ansi-c/goto-conversion/goto_convert_functions.h>
 #include <langapi/language.h>
 #include <langapi/language_file.h>
 #include <langapi/mode.h>
-
 #include <linking/linking.h>
 #include <linking/static_lifetime_init.h>
+
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <iostream>
 
 #define DOTGRAPHSETTINGS  "color=black;" \
                           "orientation=portrait;" \
@@ -146,7 +140,7 @@ static file_typet detect_file_type(
   if(
     ext == "c" || ext == "cc" || ext == "cp" || ext == "cpp" || ext == "CPP" ||
     ext == "c++" || ext == "C" || ext == "i" || ext == "ii" || ext == "class" ||
-    ext == "jar" || ext == "jsil")
+    ext == "jar")
   {
     return file_typet::SOURCE_FILE;
   }
@@ -222,11 +216,14 @@ bool compilet::add_files_from_archive(
     tstr = get_temporary_directory("goto-cc.XXXXXX");
 
     tmp_dirs.push_back(tstr);
-    set_current_path(tmp_dirs.back());
+    std::filesystem::current_path(tmp_dirs.back());
 
     // unpack now
-    int ret =
-      run("ar", {"ar", "x", concat_dir_file(working_directory, file_name)});
+    int ret = run(
+      "ar",
+      {"ar",
+       "x",
+       std::filesystem::path(working_directory).append(file_name).string()});
     if(ret != 0)
     {
       log.error() << "Failed to extract archive " << file_name << messaget::eom;
@@ -238,7 +235,9 @@ bool compilet::add_files_from_archive(
   temporary_filet tmp_file_out("", "");
   int ret = run(
     "ar",
-    {"ar", "t", concat_dir_file(working_directory, file_name)},
+    {"ar",
+     "t",
+     std::filesystem::path(working_directory).append(file_name).string()},
     "",
     tmp_file_out(),
     "");
@@ -253,7 +252,7 @@ bool compilet::add_files_from_archive(
 
   while(!in.fail() && std::getline(in, line))
   {
-    std::string t = concat_dir_file(tstr, line);
+    std::string t = std::filesystem::path(tstr).append(line).string();
 
     if(is_goto_binary(t, log.get_message_handler()))
       object_files.push_back(t);
@@ -263,7 +262,7 @@ bool compilet::add_files_from_archive(
   }
 
   if(!thin_archive)
-    set_current_path(working_directory);
+    std::filesystem::current_path(working_directory);
 
   return false;
 }
@@ -277,7 +276,8 @@ bool compilet::find_library(const std::string &name)
 
   for(const auto &library_path : library_paths)
   {
-    library_file_name = concat_dir_file(library_path, "lib" + name + ".a");
+    library_file_name =
+      std::filesystem::path(library_path).append("lib" + name + ".a").string();
 
     std::ifstream in(library_file_name);
 
@@ -285,7 +285,9 @@ bool compilet::find_library(const std::string &name)
       return !add_input_file(library_file_name);
     else
     {
-      library_file_name = concat_dir_file(library_path, "lib" + name + ".so");
+      library_file_name = std::filesystem::path(library_path)
+                            .append("lib" + name + ".so")
+                            .string();
 
       switch(detect_file_type(library_file_name, log.get_message_handler()))
       {
@@ -312,7 +314,7 @@ bool compilet::find_library(const std::string &name)
 
 /// parses object files and links them
 /// \return true on error, false otherwise
-bool compilet::link(optionalt<symbol_tablet> &&symbol_table)
+bool compilet::link(std::optional<symbol_tablet> &&symbol_table)
 {
   // "compile" hitherto uncompiled functions
   log.statistics() << "Compiling functions" << messaget::eom;
@@ -366,7 +368,7 @@ bool compilet::link(optionalt<symbol_tablet> &&symbol_table)
 /// Parses source files and writes object files, or keeps the symbols in the
 /// symbol_table if not compiling/assembling only.
 /// \return Symbol table, if parsing and type checking succeeded, else empty
-optionalt<symbol_tablet> compilet::compile()
+std::optional<symbol_tablet> compilet::compile()
 {
   symbol_tablet symbol_table;
 
@@ -414,7 +416,11 @@ optionalt<symbol_tablet> compilet::compile()
           get_base_name(file_name, true) + "." + object_file_extension;
 
         if(!output_directory_object.empty())
-          cfn = concat_dir_file(output_directory_object, file_name_with_obj_ext);
+        {
+          cfn = std::filesystem::path(output_directory_object)
+                  .append(file_name_with_obj_ext)
+                  .string();
+        }
         else
           cfn = file_name_with_obj_ext;
       }
@@ -474,16 +480,10 @@ bool compilet::parse(
     return true;
   }
 
-  languagep->set_message_handler(log.get_message_handler());
-
   if(file_name == "-")
     return parse_stdin(*languagep);
 
-#ifdef _MSC_VER
-  std::ifstream infile(widen(file_name));
-#else
-  std::ifstream infile(file_name);
-#endif
+  std::ifstream infile(widen_if_needed(file_name));
 
   if(!infile)
   {
@@ -515,13 +515,13 @@ bool compilet::parse(
       }
     }
 
-    lf.language->preprocess(infile, file_name, *os);
+    lf.language->preprocess(infile, file_name, *os, log.get_message_handler());
   }
   else
   {
     log.statistics() << "Parsing: " << file_name << messaget::eom;
 
-    if(lf.language->parse(infile, file_name))
+    if(lf.language->parse(infile, file_name, log.get_message_handler()))
     {
       log.error() << "PARSING ERROR" << messaget::eom;
       return true;
@@ -557,11 +557,11 @@ bool compilet::parse_stdin(languaget &language)
       }
     }
 
-    language.preprocess(std::cin, "", *os);
+    language.preprocess(std::cin, "", *os, log.get_message_handler());
   }
   else
   {
-    if(language.parse(std::cin, ""))
+    if(language.parse(std::cin, "", log.get_message_handler()))
     {
       log.error() << "PARSING ERROR" << messaget::eom;
       return true;
@@ -617,17 +617,18 @@ bool compilet::write_bin_object_file(
 
 /// Parses and type checks a source file located at \p file_name.
 /// \return A symbol table if, and only if, parsing and type checking succeeded.
-optionalt<symbol_tablet> compilet::parse_source(const std::string &file_name)
+std::optional<symbol_tablet>
+compilet::parse_source(const std::string &file_name)
 {
   language_filest language_files;
-  language_files.set_message_handler(log.get_message_handler());
 
   if(parse(file_name, language_files))
     return {};
 
   // we just typecheck one file here
   symbol_tablet file_symbol_table;
-  if(language_files.typecheck(file_symbol_table, keep_file_local))
+  if(language_files.typecheck(
+       file_symbol_table, keep_file_local, log.get_message_handler()))
   {
     log.error() << "CONVERSION ERROR" << messaget::eom;
     return {};
@@ -657,7 +658,7 @@ compilet::compilet(cmdlinet &_cmdline, message_handlert &mh, bool Werror)
   mode=COMPILE_LINK_EXECUTABLE;
   echo_file_name=false;
   wrote_object=false;
-  working_directory=get_current_working_directory();
+  working_directory = std::filesystem::current_path().string();
 
   if(cmdline.isset("export-function-local-symbols"))
   {
@@ -674,7 +675,7 @@ compilet::~compilet()
   // clean up temp dirs
 
   for(const auto &dir : tmp_dirs)
-    delete_directory(dir);
+    std::filesystem::remove_all(dir);
 }
 
 std::size_t compilet::function_body_count(const goto_functionst &functions)
@@ -742,7 +743,10 @@ bool compilet::add_written_cprover_symbols(const symbol_tablet &symbol_table)
   {
     const irep_idt &name=pair.second.name;
     const typet &new_type=pair.second.type;
-    if(!(has_prefix(id2string(name), CPROVER_PREFIX) && new_type.id()==ID_code))
+    if(!(name.starts_with(CPROVER_PREFIX) && new_type.id() == ID_code))
+      continue;
+
+    if(name.starts_with(FILE_LOCAL_PREFIX))
       continue;
 
     bool inserted;

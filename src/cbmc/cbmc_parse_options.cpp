@@ -13,29 +13,29 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include <util/config.h>
 #include <util/exit_codes.h>
+#include <util/help_formatter.h>
 #include <util/invariant.h>
-#include <util/make_unique.h>
+#include <util/unicode.h>
 #include <util/version.h>
 
-#include <cstdlib> // exit()
-#include <fstream> // IWYU pragma: keep
-#include <iostream>
-#include <memory>
-
-#ifdef _MSC_VER
-#  include <util/unicode.h>
-#endif
-
-#include <langapi/language.h>
+#include <goto-programs/initialize_goto_model.h>
+#include <goto-programs/loop_ids.h>
+#include <goto-programs/process_goto_program.h>
+#include <goto-programs/read_goto_binary.h>
+#include <goto-programs/remove_skip.h>
+#include <goto-programs/remove_unused_functions.h>
+#include <goto-programs/set_properties.h>
+#include <goto-programs/show_goto_functions.h>
+#include <goto-programs/show_properties.h>
+#include <goto-programs/show_symbol_table.h>
+#include <goto-programs/write_goto_binary.h>
 
 #include <ansi-c/c_preprocess.h>
 #include <ansi-c/cprover_library.h>
 #include <ansi-c/gcc_version.h>
-
+#include <ansi-c/goto-conversion/link_to_library.h>
 #include <assembler/remove_asm.h>
-
 #include <cpp/cprover_library.h>
-
 #include <goto-checker/all_properties_verifier.h>
 #include <goto-checker/all_properties_verifier_with_fault_localization.h>
 #include <goto-checker/all_properties_verifier_with_trace_storage.h>
@@ -49,31 +49,21 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <goto-checker/single_path_symex_only_checker.h>
 #include <goto-checker/stop_on_fail_verifier.h>
 #include <goto-checker/stop_on_fail_verifier_with_fault_localization.h>
-
-#include <goto-programs/initialize_goto_model.h>
-#include <goto-programs/link_to_library.h>
-#include <goto-programs/loop_ids.h>
-#include <goto-programs/process_goto_program.h>
-#include <goto-programs/read_goto_binary.h>
-#include <goto-programs/remove_skip.h>
-#include <goto-programs/remove_unused_functions.h>
-#include <goto-programs/set_properties.h>
-#include <goto-programs/show_goto_functions.h>
-#include <goto-programs/show_properties.h>
-#include <goto-programs/show_symbol_table.h>
-
 #include <goto-instrument/cover.h>
 #include <goto-instrument/full_slicer.h>
 #include <goto-instrument/nondet_static.h>
 #include <goto-instrument/reachability_slicer.h>
-
 #include <goto-symex/path_storage.h>
-
+#include <langapi/language.h>
+#include <langapi/mode.h>
 #include <pointer-analysis/add_failed_symbols.h>
 
-#include <langapi/mode.h>
-
 #include "c_test_input_generator.h"
+
+#include <cstdlib> // exit()
+#include <fstream> // IWYU pragma: keep
+#include <iostream>
+#include <memory>
 
 cbmc_parse_optionst::cbmc_parse_optionst(int argc, const char **argv)
   : parse_options_baset(
@@ -116,8 +106,48 @@ void cbmc_parse_optionst::set_default_options(optionst &options)
   options.set_option("depth", UINT32_MAX);
 }
 
+void cbmc_parse_optionst::set_default_analysis_flags(
+  optionst &options,
+  const bool enabled)
+{
+  // Checks enabled by default in v6.0+.
+  options.set_option("bounds-check", enabled);
+  options.set_option("pointer-check", enabled);
+  options.set_option("pointer-primitive-check", enabled);
+  options.set_option("div-by-zero-check", enabled);
+  options.set_option("signed-overflow-check", enabled);
+  options.set_option("undefined-shift-check", enabled);
+
+  // Unwinding assertions required in certain cases for sound verification
+  // results. See https://github.com/diffblue/cbmc/issues/6561 for elaboration.
+  // As the unwinding-assertions is processed earlier, we set it only if it has
+  // not been set yet.
+  if(!options.is_set("unwinding-assertions"))
+  {
+    options.set_option("unwinding-assertions", enabled);
+  }
+
+  if(enabled)
+  {
+    config.ansi_c.malloc_may_fail = true;
+    config.ansi_c.malloc_failure_mode =
+      configt::ansi_ct::malloc_failure_modet::malloc_failure_mode_return_null;
+  }
+  else
+  {
+    config.ansi_c.malloc_may_fail = false;
+    config.ansi_c.malloc_failure_mode =
+      configt::ansi_ct::malloc_failure_modet::malloc_failure_mode_none;
+  }
+}
+
 void cbmc_parse_optionst::get_command_line_options(optionst &options)
 {
+  // Enable flags that in combination provide analysis with no surprises
+  // (expected checks and no unsoundness by missing checks).
+  cbmc_parse_optionst::set_default_analysis_flags(
+    options, !cmdline.isset("no-standard-checks"));
+
   if(config.set(cmdline))
   {
     usage_error();
@@ -136,6 +166,35 @@ void cbmc_parse_optionst::get_command_line_options(optionst &options)
       << "--cover and --unwinding-assertions must not be given together"
       << messaget::eom;
     exit(CPROVER_EXIT_USAGE_ERROR);
+  }
+
+  // We want to warn the user that if we are using standard checks (that enables
+  // unwinding-assertions) and we did not disable them manually.
+  if(
+    cmdline.isset("cover") && !cmdline.isset("no-standard-checks") &&
+    !cmdline.isset("no-unwinding-assertions"))
+  {
+    log.warning() << "--cover is incompatible with --unwinding-assertions, so "
+                     "unwinding-assertions will be defaulted to false"
+                  << messaget::eom;
+  }
+
+  // We want to set the unwinding-assertions option as early as we can,
+  // otherwise we come across two issues: 1) there's no way to deactivate it
+  // with `--no-unwinding-assertions`, as the `--no-xxx` flags are set by
+  // `goto_check_c` which doesn't provide handling for the options, and 2) we
+  // handle it only when we use `--no-standard-checks`, but if we do so, we have
+  // already printed a couple times to the screen that `--unwinding-assertions`
+  // must be passed because of some activation/sensitive further down below.
+  if(cmdline.isset("unwinding-assertions"))
+  {
+    options.set_option("unwinding-assertions", true);
+    options.set_option("paths-symex-explore-all", true);
+  }
+  else if(cmdline.isset("no-unwinding-assertions"))
+  {
+    options.set_option("unwinding-assertions", false);
+    options.set_option("paths-symex-explore-all", false);
   }
 
   if(cmdline.isset("max-field-sensitivity-array-size"))
@@ -187,28 +246,44 @@ void cbmc_parse_optionst::get_command_line_options(optionst &options)
     options.set_option("show-vcc", true);
 
   if(cmdline.isset("cover"))
+  {
     parse_cover_options(cmdline, options);
+    // The default unwinding assertions option needs to be switched off when
+    // performing coverage checks because we intend to solve for coverage rather
+    // than assertions.
+    options.set_option("unwinding-assertions", false);
+  }
 
   if(cmdline.isset("mm"))
     options.set_option("mm", cmdline.get_value("mm"));
 
   if(cmdline.isset("symex-complexity-limit"))
+  {
     options.set_option(
       "symex-complexity-limit", cmdline.get_value("symex-complexity-limit"));
+    log.warning() << "**** WARNING: Complexity-limited analysis may yield "
+                     "unsound verification results"
+                  << messaget::eom;
+  }
 
   if(cmdline.isset("symex-complexity-failed-child-loops-limit"))
+  {
     options.set_option(
       "symex-complexity-failed-child-loops-limit",
       cmdline.get_value("symex-complexity-failed-child-loops-limit"));
+    if(!cmdline.isset("symex-complexity-limit"))
+    {
+      log.warning() << "**** WARNING: Complexity-limited analysis may yield "
+                       "unsound verification results"
+                    << messaget::eom;
+    }
+  }
 
   if(cmdline.isset("property"))
     options.set_option("property", cmdline.get_values("property"));
 
   if(cmdline.isset("drop-unused-functions"))
     options.set_option("drop-unused-functions", true);
-
-  if(cmdline.isset("havoc-undefined-functions"))
-    options.set_option("havoc-undefined-functions", true);
 
   if(cmdline.isset("string-abstraction"))
     options.set_option("string-abstraction", true);
@@ -240,14 +315,43 @@ void cbmc_parse_optionst::get_command_line_options(optionst &options)
     options.set_option("trace", true);
   }
 
+  if(cmdline.isset("export-symex-ready-goto"))
+  {
+    options.set_option(
+      "export-symex-ready-goto", cmdline.get_value("export-symex-ready-goto"));
+    if(options.get_option("export-symex-ready-goto").empty())
+    {
+      log.error()
+        << "ERROR: Please provide a filename to write the goto-binary to."
+        << messaget::eom;
+      exit(CPROVER_EXIT_INTERNAL_ERROR);
+    }
+  }
+
   if(cmdline.isset("localize-faults"))
     options.set_option("localize-faults", true);
 
   if(cmdline.isset("unwind"))
+  {
     options.set_option("unwind", cmdline.get_value("unwind"));
+    if(
+      !options.get_bool_option("unwinding-assertions") &&
+      !cmdline.isset("unwinding-assertions"))
+    {
+      log.warning() << "**** WARNING: Use --unwinding-assertions to obtain "
+                       "sound verification results"
+                    << messaget::eom;
+    }
+  }
 
   if(cmdline.isset("depth"))
+  {
     options.set_option("depth", cmdline.get_value("depth"));
+    log.warning()
+      << "**** WARNING: Depth-bounded analysis may yield unsound verification "
+         "results"
+      << messaget::eom;
+  }
 
   if(cmdline.isset("slice-by-trace"))
   {
@@ -259,6 +363,14 @@ void cbmc_parse_optionst::get_command_line_options(optionst &options)
   {
     options.set_option(
       "unwindset", cmdline.get_comma_separated_values("unwindset"));
+    if(
+      !options.get_bool_option("unwinding-assertions") &&
+      !cmdline.isset("unwinding-assertions"))
+    {
+      log.warning() << "**** WARNING: Use --unwinding-assertions to obtain "
+                       "sound verification results"
+                    << messaget::eom;
+    }
   }
 
   // constant propagation
@@ -270,18 +382,16 @@ void cbmc_parse_optionst::get_command_line_options(optionst &options)
     "self-loops-to-assumptions",
     !cmdline.isset("no-self-loops-to-assumptions"));
 
-  // all checks supported by goto_check
+  // all (other) checks supported by goto_check
   PARSE_OPTIONS_GOTO_CHECK(cmdline, options);
 
-  // generate unwinding assertions
-  if(cmdline.isset("unwinding-assertions"))
-  {
-    options.set_option("unwinding-assertions", true);
-    options.set_option("paths-symex-explore-all", true);
-  }
-
   if(cmdline.isset("partial-loops"))
+  {
     options.set_option("partial-loops", true);
+    log.warning()
+      << "**** WARNING: --partial-loops may yield unsound verification results"
+      << messaget::eom;
+  }
 
   // remove unused equations
   if(cmdline.isset("slice-formula"))
@@ -362,6 +472,7 @@ void cbmc_parse_optionst::get_command_line_options(optionst &options)
   PARSE_OPTIONS_GOTO_TRACE(cmdline, options);
 
   // Options for process_goto_program
+  options.set_option("rewrite-rw-ok", true);
   options.set_option("rewrite-union", true);
 
   if(cmdline.isset("smt1"))
@@ -390,7 +501,7 @@ int cbmc_parse_optionst::doit()
   get_command_line_options(options);
 
   messaget::eval_verbosity(
-    cmdline.get_value("verbosity"), messaget::M_STATISTICS, ui_message_handler);
+    cmdline.get_value("verbosity"), messaget::M_STATUS, ui_message_handler);
 
   log_version_and_architecture("CBMC");
 
@@ -462,11 +573,7 @@ int cbmc_parse_optionst::doit()
 
     std::string filename=cmdline.args[0];
 
-    #ifdef _MSC_VER
-    std::ifstream infile(widen(filename));
-    #else
-    std::ifstream infile(filename);
-    #endif
+    std::ifstream infile(widen_if_needed(filename));
 
     if(!infile)
     {
@@ -485,18 +592,17 @@ int cbmc_parse_optionst::doit()
       return CPROVER_EXIT_INCORRECT_TASK;
     }
 
-    language->set_language_options(options);
-    language->set_message_handler(ui_message_handler);
+    language->set_language_options(options, ui_message_handler);
 
     log.status() << "Parsing " << filename << messaget::eom;
 
-    if(language->parse(infile, filename))
+    if(language->parse(infile, filename, ui_message_handler))
     {
       log.error() << "PARSING ERROR" << messaget::eom;
       return CPROVER_EXIT_INCORRECT_TASK;
     }
 
-    language->show_parse(std::cout);
+    language->show_parse(std::cout, ui_message_handler);
     return CPROVER_EXIT_SUCCESS;
   }
 
@@ -515,6 +621,31 @@ int cbmc_parse_optionst::doit()
 
   if(set_properties())
     return CPROVER_EXIT_SET_PROPERTIES_FAILED;
+
+  // At this point, our goto-model should be in symex-ready-goto form (all of
+  // the transformations have been run and the program is ready to be given
+  // to the solver).
+  if(options.is_set("export-symex-ready-goto"))
+  {
+    auto symex_ready_goto_filename =
+      options.get_option("export-symex-ready-goto");
+
+    bool success = !write_goto_binary(
+      symex_ready_goto_filename, goto_model, ui_message_handler);
+
+    if(!success)
+    {
+      log.error() << "ERROR: Unable to export goto-program in file "
+                  << symex_ready_goto_filename << messaget::eom;
+      return CPROVER_EXIT_INTERNAL_ERROR;
+    }
+    else
+    {
+      log.status() << "Exported goto-program in symex-ready-goto form at "
+                   << symex_ready_goto_filename << messaget::eom;
+      return CPROVER_EXIT_SUCCESS;
+    }
+  }
 
   if(
     options.get_bool_option("program-only") ||
@@ -596,13 +727,13 @@ int cbmc_parse_optionst::doit()
   {
     if(options.get_bool_option("stop-on-fail"))
     {
-      verifier = util_make_unique<
+      verifier = std::make_unique<
         stop_on_fail_verifiert<single_loop_incremental_symex_checkert>>(
         options, ui_message_handler, goto_model);
     }
     else
     {
-      verifier = util_make_unique<all_properties_verifier_with_trace_storaget<
+      verifier = std::make_unique<all_properties_verifier_with_trace_storaget<
         single_loop_incremental_symex_checkert>>(
         options, ui_message_handler, goto_model);
     }
@@ -611,7 +742,7 @@ int cbmc_parse_optionst::doit()
     options.get_bool_option("stop-on-fail") && options.get_bool_option("paths"))
   {
     verifier =
-      util_make_unique<stop_on_fail_verifiert<single_path_symex_checkert>>(
+      std::make_unique<stop_on_fail_verifiert<single_path_symex_checkert>>(
         options, ui_message_handler, goto_model);
   }
   else if(
@@ -621,13 +752,13 @@ int cbmc_parse_optionst::doit()
     if(options.get_bool_option("localize-faults"))
     {
       verifier =
-        util_make_unique<stop_on_fail_verifier_with_fault_localizationt<
+        std::make_unique<stop_on_fail_verifier_with_fault_localizationt<
           multi_path_symex_checkert>>(options, ui_message_handler, goto_model);
     }
     else
     {
       verifier =
-        util_make_unique<stop_on_fail_verifiert<multi_path_symex_checkert>>(
+        std::make_unique<stop_on_fail_verifiert<multi_path_symex_checkert>>(
           options, ui_message_handler, goto_model);
     }
   }
@@ -635,7 +766,7 @@ int cbmc_parse_optionst::doit()
     !options.get_bool_option("stop-on-fail") &&
     options.get_bool_option("paths"))
   {
-    verifier = util_make_unique<
+    verifier = std::make_unique<
       all_properties_verifier_with_trace_storaget<single_path_symex_checkert>>(
       options, ui_message_handler, goto_model);
   }
@@ -646,12 +777,12 @@ int cbmc_parse_optionst::doit()
     if(options.get_bool_option("localize-faults"))
     {
       verifier =
-        util_make_unique<all_properties_verifier_with_fault_localizationt<
+        std::make_unique<all_properties_verifier_with_fault_localizationt<
           multi_path_symex_checkert>>(options, ui_message_handler, goto_model);
     }
     else
     {
-      verifier = util_make_unique<
+      verifier = std::make_unique<
         all_properties_verifier_with_trace_storaget<multi_path_symex_checkert>>(
         options, ui_message_handler, goto_model);
     }
@@ -693,6 +824,8 @@ int cbmc_parse_optionst::get_goto_program(
 
   goto_model = initialize_goto_model(cmdline.args, ui_message_handler, options);
 
+  update_max_malloc_size(goto_model, ui_message_handler);
+
   if(cmdline.isset("show-symbol-table"))
   {
     show_symbol_table(goto_model, ui_message_handler);
@@ -724,7 +857,7 @@ int cbmc_parse_optionst::get_goto_program(
     return CPROVER_EXIT_SUCCESS;
   }
 
-  log.status() << config.object_bits_info() << messaget::eom;
+  log.statistics() << config.object_bits_info() << messaget::eom;
 
   return -1; // no error, continue
 }
@@ -748,7 +881,6 @@ void cbmc_parse_optionst::preprocessing(const optionst &options)
   }
 
   std::unique_ptr<languaget> language = get_language_from_filename(filename);
-  language->set_language_options(options);
 
   if(language == nullptr)
   {
@@ -756,9 +888,9 @@ void cbmc_parse_optionst::preprocessing(const optionst &options)
     return;
   }
 
-  language->set_message_handler(ui_message_handler);
+  language->set_language_options(options, ui_message_handler);
 
-  if(language->preprocess(infile, filename, std::cout))
+  if(language->preprocess(infile, filename, std::cout, ui_message_handler))
     log.error() << "PREPROCESSING ERROR" << messaget::eom;
 }
 
@@ -769,7 +901,7 @@ bool cbmc_parse_optionst::process_goto_program(
 {
   // Remove inline assembler; this needs to happen before
   // adding the library.
-  remove_asm(goto_model);
+  remove_asm(goto_model, log.get_message_handler());
 
   // add the library
   log.status() << "Adding CPROVER library (" << config.ansi_c.arch << ")"
@@ -778,6 +910,15 @@ bool cbmc_parse_optionst::process_goto_program(
     goto_model, log.get_message_handler(), cprover_cpp_library_factory);
   link_to_library(
     goto_model, log.get_message_handler(), cprover_c_library_factory);
+  // library functions may introduce inline assembler
+  while(has_asm(goto_model))
+  {
+    remove_asm(goto_model, log.get_message_handler());
+    link_to_library(
+      goto_model, log.get_message_handler(), cprover_cpp_library_factory);
+    link_to_library(
+      goto_model, log.get_message_handler(), cprover_c_library_factory);
+  }
 
   // Common removal of types and complex constructs
   if(::process_goto_program(goto_model, options, log))
@@ -859,11 +1000,18 @@ bool cbmc_parse_optionst::process_goto_program(
   // full slice?
   if(options.get_bool_option("full-slice"))
   {
+    log.warning() << "**** WARNING: Experimental option --full-slice, "
+                  << "analysis results may be unsound. See "
+                  << "https://github.com/diffblue/cbmc/issues/260"
+                  << messaget::eom;
     log.status() << "Performing a full slice" << messaget::eom;
     if(options.is_set("property"))
-      property_slicer(goto_model, options.get_list_option("property"));
+      property_slicer(
+        goto_model,
+        options.get_list_option("property"),
+        log.get_message_handler());
     else
-      full_slicer(goto_model);
+      full_slicer(goto_model, log.get_message_handler());
   }
 
   // remove any skips introduced since coverage instrumentation
@@ -881,27 +1029,29 @@ void cbmc_parse_optionst::help()
             << align_center_with_border("Daniel Kroening, Edmund Clarke") << '\n' // NOLINT(*)
             << align_center_with_border("Carnegie Mellon University, Computer Science Department") << '\n' // NOLINT(*)
             << align_center_with_border("kroening@kroening.com") << '\n' // NOLINT(*)
-            << align_center_with_border("Protected in part by U.S. patent 7,225,417") << '\n' // NOLINT(*)
-            <<
+            << align_center_with_border("Protected in part by U.S. patent 7,225,417") << '\n'; // NOLINT(*)
+
+  std::cout << help_formatter(
     "\n"
-    "Usage:                       Purpose:\n"
+    "Usage:                     \tPurpose:\n"
     "\n"
-    " cbmc [-?] [-h] [--help]      show help\n"
-    " cbmc --version               show version and exit\n"
-    " cbmc [options] file.c ...    perform bounded model checking\n"
+    " {bcbmc} [{y-?}] [{y-h}] [{y--help}] \t show this help\n"
+    " {bcbmc} {y--version} \t show version and exit\n"
+    " {bcbmc} [options] {ufile.c} {u...} \t perform bounded model checking\n"
     "\n"
     "Analysis options:\n"
     HELP_SHOW_PROPERTIES
-    " --symex-coverage-report f    generate a Cobertura XML coverage report in f\n" // NOLINT(*)
-    " --property id                only check one specific property\n"
-    " --trace                      give a counterexample trace for failed properties\n" //NOLINT(*)
-    " --stop-on-fail               stop analysis once a failed property is detected\n" // NOLINT(*)
-    "                              (implies --trace)\n"
-    " --localize-faults            localize faults (experimental)\n"
+    " {y--symex-coverage-report} {uf} \t generate a Cobertura XML coverage"
+    " report in {uf}\n"
+    " {y--property} {uid} \t only check one specific property\n"
+    " {y--trace} \t give a counterexample trace for failed properties\n"
+    " {y--stop-on-fail} \t stop analysis once a failed property is detected"
+    " (implies {y--trace})\n"
+    " {y--localize-faults} \t localize faults (experimental)\n"
     "\n"
     "C/C++ frontend options:\n"
-    " --preprocess                 stop after preprocessing\n"
-    " --test-preprocessor          stop after preprocessing, discard output\n"
+    " {y--preprocess} \t stop after preprocessing\n"
+    " {y--test-preprocessor} \t stop after preprocessing, discard output\n"
     HELP_CONFIG_C_CPP
     HELP_ANSI_C_LANGUAGE
     HELP_FUNCTIONS
@@ -910,27 +1060,27 @@ void cbmc_parse_optionst::help()
     HELP_CONFIG_PLATFORM
     "\n"
     "Program representations:\n"
-    " --show-parse-tree            show parse tree\n"
-    " --show-symbol-table          show loaded symbol table\n"
+    " {y--show-parse-tree} \t show parse tree\n"
+    " {y--show-symbol-table} \t show loaded symbol table\n"
     HELP_SHOW_GOTO_FUNCTIONS
     HELP_VALIDATE
+    " {y--export-symex-ready-goto} {uf} \t "
+    "serialise goto-program in symex-ready-goto form in {uf}\n"
     "\n"
     "Program instrumentation options:\n"
     HELP_GOTO_CHECK
     HELP_COVER
-    " --mm MM                      memory consistency model for concurrent programs (default: sc)\n" // NOLINT(*)
+    " {y--mm} {uMM} \t memory consistency model for concurrent programs"
+    " (default: {ysc})\n"
     HELP_CONFIG_LIBRARY
     HELP_REACHABILITY_SLICER
-    HELP_REACHABILITY_SLICER_FB
-    " --full-slice                 run full slicer (experimental)\n" // NOLINT(*)
-    " --drop-unused-functions      drop functions trivially unreachable from main function\n" // NOLINT(*)
-    " --havoc-undefined-functions\n"
-    "                              for any function that has no body, assign non-deterministic values to\n" // NOLINT(*)
-    "                              any parameters passed as non-const pointers and the return value\n" // NOLINT(*)
+    " {y--full-slice} \t run full slicer (experimental)\n"
+    " {y--drop-unused-functions} \t drop functions trivially unreachable from"
+    " main function\n"
     "\n"
     "Semantic transformations:\n"
-    // NOLINTNEXTLINE(whitespace/line_length)
-    " --nondet-static              add nondeterministic initialization of variables with static lifetime\n"
+    " {y--nondet-static} \t add nondeterministic initialization of variables"
+    " with static lifetime\n"
     "\n"
     "BMC options:\n"
     HELP_BMC
@@ -939,19 +1089,19 @@ void cbmc_parse_optionst::help()
     HELP_CONFIG_BACKEND
     HELP_SOLVER
     HELP_STRING_REFINEMENT_CBMC
-    " --arrays-uf-never            never turn arrays into uninterpreted functions\n" // NOLINT(*)
-    " --arrays-uf-always           always turn arrays into uninterpreted functions\n" // NOLINT(*)
-    " --show-array-constraints     show array theory constraints added\n"
-    "                              during post processing.\n"
-    "                              Requires --json-ui.\n"
+    " {y--arrays-uf-never} \t never turn arrays into uninterpreted functions\n"
+    " {y--arrays-uf-always} \t always turn arrays into uninterpreted"
+    " functions\n"
+    " {y--show-array-constraints} \t show array theory constraints added"
+    " during post processing. Requires {y--json-ui}.\n"
     "\n"
     "User-interface options:\n"
     HELP_XML_INTERFACE
     HELP_JSON_INTERFACE
     HELP_GOTO_TRACE
     HELP_FLUSH
-    " --verbosity #                verbosity level\n"
+    " {y--verbosity} {u#} \t verbosity level (default 6)\n"
     HELP_TIMESTAMP
-    "\n";
+    "\n");
   // clang-format on
 }

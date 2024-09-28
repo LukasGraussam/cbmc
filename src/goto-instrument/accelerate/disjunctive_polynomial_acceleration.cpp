@@ -88,7 +88,7 @@ bool disjunctive_polynomial_accelerationt::accelerate(
     polynomialt poly;
     exprt target=*it;
 
-    if(it->type().id()==ID_bool)
+    if(it->is_boolean())
     {
       // Hack: don't try to accelerate booleans.
       continue;
@@ -150,7 +150,7 @@ bool disjunctive_polynomial_accelerationt::accelerate(
     std::cout << "Trying to accelerate " << format(*it) << '\n';
 #endif
 
-    if(it->type().id()==ID_bool)
+    if(it->is_boolean())
     {
       // Hack: don't try to accelerate booleans.
       accelerator.dirty_vars.insert(*it);
@@ -640,7 +640,7 @@ void disjunctive_polynomial_accelerationt::assert_for_values(
   exprt &target)
 {
   // First figure out what the appropriate type for this expression is.
-  optionalt<typet> expr_type;
+  std::optional<typet> expr_type;
 
   for(std::map<exprt, exprt>::iterator it=values.begin();
       it!=values.end();

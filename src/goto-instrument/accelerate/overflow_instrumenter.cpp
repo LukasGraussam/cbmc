@@ -89,9 +89,9 @@ void overflow_instrumentert::overflow_expr(
   const exprt &expr,
   expr_sett &cases)
 {
-  forall_operands(it, expr)
+  for(const auto &op : expr.operands())
   {
-    overflow_expr(*it, cases);
+    overflow_expr(op, cases);
   }
 
   const typet &type = expr.type();
@@ -100,7 +100,7 @@ void overflow_instrumentert::overflow_expr(
   {
     const auto &typecast_expr = to_typecast_expr(expr);
 
-    if(typecast_expr.op().id() == ID_constant)
+    if(typecast_expr.op().is_constant())
       return;
 
     const typet &old_type = typecast_expr.op().type();

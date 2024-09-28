@@ -21,7 +21,6 @@ Author: CM Wintersteiger, 2006
 
 #include <util/cmdline.h>
 #include <util/config.h>
-#include <util/file_util.h>
 #include <util/get_base_name.h>
 #include <util/invariant.h>
 #include <util/prefix.h>
@@ -35,6 +34,7 @@ Author: CM Wintersteiger, 2006
 #include "hybrid_binary.h"
 #include "linker_script_merge.h"
 
+#include <filesystem>
 #include <fstream> // IWYU pragma: keep
 #include <iostream>
 #include <numeric>
@@ -59,7 +59,7 @@ static std::string compiler_name(
      base_name=="goto-gcc" ||
      base_name=="goto-ld")
   {
-    #ifdef __FreeBSD__
+#if defined(__FreeBSD__) || defined(__OpenBSD__)
     return "clang";
     #else
     return "gcc";
@@ -308,13 +308,6 @@ bool gcc_modet::needs_preprocessing(const std::string &file)
 /// does it.
 int gcc_modet::doit()
 {
-  if(cmdline.isset('?') ||
-     cmdline.isset("help"))
-  {
-    help();
-    return EX_OK;
-  }
-
   native_tool_name=
     compiler_name(cmdline, base_name);
 
@@ -322,6 +315,8 @@ int gcc_modet::doit()
     messaget::M_WARNING : messaget::M_ERROR;
   messaget::eval_verbosity(
     cmdline.get_value("verbosity"), default_verbosity, gcc_message_handler);
+  gcc_message_handler.print_warnings_as_errors(
+    cmdline.isset("Werror") && !cmdline.isset("Wno-error"));
 
   bool act_as_bcc=
     base_name=="bcc" ||
@@ -373,6 +368,20 @@ int gcc_modet::doit()
       std::cout << "gcc: " << gcc_version << '\n';
 
     return EX_OK; // Exit!
+  }
+
+  // In hybrid mode, when --help is requested, just reproduce the output of the
+  // original compiler. This is so as not to confuse configure scripts that
+  // depend on particular information (such as the list of supported targets).
+  if(cmdline.isset("help") && produce_hybrid_binary)
+  {
+    help();
+    return run_gcc(compiler);
+  }
+  else if(cmdline.isset('?') || cmdline.isset("help"))
+  {
+    help();
+    return EX_OK;
   }
 
   if(
@@ -999,9 +1008,9 @@ int gcc_modet::gcc_hybrid_binary(compilet &compiler)
 
     try
     {
-      file_rename(*it, bin_name);
+      std::filesystem::rename(*it, bin_name);
     }
-    catch(const cprover_exception_baset &e)
+    catch(const std::filesystem::filesystem_error &e)
     {
       log.error() << "Rename failed: " << e.what() << messaget::eom;
       return 1;

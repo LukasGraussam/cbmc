@@ -10,78 +10,61 @@
 /// \file
 /// Unit tests for goto program validation
 
-#include <testing-utils/use_catch.h>
-
-#include <testing-utils/message.h>
-
 #include <util/arith_tools.h>
 #include <util/c_types.h>
+#include <util/cmdline.h>
+#include <util/config.h>
 #include <util/pointer_expr.h>
 #include <util/std_code.h>
 
-#include <goto-programs/goto_convert_functions.h>
 #include <goto-programs/goto_model.h>
 #include <goto-programs/validate_goto_model.h>
 
+#include <ansi-c/goto-conversion/goto_convert_functions.h>
+#include <testing-utils/message.h>
+#include <testing-utils/use_catch.h>
+
 SCENARIO("Validation of a goto program", "[core][goto-programs][validate]")
 {
+  // This test does require a proper architecture to be set so that C type
+  // widths are configured.
+  cmdlinet cmdline;
+  config.set(cmdline);
+
   goto_modelt goto_model;
 
   // void f(){int x = 1;}
-  symbolt x;
-  x.name = "x";
-  x.mode = ID_C;
-  x.type = signed_int_type();
+  symbolt x{"x", signed_int_type(), ID_C};
   goto_model.symbol_table.add(x);
 
-  symbolt f;
-  f.name = "f";
-  f.mode = ID_C;
-  f.type = code_typet({}, empty_typet()); // void rtn, take no params
+  // void rtn, take no params
+  symbolt f{"f", code_typet({}, empty_typet()), ID_C};
   code_blockt f_body{
     {code_declt(x.symbol_expr()),
      code_assignt(x.symbol_expr(), from_integer(1, signed_int_type()))}};
-
   f.value = f_body;
   goto_model.symbol_table.add(f);
 
   // void g(){int y = 2;}
-  symbolt y;
-  y.name = "y";
-  y.mode = ID_C;
-  y.type = signed_int_type();
+  symbolt y{"y", signed_int_type(), ID_C};
   goto_model.symbol_table.add(y);
 
-  symbolt g;
-  g.name = "g";
-  g.mode = ID_C;
-  g.type = code_typet({}, empty_typet());
-
+  symbolt g{"g", code_typet({}, empty_typet()), ID_C};
   code_blockt g_body{
     {code_declt{y.symbol_expr()},
      code_assignt{y.symbol_expr(), from_integer(2, signed_int_type())}}};
-
   g.value = g_body;
   goto_model.symbol_table.add(g);
 
-  symbolt z;
-  z.name = "z";
-  z.mode = ID_C;
-  z.type = signed_int_type();
+  symbolt z{"z", signed_int_type(), ID_C};
   goto_model.symbol_table.add(z);
 
-  symbolt fn_ptr;
-  fn_ptr.name = "fn_ptr";
-  fn_ptr.mode = ID_C;
-
   // pointer to fn call
-  fn_ptr.type = pointer_typet(code_typet{{}, empty_typet()}, 64);
+  symbolt fn_ptr{"fn_ptr", pointer_type(code_typet{{}, empty_typet()}), ID_C};
   goto_model.symbol_table.add(fn_ptr);
 
-  symbolt entry_point;
-  entry_point.name = goto_functionst::entry_point();
-  entry_point.mode = ID_C;
-  entry_point.type = code_typet({}, empty_typet{});
+  symbolt entry_point{
+    goto_functionst::entry_point(), code_typet({}, empty_typet{}), ID_C};
   code_blockt entry_point_body{
     {code_declt{z.symbol_expr()},
      code_assignt{z.symbol_expr(), from_integer(3, signed_int_type())},

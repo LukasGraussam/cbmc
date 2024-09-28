@@ -78,6 +78,7 @@ public:
   void get_value_set_rec(
     const exprt &expr,
     object_mapt &dest,
+    bool &includes_nondet_pointer,
     const std::string &suffix,
     const typet &original_type,
     const namespacet &ns) const override
@@ -91,7 +92,7 @@ public:
     else
     {
       value_sett::get_value_set_rec(
-        expr, dest, suffix, original_type, ns);
+        expr, dest, includes_nondet_pointer, suffix, original_type, ns);
     }
   }
 
@@ -197,12 +198,12 @@ SCENARIO("test_value_set_analysis",
       std::prev(test_function.instructions.end());
 
     value_set_analysist normal_analysis(ns);
-    normal_analysis(goto_model.goto_functions);
+    normal_analysis(TEST_FUNCTION_NAME, test_function, ns);
     const auto &normal_function_end_vs=
       normal_analysis[test_function_end].value_set;
 
     test_value_set_analysist test_analysis(ns);
-    test_analysis(goto_model.goto_functions);
+    test_analysis(TEST_FUNCTION_NAME, test_function, ns);
     const auto &test_function_end_vs=
       test_analysis[test_function_end].value_set;
 

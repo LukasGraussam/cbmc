@@ -41,6 +41,7 @@ void add_library(
 
 void cprover_c_library_factory(
   const std::set<irep_idt> &functions,
+  const symbol_table_baset &,
   symbol_table_baset &,
   message_handlert &);
 
@@ -51,4 +52,5 @@ void cprover_c_library_factory_force_load(
   const std::set<irep_idt> &functions,
   symbol_table_baset &symbol_table,
   message_handlert &message_handler);
+
 #endif // CPROVER_ANSI_C_CPROVER_LIBRARY_H

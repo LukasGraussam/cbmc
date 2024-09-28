@@ -75,12 +75,7 @@ std::string graphml_witnesst::convert_assign_rec(
   const irep_idt &identifier,
   const code_assignt &assign)
 {
-#ifdef USE_DSTRING
   const auto cit = cache.find({identifier.get_no(), &assign.read()});
-#else
-  const auto cit =
-    cache.find({get_string_container()[id2string(identifier)], &assign.read()});
-#endif
   if(cit != cache.end())
     return cit->second;
 
@@ -105,13 +100,13 @@ std::string graphml_witnesst::convert_assign_rec(
     const array_typet &type = to_array_type(assign.rhs().type());
 
     unsigned i=0;
-    forall_operands(it, assign.rhs())
+    for(const auto &op : assign.rhs().operands())
     {
       index_exprt index(
         assign.lhs(), from_integer(i++, c_index_type()), type.element_type());
       if(!result.empty())
         result+=' ';
-      result+=convert_assign_rec(identifier, code_assignt(index, *it));
+      result += convert_assign_rec(identifier, code_assignt(index, op));
     }
   }
   else if(assign.rhs().id()==ID_struct ||
@@ -137,10 +132,11 @@ std::string graphml_witnesst::convert_assign_rec(
       return convert_assign_rec(identifier, tmp);
     }
 
-    const struct_union_typet &type=
-      to_struct_union_type(ns.follow(assign.lhs().type()));
-    const struct_union_typet::componentst &components=
-      type.components();
+    const typet &lhs_type = assign.lhs().type();
+    const struct_union_typet::componentst &components =
+      (lhs_type.id() == ID_struct_tag || lhs_type.id() == ID_union_tag)
+        ? ns.follow_tag(to_struct_or_union_tag_type(lhs_type)).components()
+        : to_struct_union_type(lhs_type).components();
 
     exprt::operandst::const_iterator it=
       assign.rhs().operands().begin();
@@ -151,7 +147,7 @@ std::string graphml_witnesst::convert_assign_rec(
       if(
         comp.get_is_padding() ||
         // for some reason #is_padding gets lost in *some* cases
-        has_prefix(id2string(comp.get_name()), "$pad"))
+        comp.get_name().starts_with("$pad"))
         continue;
 
       INVARIANT(
@@ -216,12 +212,7 @@ std::string graphml_witnesst::convert_assign_rec(
     result = lhs + " = " + expr_to_string(ns, identifier, clean_rhs) + ";";
   }
 
-#ifdef USE_DSTRING
   cache.insert({{identifier.get_no(), &assign.read()}, result});
-#else
-  cache.insert(
-    {{get_string_container()[id2string(identifier)], &assign.read()}, result});
-#endif
   return result;
 }
 
@@ -261,7 +252,7 @@ static bool filter_out(
     // Do not filter out assertions in functions the name of which starts with
     // CPROVER_PREFIX, because we need to maintain those as violation nodes:
     // these are assertions generated, for examples, for memory leaks.
-    if(!has_prefix(id2string(id), CPROVER_PREFIX) || !it->is_assert())
+    if(!id.starts_with(CPROVER_PREFIX) || !it->is_assert())
       return true;
   }
 
@@ -272,14 +263,14 @@ static bool contains_symbol_prefix(const exprt &expr, const std::string &prefix)
 {
   if(
     expr.id() == ID_symbol &&
-    has_prefix(id2string(to_symbol_expr(expr).get_identifier()), prefix))
+    to_symbol_expr(expr).get_identifier().starts_with(prefix))
   {
     return true;
   }
 
-  forall_operands(it, expr)
+  for(const auto &op : expr.operands())
   {
-    if(contains_symbol_prefix(*it, prefix))
+    if(contains_symbol_prefix(op, prefix))
       return true;
   }
   return false;
@@ -459,9 +450,9 @@ void graphml_witnesst::operator()(const goto_tracet &goto_trace)
         }
         else if(
           !contains_symbol_prefix(
-            it->full_lhs_value, SYMEX_DYNAMIC_PREFIX "dynamic_object") &&
+            it->full_lhs_value, SYMEX_DYNAMIC_PREFIX "::dynamic_object") &&
           !contains_symbol_prefix(
-            it->full_lhs, SYMEX_DYNAMIC_PREFIX "dynamic_object") &&
+            it->full_lhs, SYMEX_DYNAMIC_PREFIX "::dynamic_object") &&
           lhs_id.find("thread") == std::string::npos &&
           lhs_id.find("mutex") == std::string::npos &&
           (!it->full_lhs_value.is_constant() ||

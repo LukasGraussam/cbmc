@@ -22,6 +22,7 @@ Author: Daniel Kroening, kroening@kroening.com
 #include "value_sets.h"
 
 class namespacet;
+class xmlt;
 
 /// State type in value_set_domaint, used in value-set analysis and goto-symex.
 /// Represents a mapping from expressions to the addresses that may be stored
@@ -77,7 +78,7 @@ public:
 
   /// Represents the offset into an object: either a unique integer offset,
   /// or an unknown value, represented by `!offset`.
-  typedef optionalt<mp_integer> offsett;
+  typedef std::optional<mp_integer> offsett;
 
   /// Represents a set of expressions (`exprt` instances) with corresponding
   /// offsets (`offsett` instances). This is the RHS set of a single row of
@@ -287,6 +288,9 @@ public:
   /// \param indent: string to use for indentation of the output
   void output(std::ostream &out, const std::string &indent = "") const;
 
+  /// Output the value set formatted as XML
+  xmlt output_xml(void) const;
+
   /// Stores the LHS ID -> RHS expression set map. See `valuest` documentation
   /// for more detail.
   valuest values;
@@ -413,7 +417,7 @@ public:
   /// \param ns: The global namespace, for following \p type if it is a
   ///   struct tag type or a union tag type
   /// \return The index if the symbol is known, else `nullopt`.
-  optionalt<irep_idt> get_index_of_symbol(
+  std::optional<irep_idt> get_index_of_symbol(
     irep_idt identifier,
     const typet &type,
     const std::string &suffix,
@@ -470,13 +474,21 @@ protected:
     const std::string &erase_prefix,
     const namespacet &ns);
 
+protected:
   // Subclass customisation points:
 
-protected:
-  /// Subclass customisation point for recursion over RHS expression:
+  /// Subclass customisation point for recursion over RHS expression.
+  /// \param expr: RHS expression to get value set for.
+  /// \param [out] dest: value set for \p expr.
+  /// \param [out] includes_nondet_pointer: \p expr includes a non-deterministic
+  ///   value, and the caller may want to expand \p dest to reflect this.
+  /// \param suffix: context to enable field sensitivity.
+  /// \param original_type: type of \p expr when starting the recursion.
+  /// \param ns: namespace.
   virtual void get_value_set_rec(
     const exprt &expr,
     object_mapt &dest,
+    bool &includes_nondet_pointer,
     const std::string &suffix,
     const typet &original_type,
     const namespacet &ns) const;
@@ -494,7 +506,7 @@ protected:
     const codet &code,
     const namespacet &ns);
 
- private:
+private:
   /// Subclass customisation point to filter or otherwise alter the value-set
   /// returned from get_value_set before it is passed into assign. For example,
   /// this is used in one subclass to tag and thus differentiate values that

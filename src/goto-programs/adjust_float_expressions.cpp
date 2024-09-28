@@ -75,9 +75,11 @@ static bool have_to_adjust_float_expressions(const exprt &expr)
       return true;
   }
 
-  forall_operands(it, expr)
-    if(have_to_adjust_float_expressions(*it))
+  for(const auto &op : expr.operands())
+  {
+    if(have_to_adjust_float_expressions(op))
       return true;
+  }
 
   return false;
 }
@@ -205,7 +207,7 @@ void adjust_float_expressions(
   const namespacet &ns)
 {
   for(auto &i : goto_function.body.instructions)
-    i.transform([&ns](exprt expr) -> optionalt<exprt> {
+    i.transform([&ns](exprt expr) -> std::optional<exprt> {
       if(have_to_adjust_float_expressions(expr))
       {
         adjust_float_expressions(expr, ns);

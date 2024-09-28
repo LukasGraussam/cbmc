@@ -8,8 +8,6 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include "boolbv.h"
 
-#include <algorithm>
-
 #include <util/arith_tools.h>
 #include <util/bitvector_expr.h>
 #include <util/bitvector_types.h>
@@ -24,6 +22,10 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include <solvers/floatbv/float_utils.h>
 
+#include "literal_vector_expr.h"
+
+#include <algorithm>
+
 endianness_mapt boolbvt::endianness_map(const typet &type) const
 {
   const bool little_endian =
@@ -34,8 +36,9 @@ endianness_mapt boolbvt::endianness_map(const typet &type) const
 /// Convert expression to vector of literalts, using an internal
 /// cache to speed up conversion if available. Also assert the resultant
 /// vector is of a specific size, and freeze any elements if appropriate.
-const bvt &
-boolbvt::convert_bv(const exprt &expr, optionalt<std::size_t> expected_width)
+const bvt &boolbvt::convert_bv(
+  const exprt &expr,
+  std::optional<std::size_t> expected_width)
 {
   // check cache first
   std::pair<bv_cachet::iterator, bool> cache_result=
@@ -77,6 +80,15 @@ boolbvt::convert_bv(const exprt &expr, optionalt<std::size_t> expected_width)
   return cache_entry;
 }
 
+exprt boolbvt::handle(const exprt &expr)
+{
+  if(expr.type().id() == ID_bool)
+    return prop_conv_solvert::handle(expr);
+  auto bv = convert_bv(expr);
+  set_frozen(bv); // for incremental usage
+  return literal_vector_exprt{bv, expr.type()};
+}
+
 /// Print that the expression of x has failed conversion,
 /// then return a vector of x's width.
 bvt boolbvt::conversion_failed(const exprt &expr)
@@ -95,7 +107,7 @@ bvt boolbvt::conversion_failed(const exprt &expr)
 ///   circuit
 bvt boolbvt::convert_bitvector(const exprt &expr)
 {
-  if(expr.type().id()==ID_bool)
+  if(expr.is_boolean())
     return {convert(expr)};
 
   if(expr.id()==ID_index)
@@ -108,13 +120,15 @@ bvt boolbvt::convert_bitvector(const exprt &expr)
     return convert_with(to_with_expr(expr));
   else if(expr.id()==ID_update)
     return convert_update(to_update_expr(expr));
+  else if(expr.id() == ID_update_bit)
+    return convert_update_bit(to_update_bit_expr(expr));
   else if(expr.id()==ID_case)
     return convert_case(expr);
   else if(expr.id()==ID_cond)
     return convert_cond(to_cond_expr(expr));
   else if(expr.id()==ID_if)
     return convert_if(to_if_expr(expr));
-  else if(expr.id()==ID_constant)
+  else if(expr.is_constant())
     return convert_constant(to_constant_expr(expr));
   else if(expr.id()==ID_typecast)
     return convert_bv_typecast(to_typecast_expr(expr));
@@ -192,8 +206,6 @@ bvt boolbvt::convert_bitvector(const exprt &expr)
   }
   else if(expr.id()==ID_array)
     return convert_array(expr);
-  else if(expr.id()==ID_vector)
-    return convert_vector(to_vector_expr(expr));
   else if(expr.id()==ID_complex)
     return convert_complex(to_complex_expr(expr));
   else if(expr.id()==ID_complex_real)
@@ -241,6 +253,8 @@ bvt boolbvt::convert_bitvector(const exprt &expr)
   }
   else if(expr.id() == ID_find_first_set)
     return convert_bv(simplify_expr(to_find_first_set_expr(expr).lower(), ns));
+  else if(expr.id() == ID_literal_vector)
+    return to_literal_vector_expr(expr).bv();
 
   return conversion_failed(expr);
 }
@@ -317,7 +331,7 @@ bvt boolbvt::convert_function_application(
 
 literalt boolbvt::convert_rest(const exprt &expr)
 {
-  PRECONDITION(expr.type().id() == ID_bool);
+  PRECONDITION(expr.is_boolean());
 
   if(expr.id()==ID_typecast)
     return convert_typecast(to_typecast_expr(expr));
@@ -506,7 +520,7 @@ bool boolbvt::boolbv_set_equality_to_true(const equal_exprt &expr)
 
 void boolbvt::set_to(const exprt &expr, bool value)
 {
-  PRECONDITION(expr.type().id() == ID_bool);
+  PRECONDITION(expr.is_boolean());
 
   const auto equal_expr = expr_try_dynamic_cast<equal_exprt>(expr);
   if(value && equal_expr && !boolbv_set_equality_to_true(*equal_expr))

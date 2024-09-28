@@ -10,7 +10,6 @@
 /// Value Set Abstract Object
 
 #include <util/arith_tools.h>
-#include <util/make_unique.h>
 #include <util/simplify_expr.h>
 
 #include <analyses/variable-sensitivity/abstract_environment.h>
@@ -62,7 +61,7 @@ private:
 static index_range_implementation_ptrt
 make_value_set_index_range(const std::set<exprt> &vals)
 {
-  return util_make_unique<value_set_index_ranget>(vals);
+  return std::make_unique<value_set_index_ranget>(vals);
 }
 
 static value_range_implementation_ptrt
@@ -104,7 +103,7 @@ private:
 static value_range_implementation_ptrt
 make_value_set_value_range(const abstract_object_sett &vals)
 {
-  return util_make_unique<value_set_value_ranget>(vals);
+  return std::make_unique<value_set_value_ranget>(vals);
 }
 
 static abstract_object_sett
@@ -126,13 +125,6 @@ static abstract_object_sett widen_value_set(
   const abstract_object_sett &values,
   const constant_interval_exprt &lhs,
   const constant_interval_exprt &rhs);
-
-value_set_abstract_objectt::value_set_abstract_objectt(const typet &type)
-  : abstract_value_objectt(type)
-{
-  values.insert(std::make_shared<constant_abstract_valuet>(type));
-  verify();
-}
 
 value_set_abstract_objectt::value_set_abstract_objectt(
   const typet &type,
@@ -293,7 +285,8 @@ abstract_object_pointert value_set_abstract_objectt::resolve_values(
 void value_set_abstract_objectt::set_top_internal()
 {
   values.clear();
-  values.insert(std::make_shared<constant_abstract_valuet>(type()));
+  values.insert(
+    std::make_shared<constant_abstract_valuet>(type(), true, false));
 }
 
 void value_set_abstract_objectt::set_values(
@@ -448,11 +441,11 @@ static bool is_set_extreme(const typet &type, const abstract_object_sett &set)
       set,
       [](const abstract_value_objectt &value) {
         auto c = value.to_constant();
-        return c.is_false() || (c.id() == ID_min);
+        return c.is_false() || (c.id() == ID_min_value);
       },
       [](const abstract_value_objectt &value) {
         auto c = value.to_constant();
-        return c.is_true() || (c.id() == ID_max);
+        return c.is_true() || (c.id() == ID_max_value);
       });
   }
 
@@ -462,11 +455,11 @@ static bool is_set_extreme(const typet &type, const abstract_object_sett &set)
       set,
       [](const abstract_value_objectt &value) {
         auto c = value.to_constant();
-        return c.is_zero() || (c.id() == ID_min);
+        return c.is_zero() || (c.id() == ID_min_value);
       },
       [](const abstract_value_objectt &value) {
         auto c = value.to_constant();
-        return c.is_one() || (c.id() == ID_max);
+        return c.is_one() || (c.id() == ID_max_value);
       });
   }
 
@@ -499,6 +492,7 @@ static abstract_object_sett compact_values(const abstract_object_sett &values)
 static exprt eval_expr(const exprt &e);
 static bool is_eq(const exprt &lhs, const exprt &rhs);
 static bool is_le(const exprt &lhs, const exprt &rhs);
+static bool is_lt(const exprt &lhs, const exprt &rhs);
 static abstract_object_sett collapse_values_in_intervals(
   const abstract_object_sett &values,
   const std::vector<constant_interval_exprt> &intervals);
@@ -531,8 +525,8 @@ void collapse_overlapping_intervals(
     intervals.end(),
     [](constant_interval_exprt const &lhs, constant_interval_exprt const &rhs) {
       if(is_eq(lhs.get_lower(), rhs.get_lower()))
-        return is_le(lhs.get_upper(), rhs.get_upper());
-      return is_le(lhs.get_lower(), rhs.get_lower());
+        return is_lt(lhs.get_upper(), rhs.get_upper());
+      return is_lt(lhs.get_lower(), rhs.get_lower());
     });
 
   size_t index = 1;
@@ -650,6 +644,11 @@ static bool is_eq(const exprt &lhs, const exprt &rhs)
 static bool is_le(const exprt &lhs, const exprt &rhs)
 {
   return constant_interval_exprt::less_than_or_equal(lhs, rhs);
+}
+
+static bool is_lt(const exprt &lhs, const exprt &rhs)
+{
+  return constant_interval_exprt::less_than(lhs, rhs);
 }
 
 static abstract_object_sett widen_value_set(

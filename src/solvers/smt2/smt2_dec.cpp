@@ -20,10 +20,12 @@ std::string smt2_dect::decision_procedure_text() const
   // clang-format off
   return "SMT2 " + logic + (use_FPA_theory ? " (with FPA)" : "") + " using " +
     (solver==solvert::GENERIC?"Generic":
+     solver==solvert::BITWUZLA?"Bitwuzla":
      solver==solvert::BOOLECTOR?"Boolector":
      solver==solvert::CPROVER_SMT2?"CPROVER SMT2":
      solver==solvert::CVC3?"CVC3":
      solver==solvert::CVC4?"CVC4":
+     solver==solvert::CVC5?"CVC5":
      solver==solvert::MATHSAT?"MathSAT":
      solver==solvert::YICES?"Yices":
      solver==solvert::Z3?"Z3":
@@ -31,7 +33,7 @@ std::string smt2_dect::decision_procedure_text() const
   // clang-format on
 }
 
-decision_proceduret::resultt smt2_dect::dec_solve()
+decision_proceduret::resultt smt2_dect::dec_solve(const exprt &assumption)
 {
   ++number_of_solver_calls;
 
@@ -40,12 +42,21 @@ decision_proceduret::resultt smt2_dect::dec_solve()
     temp_file_stderr("smt2_dec_stderr_", "");
 
   const auto write_problem_to_file = [&](std::ofstream problem_out) {
+    if(assumption.is_not_nil())
+      assumptions.push_back(convert(assumption));
+
     cached_output << stringstream.str();
     stringstream.str(std::string{});
+
     write_footer();
+
+    if(assumption.is_not_nil())
+      assumptions.pop_back();
+
     problem_out << cached_output.str() << stringstream.str();
     stringstream.str(std::string{});
   };
+
   write_problem_to_file(std::ofstream(
     temp_file_problem(), std::ios_base::out | std::ios_base::trunc));
 
@@ -54,6 +65,10 @@ decision_proceduret::resultt smt2_dect::dec_solve()
 
   switch(solver)
   {
+  case solvert::BITWUZLA:
+    argv = {"bitwuzla", temp_file_problem()};
+    break;
+
   case solvert::BOOLECTOR:
     argv = {"boolector", "--smt2", temp_file_problem(), "-m"};
     break;
@@ -77,6 +92,10 @@ decision_proceduret::resultt smt2_dect::dec_solve()
     // The flags --bitblast=eager --bv-div-zero-const help but only
     // work for pure bit-vector formulas.
     argv = {"cvc4", "-L", "smt2", temp_file_problem()};
+    break;
+
+  case solvert::CVC5:
+    argv = {"cvc5", "--lang", "smtlib", temp_file_problem()};
     break;
 
   case solvert::MATHSAT:
@@ -217,22 +236,45 @@ decision_proceduret::resultt smt2_dect::read_result(std::istream &in)
   {
     const std::string boolean_identifier =
       convert_identifier("B" + std::to_string(v));
-    boolean_assignment[v] = [&]() {
       const auto found_parsed_value =
         parsed_values.find(drop_quotes(boolean_identifier));
       if(found_parsed_value != parsed_values.end())
       {
-        return found_parsed_value->second.id() == ID_true;
+        const irept &value = found_parsed_value->second;
+
+        if(value.id() != ID_true && value.id() != ID_false)
+        {
+          messaget log{message_handler};
+          log.error() << "SMT2 solver returned non-constant value for variable "
+                      << boolean_identifier << messaget::eom;
+          return decision_proceduret::resultt::D_ERROR;
+        }
+        boolean_assignment[v] = value.id() == ID_true;
       }
-      // Work out the value based on what set_to was called with.
-      const auto found_set_value = set_values.find(boolean_identifier);
-      if(found_set_value != set_values.end())
-        return found_set_value->second;
-      // Old code used the computation
-      // const irept &value=values["B"+std::to_string(v)];
-      // boolean_assignment[v]=(value.id()==ID_true);
-      return parsed_values[boolean_identifier].id() == ID_true;
-    }();
+      else
+      {
+        // Work out the value based on what set_to was called with.
+        const auto found_set_value = set_values.find(boolean_identifier);
+        if(found_set_value != set_values.end())
+          boolean_assignment[v] = found_set_value->second;
+        else
+        {
+          // Old code used the computation
+          // const irept &value=values["B"+std::to_string(v)];
+          // boolean_assignment[v]=(value.id()==ID_true);
+          const irept &value = parsed_values[boolean_identifier];
+
+          if(value.id() != ID_true && value.id() != ID_false)
+          {
+            messaget log{message_handler};
+            log.error()
+              << "SMT2 solver returned non-Boolean value for variable "
+              << boolean_identifier << messaget::eom;
+            return decision_proceduret::resultt::D_ERROR;
+          }
+          boolean_assignment[v] = value.id() == ID_true;
+        }
+      }
   }
 
   return res;

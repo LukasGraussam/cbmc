@@ -1,6 +1,6 @@
 /* FUNCTION: sleep */
 
-unsigned __VERIFIER_nondet_unsigned();
+unsigned __VERIFIER_nondet_unsigned(void);
 
 unsigned int sleep(unsigned int seconds)
 {
@@ -22,9 +22,44 @@ unsigned int _sleep(unsigned int seconds)
   return sleep(seconds);
 }
 
+/* FUNCTION: usleep */
+
+#ifndef __CPROVER_ERRNO_H_INCLUDED
+#  include <errno.h>
+#  define __CPROVER_ERRNO_H_INCLUDED
+#endif
+
+__CPROVER_bool __VERIFIER_nondet___CPROVER_bool(void);
+
+int usleep(unsigned int usec)
+{
+__CPROVER_HIDE:;
+  // do nothing, but return nondet value
+  __CPROVER_bool error = __VERIFIER_nondet___CPROVER_bool();
+  if(error)
+  {
+    if(usec >= 1000000)
+      errno = EINVAL;
+    else
+      errno = EINTR;
+    return -1;
+  }
+  return 0;
+}
+
+/* FUNCTION: _usleep */
+
+int usleep(unsigned int);
+
+int _usleep(unsigned int usec)
+{
+__CPROVER_HIDE:;
+  return usleep(usec);
+}
+
 /* FUNCTION: unlink */
 
-int __VERIFIER_nondet_int();
+int __VERIFIER_nondet_int(void);
 
 int unlink(const char *s)
 {
@@ -45,12 +80,12 @@ int unlink(const char *s)
 #define __CPROVER_ERRNO_H_INCLUDED
 #endif
 
-extern struct __CPROVER_pipet __CPROVER_pipes[];
+extern struct __CPROVER_pipet __CPROVER_pipes[__CPROVER_constant_infinity_uint];
 // offset to make sure we don't collide with other fds
 extern const int __CPROVER_pipe_offset;
-extern unsigned __CPROVER_pipe_count;
+unsigned __CPROVER_pipe_count = 0;
 
-__CPROVER_bool __VERIFIER_nondet___CPROVER_bool();
+__CPROVER_bool __VERIFIER_nondet___CPROVER_bool(void);
 
 int pipe(int fildes[2])
 {
@@ -97,7 +132,7 @@ __CPROVER_HIDE:;
 
 /* FUNCTION: close */
 
-extern struct __CPROVER_pipet __CPROVER_pipes[];
+extern struct __CPROVER_pipet __CPROVER_pipes[__CPROVER_constant_infinity_uint];
 // offset to make sure we don't collide with other fds
 extern const int __CPROVER_pipe_offset;
 
@@ -151,11 +186,11 @@ int _close(int fildes)
 #define size_type size_t
 #endif
 
-extern struct __CPROVER_pipet __CPROVER_pipes[];
+extern struct __CPROVER_pipet __CPROVER_pipes[__CPROVER_constant_infinity_uint];
 // offset to make sure we don't collide with other fds
 extern const int __CPROVER_pipe_offset;
 
-ret_type __VERIFIER_nondet_ret_type();
+ret_type __VERIFIER_nondet_ret_type(void);
 
 ret_type write(int fildes, const void *buf, size_type nbyte)
 {
@@ -229,13 +264,13 @@ ret_type _write(int fildes, const void *buf, size_type nbyte)
 #define size_type size_t
 #endif
 
-extern struct __CPROVER_pipet __CPROVER_pipes[];
+extern struct __CPROVER_pipet __CPROVER_pipes[__CPROVER_constant_infinity_uint];
 // offset to make sure we don't collide with other fds
 extern const int __CPROVER_pipe_offset;
 
-__CPROVER_bool __VERIFIER_nondet___CPROVER_bool();
-ret_type __VERIFIER_nondet_ret_type();
-size_type __VERIFIER_nondet_size_type();
+__CPROVER_bool __VERIFIER_nondet___CPROVER_bool(void);
+ret_type __VERIFIER_nondet_ret_type(void);
+size_type __VERIFIER_nondet_size_type(void);
 
 ret_type read(int fildes, void *buf, size_type nbyte)
 {
@@ -318,4 +353,35 @@ ret_type _read(int fildes, void *buf, size_type nbyte)
 {
   __CPROVER_HIDE:;
   return read(fildes, buf, nbyte);
+}
+
+/* FUNCTION: sysconf */
+
+#ifndef __CPROVER_ERRNO_H_INCLUDED
+#  include <errno.h>
+#  define __CPROVER_ERRNO_H_INCLUDED
+#endif
+
+long __VERIFIER_nondet_long(void);
+int __VERIFIER_nondet_int(void);
+
+long sysconf(int name);
+
+// This overapproximation is based on the sysconf specification available at
+// https://pubs.opengroup.org/onlinepubs/9699919799/functions/sysconf.html.
+long sysconf(int name)
+{
+__CPROVER_HIDE:;
+  (void)name;
+  long retval = __VERIFIER_nondet_long();
+
+  // We should keep errno as non-deterministic as possible, since this model
+  // never takes into account the name input.
+  errno = __VERIFIER_nondet_int();
+
+  // Spec states "some returned values may be huge; they are not suitable
+  // for allocating memory". There aren't also guarantees about return
+  // values being strictly equal or greater to -1.
+  // Thus, modelling it as non-deterministic.
+  return retval;
 }

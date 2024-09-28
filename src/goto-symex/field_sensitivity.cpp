@@ -84,9 +84,9 @@ exprt field_sensitivityt::apply(
       member.struct_op() = tmp.get_original_expr();
       tmp.set_expression(member);
       if(was_l2)
-        return state.rename(std::move(tmp), ns).get();
+        return apply(ns, state, state.rename(std::move(tmp), ns).get(), write);
       else
-        return std::move(tmp);
+        return apply(ns, state, std::move(tmp), write);
     }
   }
   else if(
@@ -99,7 +99,10 @@ exprt field_sensitivityt::apply(
        be.op().type().id() == ID_union_tag) &&
       is_ssa_expr(be.op()) && be.offset().is_constant())
     {
-      const union_typet &type = to_union_type(ns.follow(be.op().type()));
+      const union_typet &type =
+        be.op().type().id() == ID_union_tag
+          ? ns.follow_tag(to_union_tag_type(be.op().type()))
+          : to_union_type(be.op().type());
       for(const auto &comp : type.components())
       {
         ssa_exprt tmp = to_ssa_expr(be.op());
@@ -116,9 +119,26 @@ exprt field_sensitivityt::apply(
           tmp.type() = be.type();
           tmp.set_expression(*recursive_member);
           if(was_l2)
-            return state.rename(std::move(tmp), ns).get();
+          {
+            return apply(
+              ns, state, state.rename(std::move(tmp), ns).get(), write);
+          }
           else
-            return std::move(tmp);
+            return apply(ns, state, std::move(tmp), write);
+        }
+        else if(
+          recursive_member.has_value() && recursive_member->id() == ID_typecast)
+        {
+          if(was_l2)
+          {
+            return apply(
+              ns,
+              state,
+              state.rename(std::move(*recursive_member), ns).get(),
+              write);
+          }
+          else
+            return apply(ns, state, std::move(*recursive_member), write);
         }
       }
     }
@@ -135,7 +155,7 @@ exprt field_sensitivityt::apply(
 
     if(
       is_ssa_expr(index.array()) && index.array().type().id() == ID_array &&
-      index.index().id() == ID_constant)
+      index.index().is_constant())
     {
       // place the entire index expression, not just the array operand, in an
       // SSA expression
@@ -157,11 +177,11 @@ exprt field_sensitivityt::apply(
       }
 
       if(
-        l2_size.id() == ID_constant &&
+        l2_size.is_constant() &&
         numeric_cast_v<mp_integer>(to_constant_expr(l2_size)) <=
           max_field_sensitivity_array_size)
       {
-        if(l2_index.get().id() == ID_constant)
+        if(l2_index.get().is_constant())
         {
           // place the entire index expression, not just the array operand,
           // in an SSA expression
@@ -171,9 +191,12 @@ exprt field_sensitivityt::apply(
           index.index() = l2_index.get();
           tmp.set_expression(index);
           if(was_l2)
-            return state.rename(std::move(tmp), ns).get();
+          {
+            return apply(
+              ns, state, state.rename(std::move(tmp), ns).get(), write);
+          }
           else
-            return std::move(tmp);
+            return apply(ns, state, std::move(tmp), write);
         }
         else if(!write)
         {
@@ -201,9 +224,12 @@ exprt field_sensitivityt::get_fields(
     (!disjoined_fields_only && (ssa_expr.type().id() == ID_union ||
                                 ssa_expr.type().id() == ID_union_tag)))
   {
-    const struct_union_typet &type =
-      to_struct_union_type(ns.follow(ssa_expr.type()));
-    const struct_union_typet::componentst &components = type.components();
+    const struct_union_typet::componentst &components =
+      (ssa_expr.type().id() == ID_struct_tag ||
+       ssa_expr.type().id() == ID_union_tag)
+        ? ns.follow_tag(to_struct_or_union_tag_type(ssa_expr.type()))
+            .components()
+        : to_struct_union_type(ssa_expr.type()).components();
 
     exprt::operandst fields;
     fields.reserve(components.size());
@@ -238,7 +264,7 @@ exprt field_sensitivityt::get_fields(
 #ifdef ENABLE_ARRAY_FIELD_SENSITIVITY
   else if(
     ssa_expr.type().id() == ID_array &&
-    to_array_type(ssa_expr.type()).size().id() == ID_constant)
+    to_array_type(ssa_expr.type()).size().is_constant())
   {
     const mp_integer mp_array_size = numeric_cast_v<mp_integer>(
       to_constant_expr(to_array_type(ssa_expr.type()).size()));
@@ -293,6 +319,14 @@ void field_sensitivityt::field_assignments(
   {
     field_assignments_rec(
       ns, state, lhs_fs, rhs, target, allow_pointer_unsoundness);
+    // Erase the composite symbol from our working state. Note that we need to
+    // have it in the propagation table and the value set while doing the field
+    // assignments, thus we cannot skip putting it in there above.
+    if(is_divisible(lhs, true))
+    {
+      state.propagation.erase_if_exists(lhs.get_identifier());
+      state.value_set.erase_symbol(lhs, ns);
+    }
   }
 }
 
@@ -316,15 +350,11 @@ void field_sensitivityt::field_assignments_rec(
 {
   if(is_ssa_expr(lhs_fs))
   {
-    const ssa_exprt ssa_lhs = state
-                                .assignment(
-                                  to_ssa_expr(lhs_fs),
-                                  ssa_rhs,
-                                  ns,
-                                  true,
-                                  true,
-                                  allow_pointer_unsoundness)
-                                .get();
+    const ssa_exprt &l1_lhs = to_ssa_expr(lhs_fs);
+    const ssa_exprt ssa_lhs =
+      state
+        .assignment(l1_lhs, ssa_rhs, ns, true, true, allow_pointer_unsoundness)
+        .get();
 
     // do the assignment
     target.assignment(
@@ -335,11 +365,22 @@ void field_sensitivityt::field_assignments_rec(
       ssa_rhs,
       state.source,
       symex_targett::assignment_typet::STATE);
+    // Erase the composite symbol from our working state. Note that we need to
+    // have it in the propagation table and the value set while doing the field
+    // assignments, thus we cannot skip putting it in there above.
+    if(is_divisible(l1_lhs, true))
+    {
+      state.propagation.erase_if_exists(l1_lhs.get_identifier());
+      state.value_set.erase_symbol(l1_lhs, ns);
+    }
   }
   else if(
     ssa_rhs.type().id() == ID_struct || ssa_rhs.type().id() == ID_struct_tag)
   {
-    const struct_typet &type = to_struct_type(ns.follow(ssa_rhs.type()));
+    const struct_typet &type =
+      ssa_rhs.type().id() == ID_struct_tag
+        ? ns.follow_tag(to_struct_tag_type(ssa_rhs.type()))
+        : to_struct_type(ssa_rhs.type());
     const struct_union_typet::componentst &components = type.components();
 
     PRECONDITION(
@@ -377,7 +418,10 @@ void field_sensitivityt::field_assignments_rec(
   else if(
     ssa_rhs.type().id() == ID_union || ssa_rhs.type().id() == ID_union_tag)
   {
-    const union_typet &type = to_union_type(ns.follow(ssa_rhs.type()));
+    const union_typet &type =
+      ssa_rhs.type().id() == ID_union_tag
+        ? ns.follow_tag(to_union_tag_type(ssa_rhs.type()))
+        : to_union_type(ssa_rhs.type());
     const struct_union_typet::componentst &components = type.components();
 
     PRECONDITION(
@@ -496,7 +540,7 @@ bool field_sensitivityt::is_divisible(
 #ifdef ENABLE_ARRAY_FIELD_SENSITIVITY
   if(
     expr.type().id() == ID_array &&
-    to_array_type(expr.type()).size().id() == ID_constant &&
+    to_array_type(expr.type()).size().is_constant() &&
     numeric_cast_v<mp_integer>(to_constant_expr(
       to_array_type(expr.type()).size())) <= max_field_sensitivity_array_size)
   {

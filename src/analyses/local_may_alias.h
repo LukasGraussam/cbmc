@@ -16,7 +16,6 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <stack>
 
 #include <util/union_find.h>
-#include <util/make_unique.h>
 
 #include "locals.h"
 #include "dirty.h"
@@ -119,15 +118,15 @@ public:
 
     goto_functionst::function_mapt::const_iterator f_it2=
       goto_functions->function_map.find(fkt);
-    assert(f_it2!=goto_functions->function_map.end());
-    return *(fkt_map[fkt]=util_make_unique<local_may_aliast>(f_it2->second));
+    CHECK_RETURN(f_it2 != goto_functions->function_map.end());
+    return *(fkt_map[fkt] = std::make_unique<local_may_aliast>(f_it2->second));
   }
 
   local_may_aliast &operator()(goto_programt::const_targett t)
   {
     target_mapt::const_iterator t_it=
       target_map.find(t);
-    assert(t_it!=target_map.end());
+    CHECK_RETURN(t_it != target_map.end());
     return operator()(t_it->second);
   }
 
@@ -140,7 +139,9 @@ protected:
   typedef std::map<irep_idt, std::unique_ptr<local_may_aliast> > fkt_mapt;
   fkt_mapt fkt_map;
 
-  typedef std::map<goto_programt::const_targett, irep_idt > target_mapt;
+  typedef std::
+    map<goto_programt::const_targett, irep_idt, goto_programt::target_less_than>
+      target_mapt;
   target_mapt target_map;
 };
 

@@ -101,7 +101,7 @@ unsigned instrumentert::goto2graph_cfg(
 
   std::vector<std::size_t> subgraph_index;
   num_sccs=egraph_alt.SCCs(subgraph_index);
-  assert(egraph_SCCs.empty());
+  CHECK_RETURN(egraph_SCCs.empty());
   egraph_SCCs.resize(num_sccs, std::set<event_idt>());
   for(std::map<event_idt, event_idt>::const_iterator
       it=map_vertex_gnode.begin();
@@ -428,12 +428,11 @@ bool instrumentert::cfg_visitort::contains_shared_array(
       ns,
       value_sets,
       function_id,
-      cur
+      cur,
 #ifdef LOCAL_MAY
-      ,
-      local_may
+      local_may,
 #endif
-    ); // NOLINT(whitespace/parens)
+      instrumenter.message.get_message_handler()); // NOLINT(whitespace/parens)
     instrumenter.message.debug() << "Writes: "<<rw_set.w_entries.size()
       <<"; Reads:"<<rw_set.r_entries.size() << messaget::eom;
 
@@ -857,12 +856,11 @@ void instrumentert::cfg_visitort::visit_cfg_assign(
     ns,
     value_sets,
     function_id,
-    i_it
+    i_it,
 #ifdef LOCAL_MAY
-    ,
-    local_may
+    local_may,
 #endif
-  ); // NOLINT(whitespace/parens)
+    instrumenter.message.get_message_handler()); // NOLINT(whitespace/parens)
 
   event_idt previous=std::numeric_limits<event_idt>::max();
   event_idt previous_gnode=std::numeric_limits<event_idt>::max();
@@ -949,7 +947,7 @@ void instrumentert::cfg_visitort::visit_cfg_assign(
           <<new_read_node << messaget::eom;
         std::map<event_idt, event_idt>::const_iterator entry=
           instrumenter.map_vertex_gnode.find(id_it->second);
-        assert(entry!=instrumenter.map_vertex_gnode.end());
+        CHECK_RETURN(entry != instrumenter.map_vertex_gnode.end());
         egraph.add_com_edge(new_read_node, id_it->second);
         egraph_alt.add_edge(new_read_gnode, entry->second);
         egraph.add_com_edge(id_it->second, new_read_node);
@@ -968,7 +966,7 @@ void instrumentert::cfg_visitort::visit_cfg_assign(
           <<new_read_node << messaget::eom;
         std::map<event_idt, event_idt>::const_iterator entry=
           instrumenter.map_vertex_gnode.find(*id_it);
-        assert(entry!=instrumenter.map_vertex_gnode.end());
+        CHECK_RETURN(entry != instrumenter.map_vertex_gnode.end());
         egraph.add_com_edge(new_read_node, *id_it);
         egraph_alt.add_edge(new_read_gnode, entry->second);
         egraph.add_com_edge(*id_it, new_read_node);
@@ -1059,7 +1057,7 @@ void instrumentert::cfg_visitort::visit_cfg_assign(
           <<new_write_node << messaget::eom;
         std::map<event_idt, event_idt>::const_iterator entry=
           instrumenter.map_vertex_gnode.find(idr_it->second);
-        assert(entry!=instrumenter.map_vertex_gnode.end());
+        CHECK_RETURN(entry != instrumenter.map_vertex_gnode.end());
         egraph.add_com_edge(new_write_node, idr_it->second);
         egraph_alt.add_edge(new_write_gnode, entry->second);
         egraph.add_com_edge(idr_it->second, new_write_node);
@@ -1078,7 +1076,7 @@ void instrumentert::cfg_visitort::visit_cfg_assign(
           <<new_write_node << messaget::eom;
         std::map<event_idt, event_idt>::const_iterator entry=
           instrumenter.map_vertex_gnode.find(idw_it->second);
-        assert(entry!=instrumenter.map_vertex_gnode.end());
+        CHECK_RETURN(entry != instrumenter.map_vertex_gnode.end());
         egraph.add_com_edge(new_write_node, idw_it->second);
         egraph_alt.add_edge(new_write_gnode, entry->second);
         egraph.add_com_edge(idw_it->second, new_write_node);
@@ -1097,7 +1095,7 @@ void instrumentert::cfg_visitort::visit_cfg_assign(
           <<new_write_node << messaget::eom;
         std::map<event_idt, event_idt>::const_iterator entry=
           instrumenter.map_vertex_gnode.find(*id_it);
-        assert(entry!=instrumenter.map_vertex_gnode.end());
+        CHECK_RETURN(entry != instrumenter.map_vertex_gnode.end());
         egraph.add_com_edge(new_write_node, *id_it);
         egraph_alt.add_edge(new_write_gnode, entry->second);
         egraph.add_com_edge(*id_it, new_write_node);
@@ -1116,7 +1114,7 @@ void instrumentert::cfg_visitort::visit_cfg_assign(
           <<new_write_node << messaget::eom;
         std::map<event_idt, event_idt>::const_iterator entry=
           instrumenter.map_vertex_gnode.find(*id_it);
-        assert(entry!=instrumenter.map_vertex_gnode.end());
+        CHECK_RETURN(entry != instrumenter.map_vertex_gnode.end());
         egraph.add_com_edge(new_write_node, *id_it);
         egraph_alt.add_edge(new_write_gnode, entry->second);
         egraph.add_com_edge(*id_it, new_write_node);
@@ -1284,7 +1282,7 @@ bool instrumentert::is_cfg_spurious(const event_grapht::critical_cyclet &cyc)
       if(thread_found)
         break;
     }
-    assert(current_po);
+    INVARIANT(current_po, "thread found");
 
     const wmm_grapht::edgest &pos_cur=egraph.po_out(*e_it);
     const wmm_grapht::edgest &pos_next=egraph.po_out(*(++e_it));

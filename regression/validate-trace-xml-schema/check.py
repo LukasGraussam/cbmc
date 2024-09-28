@@ -23,6 +23,7 @@ ExcludedTests = list(map(lambda s: os.path.join(test_base_dir, s[0], s[1]), [
     ['xml-interface1', 'test_wrong_flag.desc'],
     # these want --show-goto-functions instead of producing a trace
     ['integer-assignments1', 'integer-typecheck.desc'],
+    ['declaration-goto', 'no-duplicate-decl.desc'],
     ['destructors', 'compound_literal.desc'],
     ['destructors', 'enter_lexical_block.desc'],
     ['enum_is_in_range', 'enum_test3-simplified.desc'],
@@ -41,7 +42,9 @@ ExcludedTests = list(map(lambda s: os.path.join(test_base_dir, s[0], s[1]), [
     # these test for invalid command line handling
     ['bad_option', 'test_multiple.desc'],
     ['bad_option', 'test.desc'],
+    ['export-symex-ready-goto', 'test-bad-usage.desc'],
     ['unknown-argument-suggestion', 'test.desc'],
+    ['sat-solver-error', 'test.desc'],
     # this one produces XML intermingled with main XML output when used with --xml-ui
     ['graphml_witness2', 'test.desc'],
     # these are producing coverage goals which aren't included in the schema
@@ -50,12 +53,14 @@ ExcludedTests = list(map(lambda s: os.path.join(test_base_dir, s[0], s[1]), [
     # produces intermingled XML on the command line
     ['coverage_report1', 'test.desc'],
     ['coverage_report1', 'paths.desc'],
+    ['coverage_report2', 'test.desc'],
     ['graphml_witness1', 'test.desc'],
     ['switch8', 'program-only.desc'],
     ['Failing_Assert1', 'dimacs.desc'],
     # this uses json-ui (fails for a different reason actually, but should also
     #   fail because of command line incompatibility)
     ['json1', 'test.desc'],
+    ['Bool', 'bool3.desc'],
     ['Empty_struct3', 'test.desc'],
     # uses show-goto-functions
     ['reachability-slice', 'test.desc'],

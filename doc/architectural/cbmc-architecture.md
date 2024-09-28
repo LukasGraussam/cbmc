@@ -55,41 +55,53 @@ tools process this format, either directly from the front-end or from
 it’s saved output. These include a wide range of analysis and
 transformation tools (see \ref other-tools).
 
-# Concepts #
-## {C, java bytecode} &rarr; Parse tree &rarr; Symbol table &rarr; GOTO programs &rarr; GOTO program transformations &rarr; BMC &rarr; counterexample (goto_tracet) &rarr; printing ##
+# Concepts
+
+## Central data structures
+
+For an explanation of the data structures involved in the modeling of a GOTO
+program (the GOTO Intermediate Representation used by CBMC and assorted tools)
+please see \subpage central-data-structures .
+
+## {C, java bytecode} &rarr; Parse tree &rarr; Symbol table &rarr; GOTO programs &rarr; GOTO program transformations &rarr; BMC &rarr; counterexample (goto_tracet) &rarr; printing
 
 To be documented.
 
-## Instrumentation: goto functions &rarr; goto functions ##
+## Instrumentation: goto functions &rarr; goto functions
+
+For an overview of the transformations applied to goto programs after the
+generation of the initial goto program and before BMC, see
+\subpage goto-program-transformations .
 
 To be documented.
 
-## Goto functions &rarr; BMC &rarr; Counterexample (trace) ##
+## Goto functions &rarr; BMC &rarr; Counterexample (trace)
+
+For an explanation of part of how the BMC (Symex) process works, please refer
+to [Symex and GOTO program instructions](symex-instructions.md)
+
+## Trace &rarr; interpreter &rarr; memory map
 
 To be documented.
 
-## Trace &rarr; interpreter &rarr; memory map ##
+## Goto functions &rarr; abstract interpretation
 
 To be documented.
 
-## Goto functions &rarr; abstract interpretation ##
+## Executables (flow of transformations):
+
+### goto-cc
 
 To be documented.
 
-## Executables (flow of transformations): ##
-
-### goto-cc ###
+### goto-instrument
 
 To be documented.
 
-### goto-instrument ###
+### cbmc
 
 To be documented.
 
-### cbmc ###
-
-To be documented.
-
-### goto-analyzer ###
+### goto-analyzer
 
 To be documented.

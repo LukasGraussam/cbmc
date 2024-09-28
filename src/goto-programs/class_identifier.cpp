@@ -28,8 +28,8 @@ static exprt build_class_identifier(
 
   while(1)
   {
-    const typet &type=ns.follow(e.type());
-    const struct_typet &struct_type=to_struct_type(type);
+    const struct_typet &struct_type =
+      ns.follow_tag(to_struct_tag_type(e.type()));
     const struct_typet::componentst &components=struct_type.components();
     INVARIANT(!components.empty(), "class structs cannot be empty");
 
@@ -85,7 +85,8 @@ void set_class_identifier(
   const namespacet &ns,
   const struct_tag_typet &class_type)
 {
-  const struct_typet &struct_type=to_struct_type(ns.follow(expr.type()));
+  const struct_typet &struct_type =
+    ns.follow_tag(to_struct_tag_type(expr.type()));
   const struct_typet::componentst &components=struct_type.components();
 
   if(components.empty())
@@ -95,8 +96,7 @@ void set_class_identifier(
 
   if(components.front().get_name() == JAVA_CLASS_IDENTIFIER_FIELD_NAME)
   {
-    INVARIANT(
-      expr.op0().id()==ID_constant, "@class_identifier must be a constant");
+    INVARIANT(expr.op0().is_constant(), "@class_identifier must be a constant");
     expr.op0()=constant_exprt(class_type.get_identifier(), string_typet());
   }
   else

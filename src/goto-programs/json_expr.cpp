@@ -52,8 +52,7 @@ static exprt simplify_json_expr(const exprt &src)
       return simplify_json_expr(object);
     }
     else if(
-      object.id() == ID_index &&
-      to_index_expr(object).index().id() == ID_constant &&
+      object.id() == ID_index && to_index_expr(object).index().is_constant() &&
       to_constant_expr(to_index_expr(object).index()).value_is_zero_string())
     {
       // simplify expressions of the form  &array[0]
@@ -207,7 +206,7 @@ json_objectt json(const exprt &expr, const namespacet &ns, const irep_idt &mode)
 {
   json_objectt result;
 
-  if(expr.id() == ID_constant)
+  if(expr.is_constant())
   {
     const constant_exprt &constant_expr = to_constant_expr(expr);
 
@@ -254,8 +253,7 @@ json_objectt json(const exprt &expr, const namespacet &ns, const irep_idt &mode)
     else if(type.id() == ID_c_enum_tag)
     {
       constant_exprt tmp(
-        to_constant_expr(expr).get_value(),
-        ns.follow_tag(to_c_enum_tag_type(type)));
+        constant_expr.get_value(), ns.follow_tag(to_c_enum_tag_type(type)));
       return json(tmp, ns, mode);
     }
     else if(type.id() == ID_bv)
@@ -269,8 +267,7 @@ json_objectt json(const exprt &expr, const namespacet &ns, const irep_idt &mode)
       result["width"] =
         json_numbert(std::to_string(to_bitvector_type(type).get_width()));
       result["binary"] = json_stringt(binary(constant_expr));
-      result["data"] =
-        json_stringt(fixedbvt(to_constant_expr(expr)).to_ansi_c_string());
+      result["data"] = json_stringt(fixedbvt(constant_expr).to_ansi_c_string());
     }
     else if(type.id() == ID_floatbv)
     {
@@ -279,7 +276,7 @@ json_objectt json(const exprt &expr, const namespacet &ns, const irep_idt &mode)
         json_numbert(std::to_string(to_bitvector_type(type).get_width()));
       result["binary"] = json_stringt(binary(constant_expr));
       result["data"] =
-        json_stringt(ieee_floatt(to_constant_expr(expr)).to_ansi_c_string());
+        json_stringt(ieee_floatt(constant_expr).to_ansi_c_string());
     }
     else if(type.id() == ID_pointer)
     {
@@ -339,7 +336,7 @@ json_objectt json(const exprt &expr, const namespacet &ns, const irep_idt &mode)
         "pointer identifier should have non-empty components");
       result["data"] = json_stringt(identifier.components.back());
     }
-    else if(simpl_expr.id() == ID_constant)
+    else if(simpl_expr.is_constant())
       return json(simpl_expr, ns, mode);
     else
       result["name"] = json_stringt("unknown");
@@ -351,10 +348,11 @@ json_objectt json(const exprt &expr, const namespacet &ns, const irep_idt &mode)
 
     std::size_t index = 0;
 
-    forall_operands(it, expr)
+    for(const auto &op : expr.operands())
     {
-      json_objectt e{{"index", json_numbert(std::to_string(index))},
-                     {"value", json(*it, ns, mode)}};
+      json_objectt e{
+        {"index", json_numbert(std::to_string(index))},
+        {"value", json(op, ns, mode)}};
       elements.push_back(std::move(e));
       index++;
     }
@@ -363,24 +361,22 @@ json_objectt json(const exprt &expr, const namespacet &ns, const irep_idt &mode)
   {
     result["name"] = json_stringt("struct");
 
-    const typet &type = ns.follow(expr.type());
+    const struct_typet &struct_type =
+      expr.type().id() == ID_struct_tag
+        ? ns.follow_tag(to_struct_tag_type(expr.type()))
+        : to_struct_type(expr.type());
+    const struct_typet::componentst &components = struct_type.components();
+    DATA_INVARIANT(
+      components.size() == expr.operands().size(),
+      "number of struct components should match with its type");
 
-    // these are expected to have a struct type
-    if(type.id() == ID_struct)
+    json_arrayt &members = result["members"].make_array();
+    for(std::size_t m = 0; m < expr.operands().size(); m++)
     {
-      const struct_typet &struct_type = to_struct_type(type);
-      const struct_typet::componentst &components = struct_type.components();
-      DATA_INVARIANT(
-        components.size() == expr.operands().size(),
-        "number of struct components should match with its type");
-
-      json_arrayt &members = result["members"].make_array();
-      for(std::size_t m = 0; m < expr.operands().size(); m++)
-      {
-        json_objectt e{{"value", json(expr.operands()[m], ns, mode)},
-                       {"name", json_stringt(components[m].get_name())}};
-        members.push_back(std::move(e));
-      }
+      json_objectt e{
+        {"value", json(expr.operands()[m], ns, mode)},
+        {"name", json_stringt(components[m].get_name())}};
+      members.push_back(std::move(e));
     }
   }
   else if(expr.id() == ID_union)

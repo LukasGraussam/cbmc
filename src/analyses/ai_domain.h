@@ -41,7 +41,6 @@ Author: Daniel Kroening, kroening@kroening.com
 #define CPROVER_ANALYSES_AI_DOMAIN_H
 
 #include <util/json.h>
-#include <util/make_unique.h>
 #include <util/xml.h>
 
 #include "ai_history.h"
@@ -113,12 +112,16 @@ public:
   /// no states
   virtual void make_bottom() = 0;
 
-  /// all states -- the analysis doesn't use this,
+  /// all states -- the analysis doesn't use this directly (see make_entry)
   /// and domains may refuse to implement it.
   virtual void make_top() = 0;
 
   /// Make this domain a reasonable entry-point state
-  virtual void make_entry() = 0;
+  /// For most domains top is sufficient
+  virtual void make_entry()
+  {
+    make_top();
+  }
 
   virtual bool is_bottom() const = 0;
 
@@ -202,7 +205,7 @@ public:
 
   std::unique_ptr<statet> copy(const statet &s) const override
   {
-    return util_make_unique<domainT>(static_cast<const domainT &>(s));
+    return std::make_unique<domainT>(static_cast<const domainT &>(s));
   }
 
   bool merge(statet &dest, const statet &src, trace_ptrt from, trace_ptrt to)
@@ -225,7 +228,24 @@ public:
 
   std::unique_ptr<statet> make(locationt l) const override
   {
-    auto d = util_make_unique<domainT>();
+    auto d = std::make_unique<domainT>();
+    CHECK_RETURN(d->is_bottom());
+    return std::unique_ptr<statet>(d.release());
+  }
+};
+
+template <typename domainT>
+class ai_domain_factory_location_constructort
+  : public ai_domain_factoryt<domainT>
+{
+public:
+  typedef ai_domain_factory_baset::statet statet;
+  typedef ai_domain_factory_baset::locationt locationt;
+  typedef ai_domain_factory_baset::trace_ptrt trace_ptrt;
+
+  std::unique_ptr<statet> make(locationt l) const override
+  {
+    auto d = std::make_unique<domainT>(l);
     CHECK_RETURN(d->is_bottom());
     return std::unique_ptr<statet>(d.release());
   }

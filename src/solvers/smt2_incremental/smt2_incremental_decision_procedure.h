@@ -6,10 +6,11 @@
 #ifndef CPROVER_SOLVERS_SMT2_INCREMENTAL_SMT2_INCREMENTAL_DECISION_PROCEDURE_H
 #define CPROVER_SOLVERS_SMT2_INCREMENTAL_SMT2_INCREMENTAL_DECISION_PROCEDURE_H
 
+#include <util/expr.h> // Needed for `exprt` values. IWYU pragma: keep
 #include <util/message.h>
-#include <util/std_expr.h>
 
 #include <solvers/smt2_incremental/ast/smt_terms.h>
+#include <solvers/smt2_incremental/encoding/struct_encoding.h>
 #include <solvers/smt2_incremental/object_tracking.h>
 #include <solvers/smt2_incremental/smt_is_dynamic_object.h>
 #include <solvers/smt2_incremental/smt_object_size.h>
@@ -21,6 +22,8 @@
 
 class namespacet;
 class smt_base_solver_processt; // IWYU pragma: keep
+class string_constantt;
+class union_tag_typet;
 
 class smt2_incremental_decision_proceduret final
   : public stack_decision_proceduret
@@ -53,12 +56,18 @@ public:
   /// Gets the value of \p descriptor from the solver and returns the solver
   /// response expressed as an exprt of type \p type. This is an implementation
   /// detail of the `get(exprt)` member function.
-  exprt get_expr(const smt_termt &descriptor, const typet &type) const;
-  array_exprt get_expr(const smt_termt &array, const array_typet &type) const;
+  std::optional<exprt>
+  get_expr(const smt_termt &descriptor, const typet &type) const;
+  std::optional<exprt>
+  get_expr(const smt_termt &struct_term, const struct_tag_typet &type) const;
+  std::optional<exprt>
+  get_expr(const smt_termt &union_term, const union_tag_typet &type) const;
+  std::optional<exprt>
+  get_expr(const smt_termt &array, const array_typet &type) const;
 
 protected:
   // Implementation of protected decision_proceduret member function.
-  resultt dec_solve() override;
+  resultt dec_solve(const exprt &) override;
   /// \brief Defines a function of array sort and asserts the element values
   /// from `array_exprt` or `array_of_exprt`.
   /// \details
@@ -82,17 +91,33 @@ protected:
   void initialize_array_elements(
     const array_of_exprt &array,
     const smt_identifier_termt &array_identifier);
+  void initialize_array_elements(
+    const string_constantt &string,
+    const smt_identifier_termt &array_identifier);
   /// \brief Defines any functions which \p expr depends on, which have not yet
   ///   been defined, along with their dependencies in turn.
   void define_dependent_functions(const exprt &expr);
+  /// If a function has not been defined for handling \p expr, then a new
+  /// function is defined. If the corresponding function exists already, then
+  /// no action is taken.
   void ensure_handle_for_expr_defined(const exprt &expr);
   /// \brief Add objects in \p expr to object_map if needed and convert to smt.
   /// \note This function is non-const because it mutates the object_map.
   smt_termt convert_expr_to_smt(const exprt &expr);
   void define_index_identifiers(const exprt &expr);
+  /// In the case where lowering passes insert instances of the anonymous
+  /// `nondet_padding_exprt`, these need functions declaring for each instance.
+  /// These instances are then substituted for the function identifier in order
+  /// to free the solver to choose a non-det value.
+  exprt substitute_defined_padding(exprt expr);
   /// Sends the solver the definitions of the object sizes and dynamic memory
   /// statuses.
   void define_object_properties();
+  /// Performs a combination of transformations which reduces the set of
+  /// possible expression forms by expressing these in terms of the remaining
+  /// language features.
+  exprt lower(exprt expression) const;
+  std::optional<smt_termt> get_identifier(const exprt &expr) const;
 
   /// Namespace for looking up the expressions which symbol_exprts relate to.
   /// This includes the symbols defined outside of the decision procedure but
@@ -118,7 +143,7 @@ protected:
     {
       return next_id++;
     }
-  } handle_sequence, array_sequence, index_sequence;
+  } handle_sequence, array_sequence, index_sequence, padding_sequence;
   /// When the `handle(exprt)` member function is called, the decision procedure
   /// commands the SMT solver to define a new function corresponding to the
   /// given expression. The mapping of the expressions to the function
@@ -165,6 +190,7 @@ protected:
   smt_is_dynamic_objectt is_dynamic_object_function;
   /// Precalculated type sizes used for pointer arithmetic.
   type_size_mapt pointer_sizes_map;
+  struct_encodingt struct_encoding;
 };
 
 #endif // CPROVER_SOLVERS_SMT2_INCREMENTAL_SMT2_INCREMENTAL_DECISION_PROCEDURE_H

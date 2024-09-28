@@ -43,8 +43,12 @@ static void get_symbols(
 
     find_symbols_sett new_symbols;
 
-    find_type_and_expr_symbols(symbol.type, new_symbols);
-    find_type_and_expr_symbols(symbol.value, new_symbols);
+    // ID of named subs of loop contracts
+    std::vector<irep_idt> loop_contracts_subs{
+      ID_C_spec_loop_invariant, ID_C_spec_decreases};
+
+    find_type_and_expr_symbols(symbol.type, new_symbols, loop_contracts_subs);
+    find_type_and_expr_symbols(symbol.value, new_symbols, loop_contracts_subs);
 
     for(const auto &s : new_symbols)
       working_set.push_back(&ns.lookup(s));
@@ -67,25 +71,20 @@ static void get_symbols(
         to_code_with_contract_type(code_type);
 
       find_symbols_sett new_symbols;
-      for(const exprt &a : maybe_contract.assigns())
+      for(const exprt &a : maybe_contract.c_assigns())
         find_type_and_expr_symbols(a, new_symbols);
-      for(const exprt &e : maybe_contract.ensures())
+      for(const exprt &e : maybe_contract.c_ensures())
         find_type_and_expr_symbols(e, new_symbols);
-      for(const exprt &r : maybe_contract.requires())
+      for(const exprt &r : maybe_contract.c_requires())
         find_type_and_expr_symbols(r, new_symbols);
 
       for(const auto &s : new_symbols)
       {
-        // keep functions called in contracts within scope.
-        // should we keep local variables from the contract as well?
-        const symbolt *new_symbol = nullptr;
-        if(!ns.lookup(s, new_symbol))
-        {
-          if(new_symbol->type.id() == ID_code)
-          {
-            working_set.push_back(new_symbol);
-          }
-        }
+        const symbolt *symbol_ptr;
+        // identifiers for parameters of prototypes need not exist, and neither
+        // does __CPROVER_return_value
+        if(!ns.lookup(s, symbol_ptr))
+          working_set.push_back(symbol_ptr);
       }
     }
   }
@@ -239,6 +238,7 @@ void remove_internal_symbols(
     if(exported.find(it->first)==exported.end())
     {
       symbol_table_baset::symbolst::const_iterator next = std::next(it);
+      log.debug() << "Removing unused symbol " << it->first << messaget::eom;
       symbol_table.erase(it);
       it=next;
     }

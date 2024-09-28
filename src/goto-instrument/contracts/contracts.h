@@ -14,8 +14,6 @@ Date: February 2016
 #ifndef CPROVER_GOTO_INSTRUMENT_CONTRACTS_CONTRACTS_H
 #define CPROVER_GOTO_INSTRUMENT_CONTRACTS_CONTRACTS_H
 
-#include <goto-programs/goto_convert_class.h>
-
 #include <util/message.h>
 #include <util/namespace.h>
 
@@ -24,6 +22,8 @@ Date: February 2016
 
 #include <goto-instrument/loop_utils.h>
 
+#include "loop_contract_config.h"
+
 #include <map>
 #include <set>
 #include <string>
@@ -31,30 +31,47 @@ Date: February 2016
 
 #define FLAG_LOOP_CONTRACTS "apply-loop-contracts"
 #define HELP_LOOP_CONTRACTS                                                    \
-  " --apply-loop-contracts\n"                                                  \
-  "                              check and use loop contracts when provided\n"
+  " {y--apply-loop-contracts} \t check and use loop contracts when provided\n"
+
+#define FLAG_DISABLE_SIDE_EFFECT_CHECK                                         \
+  "disable-loop-contracts-side-effect-check"
+#define HELP_DISABLE_SIDE_EFFECT_CHECK                                         \
+  " {y--disable-loop-contracts-side-effect-check} \t UNSOUND OPTION.\t "       \
+  " disable the check of side-effect of loop contracts\n"
+#define FLAG_LOOP_CONTRACTS_NO_UNWIND "loop-contracts-no-unwind"
+#define HELP_LOOP_CONTRACTS_NO_UNWIND                                          \
+  " {y--loop-contracts-no-unwind} \t do not unwind transformed loops\n"
+
+#define FLAG_LOOP_CONTRACTS_FILE "loop-contracts-file"
+#define HELP_LOOP_CONTRACTS_FILE                                               \
+  " {y--loop-contracts-file} {ufile} \t "                                      \
+  "parse and annotate loop contracts from files\n"
 
 #define FLAG_REPLACE_CALL "replace-call-with-contract"
 #define HELP_REPLACE_CALL                                                      \
-  " --replace-call-with-contract <fun>\n"                                      \
-  "                              replace calls to fun with fun's contract\n"
+  " {y--replace-call-with-contract} {ufunction}[/{ucontract}] \t "             \
+  "replace calls to {ufunction} with {ucontract}\n"
 
 #define FLAG_ENFORCE_CONTRACT "enforce-contract"
 #define HELP_ENFORCE_CONTRACT                                                  \
-  " --enforce-contract <fun>     wrap fun with an assertion of its contract\n"
+  " {y--enforce-contract} {ufunction}[/{ucontract}] \t "                       \
+  "wrap function with an assertion of contract\n"
 
 class local_may_aliast;
 
 class code_contractst
 {
 public:
-  code_contractst(goto_modelt &goto_model, messaget &log)
+  code_contractst(
+    goto_modelt &goto_model,
+    messaget &log,
+    const loop_contract_configt &loop_contract_config)
     : ns(goto_model.symbol_table),
       goto_model(goto_model),
       symbol_table(goto_model.symbol_table),
       goto_functions(goto_model.goto_functions),
       log(log),
-      converter(symbol_table, log.get_message_handler())
+      loop_contract_config(loop_contract_config)
   {
   }
 
@@ -72,7 +89,7 @@ public:
   /// with an assertion that the `requires` clause holds followed by an
   /// assumption that the `ensures` clause holds. In order to ensure that `F`
   /// actually abides by its `ensures` and `requires` clauses, you should
-  /// separately call `code_constractst::enforce_contracts()` on `F` and verify
+  /// separately call `code_contractst::enforce_contracts()` on `F` and verify
   /// it using `cbmc --function F`.
   void replace_calls(const std::set<std::string> &to_replace);
 
@@ -118,11 +135,19 @@ public:
     exprt decreases_clause,
     const irep_idt &mode);
 
-  // for "helper" classes to update symbol table.
-  symbol_tablet &get_symbol_table();
-  goto_functionst &get_goto_functions();
+  std::unordered_map<goto_programt::const_targett, unsigned, const_target_hash>
+  get_original_loop_number_map() const
+  {
+    return original_loop_number_map;
+  }
 
-  namespacet ns;
+  std::unordered_set<goto_programt::const_targett, const_target_hash>
+  get_loop_havoc_set() const
+  {
+    return loop_havoc_set;
+  }
+
+  const namespacet ns;
 
 protected:
   goto_modelt &goto_model;
@@ -130,12 +155,25 @@ protected:
   goto_functionst &goto_functions;
 
   messaget &log;
-  goto_convertt converter;
 
   std::unordered_set<irep_idt> summarized;
 
   /// Name of loops we are going to unwind.
   std::list<std::string> loop_names;
+
+  /// Store the map from instrumented instructions for loop contracts to their
+  /// original loop numbers. Following instrumented instructions are stored.
+  /// 1. loop-havoc   ---   begin of transformed loops
+  /// 2. ASSIGN ENTERED_LOOP = TRUE   ---   end of transformed loops
+  std::unordered_map<goto_programt::const_targett, unsigned, const_target_hash>
+    original_loop_number_map;
+
+  /// Loop havoc instructions instrumented during applying loop contracts.
+  std::unordered_set<goto_programt::const_targett, const_target_hash>
+    loop_havoc_set;
+
+  // Loop contract configuration
+  loop_contract_configt loop_contract_config;
 
 public:
   /// \brief Enforce contract of a single function

@@ -19,8 +19,9 @@ Author: Peter Schrammel
 #include <util/std_code.h>
 
 #include <goto-programs/class_identifier.h>
-#include <goto-programs/goto_convert.h>
 #include <goto-programs/goto_model.h>
+
+#include <ansi-c/goto-conversion/goto_convert.h>
 
 #include "java_types.h"
 #include "java_utils.h"
@@ -144,7 +145,6 @@ goto_programt::targett remove_java_newt::lower_java_new_array(
   source_locationt location = rhs.source_location();
   struct_tag_typet object_type =
     to_struct_tag_type(to_pointer_type(rhs.type()).base_type());
-  PRECONDITION(ns.follow(object_type).id() == ID_struct);
 
   // build size expression
   const auto object_size = size_of_expr(object_type, ns);
@@ -160,7 +160,7 @@ goto_programt::targett remove_java_newt::lower_java_new_array(
     goto_programt::make_assignment(code_assignt(lhs, malloc_expr), location);
   goto_programt::targett next = std::next(target);
 
-  const struct_typet &struct_type = to_struct_type(ns.follow(object_type));
+  const struct_typet &struct_type = ns.follow_tag(object_type);
 
   PRECONDITION(is_valid_java_array(struct_type));
 

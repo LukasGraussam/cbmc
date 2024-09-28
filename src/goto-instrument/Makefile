@@ -17,13 +17,26 @@ SRC = accelerate/accelerate.cpp \
       branch.cpp \
       call_sequences.cpp \
       contracts/contracts.cpp \
+      contracts/contracts_wrangler.cpp \
       contracts/dynamic-frames/dfcc_utils.cpp \
+      contracts/dynamic-frames/dfcc_loop_nesting_graph.cpp \
+      contracts/dynamic-frames/dfcc_contract_mode.cpp \
+      contracts/dynamic-frames/dfcc_loop_tags.cpp \
+      contracts/dynamic-frames/dfcc_check_loop_normal_form.cpp \
+      contracts/dynamic-frames/dfcc_root_object.cpp \
+      contracts/dynamic-frames/dfcc_infer_loop_assigns.cpp \
+      contracts/dynamic-frames/dfcc_cfg_info.cpp \
+      contracts/dynamic-frames/dfcc_instrument_loop.cpp \
       contracts/dynamic-frames/dfcc_library.cpp \
+      contracts/dynamic-frames/dfcc_is_cprover_symbol.cpp \
       contracts/dynamic-frames/dfcc_is_fresh.cpp \
+      contracts/dynamic-frames/dfcc_pointer_in_range.cpp \
       contracts/dynamic-frames/dfcc_is_freeable.cpp \
       contracts/dynamic-frames/dfcc_obeys_contract.cpp \
+      contracts/dynamic-frames/dfcc_lift_memory_predicates.cpp \
       contracts/dynamic-frames/dfcc_instrument.cpp \
       contracts/dynamic-frames/dfcc_spec_functions.cpp \
+      contracts/dynamic-frames/dfcc_contract_clauses_codegen.cpp \
       contracts/dynamic-frames/dfcc_contract_functions.cpp \
       contracts/dynamic-frames/dfcc_wrapper_program.cpp \
       contracts/dynamic-frames/dfcc_contract_handler.cpp \
@@ -81,9 +94,6 @@ SRC = accelerate/accelerate.cpp \
       source_lines.cpp \
       splice_call.cpp \
       stack_depth.cpp \
-      synthesizer/enumerative_loop_invariant_synthesizer.cpp \
-      synthesizer/expr_enumerator.cpp \
-      synthesizer/synthesizer_utils.cpp \
       thread_instrumentation.cpp \
       undefined_functions.cpp \
       uninitialized.cpp \

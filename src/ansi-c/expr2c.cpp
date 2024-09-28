@@ -13,7 +13,6 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <util/c_types.h>
 #include <util/config.h>
 #include <util/cprover_prefix.h>
-#include <util/expr_util.h>
 #include <util/find_symbols.h>
 #include <util/fixedbv.h>
 #include <util/floatbv_expr.h>
@@ -215,16 +214,16 @@ void expr2ct::get_shorthands(const exprt &expr)
 
 std::string expr2ct::convert(const typet &src)
 {
-  return convert_rec(src, c_qualifierst(), "");
+  return convert_with_identifier(src, "");
 }
 
 std::string expr2ct::convert_rec(
   const typet &src,
-  const qualifierst &qualifiers,
+  const c_qualifierst &qualifiers,
   const std::string &declarator)
 {
-  std::unique_ptr<qualifierst> clone = qualifiers.clone();
-  c_qualifierst &new_qualifiers = dynamic_cast<c_qualifierst &>(*clone);
+  std::unique_ptr<c_qualifierst> clone = qualifiers.clone();
+  c_qualifierst &new_qualifiers = *clone;
   new_qualifiers.read(src);
 
   std::string q=new_qualifiers.as_string();
@@ -381,7 +380,7 @@ std::string expr2ct::convert_rec(
       for(const auto &c : union_type.components())
       {
         dest += ' ';
-        dest += convert_rec(c.type(), c_qualifierst(), id2string(c.get_name()));
+        dest += convert_with_identifier(c.type(), id2string(c.get_name()));
         dest += ';';
       }
 
@@ -540,7 +539,7 @@ std::string expr2ct::convert_rec(
         {
           std::string arg_declarator=
             convert(symbol_exprt(it->get_identifier(), it->type()));
-          dest+=convert_rec(it->type(), c_qualifierst(), arg_declarator);
+          dest += convert_with_identifier(it->type(), arg_declarator);
         }
       }
 
@@ -670,7 +669,8 @@ std::string expr2ct::convert_struct_type(
   // Either we are including the body (in which case it makes sense to include
   // or exclude the parameters) or there is no body so therefore we definitely
   // shouldn't be including the parameters
-  assert(inc_struct_body || !inc_padding_components);
+  INVARIANT(
+    inc_struct_body || !inc_padding_components, "inconsistent configuration");
 
   const struct_typet &struct_type=to_struct_type(src);
 
@@ -693,10 +693,8 @@ std::string expr2ct::convert_struct_type(
       }
 
       dest+=' ';
-      dest+=convert_rec(
-        component.type(),
-        c_qualifierst(),
-        id2string(component.get_name()));
+      dest += convert_with_identifier(
+        component.type(), id2string(component.get_name()));
       dest+=';';
     }
 
@@ -716,7 +714,7 @@ std::string expr2ct::convert_struct_type(
 /// \return A C-like type declaration of an array
 std::string expr2ct::convert_array_type(
   const typet &src,
-  const qualifierst &qualifiers,
+  const c_qualifierst &qualifiers,
   const std::string &declarator_str)
 {
   return convert_array_type(
@@ -733,7 +731,7 @@ std::string expr2ct::convert_array_type(
 /// \return A C-like type declaration of an array
 std::string expr2ct::convert_array_type(
   const typet &src,
-  const qualifierst &qualifiers,
+  const c_qualifierst &qualifiers,
   const std::string &declarator_str,
   bool inc_size_if_possible)
 {
@@ -891,15 +889,12 @@ std::string expr2ct::convert_with(
       const irep_idt &component_name=
         src.operands()[i].get(ID_component_name);
 
-      const typet &full_type = ns.follow(old.type());
-
-      const struct_union_typet &struct_union_type=
-        to_struct_union_type(full_type);
-
-      const struct_union_typet::componentt &comp_expr=
-        struct_union_type.get_component(component_name);
-
-      assert(comp_expr.is_not_nil());
+      const struct_union_typet::componentt &comp_expr =
+        (old.type().id() == ID_struct_tag || old.type().id() == ID_union_tag)
+          ? ns.follow_tag(to_struct_or_union_tag_type(old.type()))
+              .get_component(component_name)
+          : to_struct_union_type(old.type()).get_component(component_name);
+      CHECK_RETURN(comp_expr.is_not_nil());
 
       irep_idt display_component_name;
 
@@ -975,8 +970,8 @@ expr2ct::convert_update(const update_exprt &src, unsigned precedence)
 
   const exprt &designator = src.op1();
 
-  forall_operands(it, designator)
-    dest+=convert(*it);
+  for(const auto &op : designator.operands())
+    dest += convert(op);
 
   dest+=", ";
 
@@ -1002,10 +997,10 @@ std::string expr2ct::convert_cond(
 
   std::string dest="cond {\n";
 
-  forall_operands(it, src)
+  for(const auto &operand : src.operands())
   {
     unsigned p;
-    std::string op=convert_with_precedence(*it, p);
+    std::string op = convert_with_precedence(operand, p);
 
     if(condition)
       dest+="  ";
@@ -1089,7 +1084,7 @@ std::string expr2ct::convert_multi_ary(
   std::string dest;
   bool first=true;
 
-  forall_operands(it, src)
+  for(const auto &operand : src.operands())
   {
     if(first)
       first=false;
@@ -1102,7 +1097,7 @@ std::string expr2ct::convert_multi_ary(
     }
 
     unsigned p;
-    std::string op=convert_with_precedence(*it, p);
+    std::string op = convert_with_precedence(operand, p);
 
     // In pointer arithmetic, x+(y-z) is unfortunately
     // not the same as (x+y)-z, even though + and -
@@ -1111,10 +1106,9 @@ std::string expr2ct::convert_multi_ary(
     // the same as x*(y/z), but * and / have the same
     // precedence.
 
-    bool use_parentheses=
-      precedence>p ||
-      (precedence==p && full_parentheses) ||
-      (precedence==p && src.id()!=it->id());
+    bool use_parentheses = precedence > p ||
+                           (precedence == p && full_parentheses) ||
+                           (precedence == p && src.id() != operand.id());
 
     if(use_parentheses)
       dest+='(';
@@ -1276,7 +1270,7 @@ std::string expr2ct::convert_complex(
 {
   if(
     src.operands().size() == 2 && to_binary_expr(src).op0().is_zero() &&
-    to_binary_expr(src).op1().id() == ID_constant)
+    to_binary_expr(src).op1().is_constant())
   {
     // This is believed to be gcc only; check if this is sensible
     // in MSC mode.
@@ -1554,26 +1548,31 @@ std::string expr2ct::convert_member(
     dest+='.';
   }
 
-  const typet &full_type = ns.follow(compound.type());
-
-  if(full_type.id()!=ID_struct &&
-     full_type.id()!=ID_union)
+  if(
+    compound.type().id() != ID_struct && compound.type().id() != ID_union &&
+    compound.type().id() != ID_struct_tag &&
+    compound.type().id() != ID_union_tag)
+  {
     return convert_norep(src, precedence);
+  }
 
-  const struct_union_typet &struct_union_type=
-    to_struct_union_type(full_type);
+  const struct_union_typet &struct_union_type =
+    (compound.type().id() == ID_struct_tag ||
+     compound.type().id() == ID_union_tag)
+      ? ns.follow_tag(to_struct_or_union_tag_type(compound.type()))
+      : to_struct_union_type(compound.type());
 
   irep_idt component_name=src.get_component_name();
 
   if(!component_name.empty())
   {
-    const exprt &comp_expr = struct_union_type.get_component(component_name);
+    const auto &comp_expr = struct_union_type.get_component(component_name);
 
     if(comp_expr.is_nil())
       return convert_norep(src, precedence);
 
-    if(!comp_expr.get(ID_pretty_name).empty())
-      dest+=comp_expr.get_string(ID_pretty_name);
+    if(!comp_expr.get_pretty_name().empty())
+      dest += id2string(comp_expr.get_pretty_name());
     else
       dest+=id2string(component_name);
 
@@ -1585,9 +1584,12 @@ std::string expr2ct::convert_member(
   if(n>=struct_union_type.components().size())
     return convert_norep(src, precedence);
 
-  const exprt &comp_expr = struct_union_type.components()[n];
+  const auto &comp_expr = struct_union_type.components()[n];
 
-  dest+=comp_expr.get_string(ID_pretty_name);
+  if(!comp_expr.get_pretty_name().empty())
+    dest += id2string(comp_expr.get_pretty_name());
+  else
+    dest += id2string(comp_expr.get_name());
 
   return dest;
 }
@@ -1644,13 +1646,13 @@ std::string expr2ct::convert_symbol(const exprt &src)
       get_shorthands(src);
 
       entry=shorthands.find(id);
-      assert(entry!=shorthands.end());
+      CHECK_RETURN(entry != shorthands.end());
     }
 
     dest=id2string(entry->second);
 
     #if 0
-    if(has_prefix(id2string(id), SYMEX_DYNAMIC_PREFIX "dynamic_object"))
+    if(id.starts_with(SYMEX_DYNAMIC_PREFIX "::dynamic_object"))
     {
       if(sizeof_nesting++ == 0)
         dest+=" /*"+convert(src.type());
@@ -1666,7 +1668,7 @@ std::string expr2ct::convert_symbol(const exprt &src)
 std::string expr2ct::convert_nondet_symbol(const nondet_symbol_exprt &src)
 {
   const irep_idt id=src.get_identifier();
-  return "nondet_symbol("+id2string(id)+")";
+  return "nondet_symbol<" + convert(src.type()) + ">(" + id2string(id) + ")";
 }
 
 std::string expr2ct::convert_predicate_symbol(const exprt &src)
@@ -1722,7 +1724,7 @@ std::string expr2ct::convert_object_descriptor(
   return result;
 }
 
-static optionalt<exprt>
+static std::optional<exprt>
 build_sizeof_expr(const constant_exprt &expr, const namespacet &ns)
 {
   const typet &type = static_cast<const typet &>(expr.find(ID_C_c_sizeof_type));
@@ -1731,7 +1733,7 @@ build_sizeof_expr(const constant_exprt &expr, const namespacet &ns)
     return {};
 
   const auto type_size_expr = size_of_expr(type, ns);
-  optionalt<mp_integer> type_size;
+  std::optional<mp_integer> type_size;
   if(type_size_expr.has_value())
     type_size = numeric_cast<mp_integer>(*type_size_expr);
   auto val = numeric_cast<mp_integer>(expr);
@@ -1982,7 +1984,7 @@ std::string expr2ct::convert_constant(
   }
   else if(type.id()==ID_pointer)
   {
-    if(is_null_pointer(src))
+    if(src.is_null_pointer())
     {
       if(configuration.use_library_macros)
         dest = "NULL";
@@ -1992,7 +1994,7 @@ std::string expr2ct::convert_constant(
         dest="(("+convert(type)+")"+dest+")";
     }
     else if(
-      value == "INVALID" || has_prefix(id2string(value), "INVALID-") ||
+      value == "INVALID" || value.starts_with("INVALID-") ||
       value == "NULL+offset")
     {
       dest = id2string(value);
@@ -2056,13 +2058,13 @@ std::string expr2ct::convert_struct(
   unsigned &precedence,
   bool include_padding_components)
 {
-  const typet full_type=ns.follow(src.type());
-
-  if(full_type.id()!=ID_struct)
+  if(src.type().id() != ID_struct && src.type().id() != ID_struct_tag)
     return convert_norep(src, precedence);
 
-  const struct_typet &struct_type=
-    to_struct_type(full_type);
+  const struct_typet &struct_type =
+    src.type().id() == ID_struct_tag
+      ? ns.follow_tag(to_struct_tag_type(src.type()))
+      : to_struct_type(src.type());
 
   const struct_typet::componentst &components=
     struct_type.components();
@@ -2139,7 +2141,7 @@ std::string expr2ct::convert_vector(
   bool newline=false;
   size_t last_size=0;
 
-  forall_operands(it, src)
+  for(const auto &op : src.operands())
   {
     if(first)
       first=false;
@@ -2153,7 +2155,7 @@ std::string expr2ct::convert_vector(
         dest+=' ';
     }
 
-    std::string tmp=convert(*it);
+    std::string tmp = convert(op);
 
     if(last_size+40<dest.size())
     {
@@ -2201,9 +2203,11 @@ std::string expr2ct::convert_array(const exprt &src)
 
   bool all_constant=true;
 
-  forall_operands(it, src)
-    if(!it->is_constant())
+  for(const auto &op : src.operands())
+  {
+    if(!op.is_constant())
       all_constant=false;
+  }
 
   if(
     src.get_bool(ID_C_string_constant) && all_constant &&
@@ -2527,10 +2531,10 @@ std::string expr2ct::convert_overflow(
     dest += convert(to_multi_ary_expr(src).op0().type());
   }
 
-  forall_operands(it, src)
+  for(const auto &op : src.operands())
   {
     unsigned p;
-    std::string arg_str=convert_with_precedence(*it, p);
+    std::string arg_str = convert_with_precedence(op, p);
 
     dest+=", ";
     // TODO: ggf. Klammern je nach p
@@ -2790,8 +2794,8 @@ std::string expr2ct::convert_code_switch(
     }
     else
     {
-      forall_operands(it2, op)
-        dest+=convert_code(to_code(*it2), indent+2);
+      for(const auto &operand : op.operands())
+        dest += convert_code(to_code(operand), indent + 2);
     }
   }
 
@@ -2845,7 +2849,7 @@ expr2ct::convert_code_frontend_decl(const codet &src, unsigned indent)
       dest+="inline ";
   }
 
-  dest+=convert_rec(src.op0().type(), c_qualifierst(), declarator);
+  dest += convert_with_identifier(src.op0().type(), declarator);
 
   if(src.operands().size()==2)
     dest+="="+convert(src.op1());
@@ -2935,9 +2939,9 @@ std::string expr2ct::convert_code_decl_block(
 {
   std::string dest;
 
-  forall_operands(it, src)
+  for(const auto &op : src.operands())
   {
-    dest+=convert_code(to_code(*it), indent);
+    dest += convert_code(to_code(op), indent);
     dest+="\n";
   }
 
@@ -3502,9 +3506,18 @@ expr2ct::convert_extractbits(const extractbits_exprt &src, unsigned precedence)
 {
   std::string dest = convert_with_precedence(src.src(), precedence);
   dest+='[';
-  dest += convert_with_precedence(src.upper(), precedence);
+  auto expr_width_opt = pointer_offset_bits(src.type(), ns);
+  if(expr_width_opt.has_value())
+  {
+    auto upper = plus_exprt{
+      src.index(),
+      from_integer(expr_width_opt.value() - 1, src.index().type())};
+    dest += convert_with_precedence(upper, precedence);
+  }
+  else
+    dest += "?";
   dest+=", ";
-  dest += convert_with_precedence(src.lower(), precedence);
+  dest += convert_with_precedence(src.index(), precedence);
   dest+=']';
 
   return dest;
@@ -3563,6 +3576,82 @@ std::string expr2ct::convert_bitreverse(const bitreverse_exprt &src)
 
   unsigned precedence;
   return convert_norep(src, precedence);
+}
+
+std::string expr2ct::convert_r_or_w_ok(const r_or_w_ok_exprt &src)
+{
+  std::string dest = src.id() == ID_r_ok   ? "R_OK"
+                     : src.id() == ID_w_ok ? "W_OK"
+                                           : "RW_OK";
+
+  dest += '(';
+
+  unsigned p;
+  dest += convert_with_precedence(src.pointer(), p);
+  dest += ", ";
+  dest += convert_with_precedence(src.size(), p);
+
+  dest += ')';
+
+  return dest;
+}
+
+std::string
+expr2ct::convert_prophecy_r_or_w_ok(const prophecy_r_or_w_ok_exprt &src)
+{
+  // we hide prophecy expressions in C-style output
+  std::string dest = src.id() == ID_prophecy_r_ok   ? "R_OK"
+                     : src.id() == ID_prophecy_w_ok ? "W_OK"
+                                                    : "RW_OK";
+
+  dest += '(';
+
+  unsigned p;
+  dest += convert_with_precedence(src.pointer(), p);
+  dest += ", ";
+  dest += convert_with_precedence(src.size(), p);
+
+  dest += ')';
+
+  return dest;
+}
+
+std::string expr2ct::convert_pointer_in_range(const pointer_in_range_exprt &src)
+{
+  std::string dest = CPROVER_PREFIX "pointer_in_range";
+
+  dest += '(';
+
+  unsigned p;
+  dest += convert_with_precedence(src.lower_bound(), p);
+  dest += ", ";
+  dest += convert_with_precedence(src.pointer(), p);
+  dest += ", ";
+  dest += convert_with_precedence(src.upper_bound(), p);
+
+  dest += ')';
+
+  return dest;
+}
+
+std::string expr2ct::convert_prophecy_pointer_in_range(
+  const prophecy_pointer_in_range_exprt &src)
+{
+  // we hide prophecy expressions in C-style output
+  std::string dest = CPROVER_PREFIX "pointer_in_range";
+
+  dest += '(';
+
+  unsigned p;
+  dest += convert_with_precedence(src.lower_bound(), p);
+  dest += ", ";
+  dest += convert_with_precedence(src.pointer(), p);
+  dest += ", ";
+  dest += convert_with_precedence(src.upper_bound(), p);
+
+  dest += ')';
+
+  return dest;
 }
 
 std::string expr2ct::convert_with_precedence(
@@ -3661,10 +3750,10 @@ std::string expr2ct::convert_with_precedence(
       "__builtin_bswap" + integer2string(*pointer_offset_bits(
                             to_unary_expr(src).op().type(), ns)));
 
-  else if(has_prefix(src.id_string(), "byte_extract"))
+  else if(src.id().starts_with("byte_extract"))
     return convert_byte_extract(to_byte_extract_expr(src), precedence = 16);
 
-  else if(has_prefix(src.id_string(), "byte_update"))
+  else if(src.id().starts_with("byte_update"))
     return convert_byte_update(to_byte_update_expr(src), precedence = 16);
 
   else if(src.id()==ID_address_of)
@@ -3882,7 +3971,7 @@ std::string expr2ct::convert_with_precedence(
   else if(src.id()==ID_code)
     return convert_code(to_code(src));
 
-  else if(src.id()==ID_constant)
+  else if(src.is_constant())
     return convert_constant(to_constant_expr(src), precedence);
 
   else if(src.id() == ID_annotated_pointer_constant)
@@ -3892,8 +3981,7 @@ std::string expr2ct::convert_with_precedence(
   }
 
   else if(src.id()==ID_string_constant)
-    return '"' + MetaString(id2string(to_string_constant(src).get_value())) +
-           '"';
+    return '"' + MetaString(id2string(to_string_constant(src).value())) + '"';
 
   else if(src.id()==ID_struct)
     return convert_struct(src, precedence);
@@ -3974,6 +4062,25 @@ std::string expr2ct::convert_with_precedence(
   else if(src.id() == ID_bitreverse)
     return convert_bitreverse(to_bitreverse_expr(src));
 
+  else if(src.id() == ID_r_ok || src.id() == ID_w_ok || src.id() == ID_rw_ok)
+    return convert_r_or_w_ok(to_r_or_w_ok_expr(src));
+
+  else if(
+    auto prophecy_r_or_w_ok =
+      expr_try_dynamic_cast<prophecy_r_or_w_ok_exprt>(src))
+  {
+    return convert_prophecy_r_or_w_ok(*prophecy_r_or_w_ok);
+  }
+
+  else if(src.id() == ID_pointer_in_range)
+    return convert_pointer_in_range(to_pointer_in_range_expr(src));
+
+  else if(src.id() == ID_prophecy_pointer_in_range)
+  {
+    return convert_prophecy_pointer_in_range(
+      to_prophecy_pointer_in_range_expr(src));
+  }
+
   auto function_string_opt = convert_function(src);
   if(function_string_opt.has_value())
     return *function_string_opt;
@@ -3982,7 +4089,7 @@ std::string expr2ct::convert_with_precedence(
   return convert_norep(src, precedence);
 }
 
-optionalt<std::string> expr2ct::convert_function(const exprt &src)
+std::optional<std::string> expr2ct::convert_function(const exprt &src)
 {
   static const std::map<irep_idt, std::string> function_names = {
     {"buffer_size", "BUFFER_SIZE"},
@@ -4013,7 +4120,6 @@ optionalt<std::string> expr2ct::convert_function(const exprt &src)
     {ID_gcc_builtin_va_arg, "gcc_builtin_va_arg"},
     {ID_get_may, CPROVER_PREFIX "get_may"},
     {ID_get_must, CPROVER_PREFIX "get_must"},
-    {ID_good_pointer, "GOOD_POINTER"},
     {ID_ieee_float_equal, "IEEE_FLOAT_EQUAL"},
     {ID_ieee_float_notequal, "IEEE_FLOAT_NOTEQUAL"},
     {ID_infinity, "INFINITY"},
@@ -4024,14 +4130,12 @@ optionalt<std::string> expr2ct::convert_function(const exprt &src)
     {ID_isinf, "isinf"},
     {ID_isnan, "isnan"},
     {ID_isnormal, "isnormal"},
-    {ID_object_size, "OBJECT_SIZE"},
-    {ID_pointer_object, "POINTER_OBJECT"},
-    {ID_pointer_offset, "POINTER_OFFSET"},
+    {ID_object_size, CPROVER_PREFIX "OBJECT_SIZE"},
+    {ID_pointer_object, CPROVER_PREFIX "POINTER_OBJECT"},
+    {ID_pointer_offset, CPROVER_PREFIX "POINTER_OFFSET"},
+    {ID_loop_entry, CPROVER_PREFIX "loop_entry"},
     {ID_saturating_minus, CPROVER_PREFIX "saturating_minus"},
     {ID_saturating_plus, CPROVER_PREFIX "saturating_plus"},
-    {ID_r_ok, "R_OK"},
-    {ID_w_ok, "W_OK"},
-    {ID_rw_ok, "RW_OK"},
     {ID_width, "WIDTH"},
   };
 

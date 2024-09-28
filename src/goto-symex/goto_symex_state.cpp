@@ -23,7 +23,7 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <analyses/dirty.h>
 #include <pointer-analysis/add_failed_symbols.h>
 
-#include "goto_symex_is_constant.h"
+#include "goto_symex_can_forward_propagate.h"
 #include "symex_target_equation.h"
 
 static void get_l1_name(exprt &expr);
@@ -84,6 +84,8 @@ renamedt<ssa_exprt, L2> goto_symex_statet::assignment(
 
   // the type might need renaming
   rename<L2>(lhs.type(), l1_identifier, ns);
+  if(rhs_is_simplified)
+    simplify(lhs, ns);
   lhs.update_type();
   if(run_validation_checks)
   {
@@ -110,7 +112,7 @@ renamedt<ssa_exprt, L2> goto_symex_statet::assignment(
       "pointer handling for concurrency is unsound");
 
   // Update constant propagation map -- the RHS is L2
-  if(!is_shared && record_value && goto_symex_is_constantt()(rhs))
+  if(!is_shared && record_value && goto_symex_can_forward_propagatet(ns)(rhs))
   {
     const auto propagation_entry = propagation.find(l1_identifier);
     if(!propagation_entry.has_value())
@@ -261,14 +263,40 @@ goto_symex_statet::rename(exprt expr, const namespacet &ns)
       *it = rename<level>(std::move(*it), ns).get();
 
     const exprt &c_expr = as_const(expr);
-    INVARIANT(
-      (expr.id() != ID_with ||
-       c_expr.type() == to_with_expr(c_expr).old().type()) &&
-        (expr.id() != ID_if ||
-         (c_expr.type() == to_if_expr(c_expr).true_case().type() &&
-          c_expr.type() == to_if_expr(c_expr).false_case().type())),
-      "Type of renamed expr should be the same as operands for with_exprt and "
-      "if_exprt");
+
+    // It may happen that the `old` subexpression of a `with_exprt` expression
+    // is propagated with a value that has an array type with a size that is a
+    // symbol with an L2 index that is different. In this case the type of the
+    // `with_exprt` will not match with the type of the `old` subexpression
+    // anymore.
+    // To address this issue we re-canonicalize the `with_exprt` by propagating
+    // the type of the `old` subexpression to the type of the `with_exprt`.
+    const auto *c_with_expr = expr_try_dynamic_cast<with_exprt>(c_expr);
+    if(
+      c_with_expr && can_cast_type<array_typet>(c_with_expr->type()) &&
+      can_cast_type<array_typet>(c_with_expr->old().type()) &&
+      c_with_expr->type() != c_with_expr->old().type())
+    {
+      expr.type() = to_with_expr(expr).old().type();
+    }
+    INVARIANT_WITH_DIAGNOSTICS(
+      expr.id() != ID_with ||
+        c_expr.type() == to_with_expr(c_expr).old().type(),
+      "Type of renamed expr should be the same as operands for with_exprt",
+      c_expr.type().pretty(),
+      to_with_expr(c_expr).old().type().pretty());
+    INVARIANT_WITH_DIAGNOSTICS(
+      expr.id() != ID_if ||
+        c_expr.type() == to_if_expr(c_expr).true_case().type(),
+      "Type of renamed expr should be the same as operands for if_exprt",
+      c_expr.type().pretty(),
+      to_if_expr(c_expr).true_case().type().pretty());
+    INVARIANT_WITH_DIAGNOSTICS(
+      expr.id() != ID_if ||
+        c_expr.type() == to_if_expr(c_expr).false_case().type(),
+      "Type of renamed expr should be the same as operands for if_exprt",
+      c_expr.type().pretty(),
+      to_if_expr(c_expr).false_case().type().pretty());
 
     if(level == L2)
       expr = field_sensitivity.apply(ns, *this, std::move(expr), false);
@@ -713,17 +741,22 @@ void goto_symex_statet::rename(
     }
   }
 
-  // expand struct and union tag types
-  type = ns.follow(type);
-
   if(type.id()==ID_array)
   {
     auto &array_type = to_array_type(type);
     rename<level>(array_type.element_type(), irep_idt(), ns);
     array_type.size() = rename<level>(std::move(array_type.size()), ns).get();
   }
-  else if(type.id() == ID_struct || type.id() == ID_union)
+  else if(
+    type.id() == ID_struct || type.id() == ID_union ||
+    type.id() == ID_struct_tag || type.id() == ID_union_tag)
   {
+    // expand struct and union tag types
+    if(type.id() == ID_struct_tag)
+      type = ns.follow_tag(to_struct_tag_type(type));
+    else if(type.id() == ID_union_tag)
+      type = ns.follow_tag(to_union_tag_type(type));
+
     struct_union_typet &s_u_type=to_struct_union_type(type);
     struct_union_typet::componentst &components=s_u_type.components();
 

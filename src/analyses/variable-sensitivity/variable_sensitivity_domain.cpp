@@ -220,11 +220,6 @@ void variable_sensitivity_domaint::make_top()
   abstract_state.make_top();
 }
 
-void variable_sensitivity_domaint::make_entry()
-{
-  abstract_state.make_top();
-}
-
 bool variable_sensitivity_domaint::merge(
   const variable_sensitivity_domaint &b,
   trace_ptrt from,
@@ -280,13 +275,6 @@ bool variable_sensitivity_domaint::is_bottom() const
 bool variable_sensitivity_domaint::is_top() const
 {
   return abstract_state.is_top();
-}
-
-std::vector<irep_idt> variable_sensitivity_domaint::get_modified_symbols(
-  const variable_sensitivity_domaint &other) const
-{
-  return abstract_environmentt::modified_symbols(
-    abstract_state, other.abstract_state);
 }
 
 void variable_sensitivity_domaint::transform_function_call(
@@ -431,14 +419,10 @@ bool variable_sensitivity_domaint::ignore_function_call_transform(
 }
 
 void variable_sensitivity_domaint::merge_three_way_function_return(
-  const ai_domain_baset &function_call,
   const ai_domain_baset &function_start,
   const ai_domain_baset &function_end,
   const namespacet &ns)
 {
-  const variable_sensitivity_domaint &cast_function_call =
-    static_cast<const variable_sensitivity_domaint &>(function_call);
-
   const variable_sensitivity_domaint &cast_function_start =
     static_cast<const variable_sensitivity_domaint &>(function_start);
 
@@ -446,7 +430,8 @@ void variable_sensitivity_domaint::merge_three_way_function_return(
     static_cast<const variable_sensitivity_domaint &>(function_end);
 
   const std::vector<irep_idt> &modified_symbol_names =
-    cast_function_start.get_modified_symbols(cast_function_end);
+    abstract_environmentt::modified_symbols(
+      cast_function_start.abstract_state, cast_function_end.abstract_state);
 
   std::vector<symbol_exprt> modified_symbols;
   modified_symbols.reserve(modified_symbol_names.size());
@@ -456,22 +441,14 @@ void variable_sensitivity_domaint::merge_three_way_function_return(
     std::back_inserter(modified_symbols),
     [&ns](const irep_idt &id) { return ns.lookup(id).symbol_expr(); });
 
-  abstract_state = cast_function_call.abstract_state;
-  apply_domain(modified_symbols, cast_function_end, ns);
-
-  return;
-}
-
-void variable_sensitivity_domaint::apply_domain(
-  std::vector<symbol_exprt> modified_symbols,
-  const variable_sensitivity_domaint &source,
-  const namespacet &ns)
-{
   for(const auto &symbol : modified_symbols)
   {
-    abstract_object_pointert value = source.abstract_state.eval(symbol, ns);
+    abstract_object_pointert value =
+      cast_function_end.abstract_state.eval(symbol, ns);
     abstract_state.assign(symbol, value, ns);
   }
+
+  return;
 }
 
 void variable_sensitivity_domaint::assume(exprt expr, namespacet ns)

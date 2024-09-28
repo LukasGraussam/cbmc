@@ -209,19 +209,16 @@ bool abstract_environmentt::assign(
     final_value = value;
   }
 
-  const typet &lhs_type = ns.follow(lhs_value->type());
-  const typet &rhs_type = ns.follow(final_value->type());
-
   // Write the value for the root symbol back into the map
   INVARIANT(
-    lhs_type == rhs_type,
+    lhs_value->type() == final_value->type(),
     "Assignment types must match"
     "\n"
     "lhs_type :" +
-      lhs_type.pretty() +
+      lhs_value->type().pretty() +
       "\n"
       "rhs_type :" +
-      rhs_type.pretty());
+      final_value->type().pretty());
 
   // If LHS was directly the symbol
   if(s.id() == ID_symbol)
@@ -262,7 +259,7 @@ bool abstract_environmentt::assume(const exprt &expr, const namespacet &ns)
   // We should only attempt to assume Boolean things
   // This should be enforced by the well-structured-ness of the
   // goto-program and the way assume is used.
-  PRECONDITION(expr.type().id() == ID_bool);
+  PRECONDITION(expr.is_boolean());
 
   auto simplified = simplify_expr(expr, ns);
   auto assumption = do_assume(simplified, ns);
@@ -270,8 +267,7 @@ bool abstract_environmentt::assume(const exprt &expr, const namespacet &ns)
   if(assumption.id() != ID_nil) // I.E. actually a value
   {
     // Should be of the right type
-    INVARIANT(
-      assumption.type().id() == ID_bool, "simplification preserves type");
+    INVARIANT(assumption.is_boolean(), "simplification preserves type");
 
     if(assumption.is_false())
     {
@@ -788,7 +784,7 @@ exprt assume_less_than_unbounded(
   {
     // TOP < x, so prune range is min->right.upper
     auto pruned_expr = constant_interval_exprt(
-      min_exprt(operands.left->type()),
+      min_value_exprt(operands.left->type()),
       operands.right_interval().get_upper(),
       operands.left->type());
     auto constrained =
@@ -800,7 +796,7 @@ exprt assume_less_than_unbounded(
     // x < TOP, so prune range is left.lower->max
     auto pruned_expr = constant_interval_exprt(
       operands.left_interval().get_lower(),
-      max_exprt(operands.right->type()),
+      max_value_exprt(operands.right->type()),
       operands.right->type());
     auto constrained =
       std::make_shared<interval_abstract_valuet>(pruned_expr, env, ns);

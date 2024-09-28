@@ -246,8 +246,8 @@ code_blockt build_null_pointer(const symbol_exprt &result_symbol)
 code_blockt recursive_initializationt::build_constructor_body(
   const exprt &depth_symbol,
   const symbol_exprt &result_symbol,
-  const optionalt<exprt> &size_symbol,
-  const optionalt<irep_idt> &lhs_name,
+  const std::optional<exprt> &size_symbol,
+  const std::optional<irep_idt> &lhs_name,
   const bool is_nullable)
 {
   PRECONDITION(result_symbol.type().id() == ID_pointer);
@@ -297,8 +297,8 @@ irep_idt recursive_initializationt::build_constructor(const exprt &expr)
   // or in case a `size` is associated with the `expr`
   //
   // void type_constructor_T(int depth_T, T *result_T, int *size);
-  optionalt<irep_idt> size_var;
-  optionalt<irep_idt> expr_name;
+  std::optional<irep_idt> size_var;
+  std::optional<irep_idt> expr_name;
   bool is_nullable = false;
   bool has_size_param = false;
   if(expr.id() == ID_symbol)
@@ -335,7 +335,7 @@ irep_idt recursive_initializationt::build_constructor(const exprt &expr)
   fun_params.push_back(result_parameter);
 
   auto &symbol_table = goto_model.symbol_table;
-  optionalt<exprt> size_symbol_expr;
+  std::optional<exprt> size_symbol_expr;
   if(expr_name.has_value() && should_be_treated_as_array(*expr_name))
   {
     typet size_var_type;
@@ -377,12 +377,13 @@ symbol_exprt recursive_initializationt::get_malloc_function()
   auto malloc_sym = goto_model.symbol_table.lookup("malloc");
   if(malloc_sym == nullptr)
   {
-    symbolt new_malloc_sym;
-    new_malloc_sym.type = code_typet{code_typet{
-      {code_typet::parametert{size_type()}}, pointer_type(empty_typet{})}};
-    new_malloc_sym.name = new_malloc_sym.pretty_name =
-      new_malloc_sym.base_name = "malloc";
-    new_malloc_sym.mode = initialization_config.mode;
+    symbolt new_malloc_sym{
+      "malloc",
+      code_typet{
+        {code_typet::parametert{size_type()}}, pointer_type(empty_typet{})},
+      initialization_config.mode};
+    new_malloc_sym.pretty_name = "malloc";
+    new_malloc_sym.base_name = "malloc";
     goto_model.symbol_table.insert(new_malloc_sym);
     return new_malloc_sym.symbol_expr();
   }
@@ -396,7 +397,7 @@ bool recursive_initializationt::should_be_treated_as_array(
          initialization_config.pointers_to_treat_as_arrays.end();
 }
 
-optionalt<recursive_initializationt::equal_cluster_idt>
+std::optional<recursive_initializationt::equal_cluster_idt>
 recursive_initializationt::find_equal_cluster(const irep_idt &name) const
 {
   for(equal_cluster_idt index = 0;
@@ -417,7 +418,7 @@ bool recursive_initializationt::is_array_size_parameter(
          initialization_config.variables_that_hold_array_sizes.end();
 }
 
-optionalt<irep_idt> recursive_initializationt::get_associated_size_variable(
+std::optional<irep_idt> recursive_initializationt::get_associated_size_variable(
   const irep_idt &array_name) const
 {
   return optional_lookup(
@@ -634,12 +635,13 @@ symbol_exprt recursive_initializationt::get_free_function()
   auto free_sym = goto_model.symbol_table.lookup("free");
   if(free_sym == nullptr)
   {
-    symbolt new_free_sym;
-    new_free_sym.type = code_typet{code_typet{
-      {code_typet::parametert{pointer_type(empty_typet{})}}, empty_typet{}}};
-    new_free_sym.name = new_free_sym.pretty_name = new_free_sym.base_name =
-      "free";
-    new_free_sym.mode = initialization_config.mode;
+    symbolt new_free_sym{
+      "free",
+      code_typet{
+        {code_typet::parametert{pointer_type(empty_typet{})}}, empty_typet{}},
+      initialization_config.mode};
+    new_free_sym.pretty_name = "free";
+    new_free_sym.base_name = "free";
     goto_model.symbol_table.insert(new_free_sym);
     return new_free_sym.symbol_expr();
   }
@@ -678,7 +680,7 @@ code_blockt recursive_initializationt::build_pointer_constructor(
     depth, ID_ge, get_symbol_expr(max_depth_var_name)};
   exprt::operandst should_not_recurse{depth_gt_max_depth};
 
-  optionalt<symbol_exprt> has_seen;
+  std::optional<symbol_exprt> has_seen;
   if(can_cast_type<struct_tag_typet>(to_pointer_type(type).base_type()))
     has_seen = get_fresh_global_symexpr(
       "has_seen_" + type2id(to_pointer_type(type).base_type()));
@@ -818,7 +820,7 @@ code_blockt recursive_initializationt::build_dynamic_array_constructor(
   const exprt &depth,
   const symbol_exprt &result,
   const exprt &size,
-  const optionalt<irep_idt> &lhs_name)
+  const std::optional<irep_idt> &lhs_name)
 {
   PRECONDITION(result.type().id() == ID_pointer);
   const typet &dynamic_array_type = to_pointer_type(result.type()).base_type();
@@ -1025,7 +1027,7 @@ code_blockt recursive_initializationt::build_function_pointer_constructor(
         : "";
     // skip referencing globals because the corresponding symbols in the symbol
     // table are no longer marked as file local.
-    if(has_prefix(id2string(sym_to_lookup), FILE_LOCAL_PREFIX))
+    if(sym_to_lookup.starts_with(FILE_LOCAL_PREFIX))
     {
       continue;
     }

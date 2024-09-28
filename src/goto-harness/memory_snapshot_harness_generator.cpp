@@ -16,9 +16,9 @@ Author: Daniel Poetzl
 #include <util/string_utils.h>
 #include <util/symbol_table.h>
 
-#include <goto-programs/goto_convert_functions.h>
 #include <goto-programs/goto_model.h>
 
+#include <ansi-c/goto-conversion/goto_convert_functions.h>
 #include <json-symtab-language/json_symbol_table.h>
 #include <json/json_parser.h>
 
@@ -405,14 +405,13 @@ void memory_snapshot_harness_generatort::generate(
 
   // Create harness function symbol
 
-  symbolt harness_function_symbol;
-  harness_function_symbol.name = harness_function_name;
+  symbolt harness_function_symbol{
+    harness_function_name,
+    code_typet({}, empty_typet()),
+    called_function_symbol->mode};
   harness_function_symbol.base_name = harness_function_name;
   harness_function_symbol.pretty_name = harness_function_name;
-
   harness_function_symbol.is_lvalue = true;
-  harness_function_symbol.mode = called_function_symbol->mode;
-  harness_function_symbol.type = code_typet({}, empty_typet());
   harness_function_symbol.value = harness_function_body;
 
   // Add harness function to goto model and symbol table

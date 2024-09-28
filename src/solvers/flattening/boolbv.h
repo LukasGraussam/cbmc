@@ -39,6 +39,8 @@ class overflow_result_exprt;
 class replication_exprt;
 class unary_overflow_exprt;
 class union_typet;
+class update_bit_exprt;
+class update_bits_exprt;
 
 class boolbvt:public arrayst
 {
@@ -59,7 +61,7 @@ public:
 
   virtual const bvt &convert_bv( // check cache
     const exprt &expr,
-    const optionalt<std::size_t> expected_width = {});
+    const std::optional<std::size_t> expected_width = {});
 
   virtual bvt convert_bitvector(const exprt &expr); // no cache
 
@@ -67,6 +69,7 @@ public:
   exprt get(const exprt &expr) const override;
   void set_to(const exprt &expr, bool value) override;
   void print_assignment(std::ostream &out) const override;
+  exprt handle(const exprt &) override;
 
   void clear_cache() override
   {
@@ -157,7 +160,6 @@ protected:
   virtual bvt convert_if(const if_exprt &expr);
   virtual bvt convert_struct(const struct_exprt &expr);
   virtual bvt convert_array(const exprt &expr);
-  virtual bvt convert_vector(const vector_exprt &expr);
   virtual bvt convert_complex(const complex_exprt &expr);
   virtual bvt convert_complex_real(const complex_real_exprt &expr);
   virtual bvt convert_complex_imag(const complex_imag_exprt &expr);
@@ -177,6 +179,8 @@ protected:
   virtual bvt convert_member(const member_exprt &expr);
   virtual bvt convert_with(const with_exprt &expr);
   virtual bvt convert_update(const update_exprt &);
+  virtual bvt convert_update_bit(const update_bit_exprt &);
+  virtual bvt convert_update_bits(const update_bits_exprt &);
   virtual bvt convert_case(const exprt &expr);
   virtual bvt convert_cond(const cond_exprt &);
   virtual bvt convert_shift(const binary_exprt &expr);
@@ -197,36 +201,38 @@ protected:
   virtual bvt convert_saturating_add_sub(const binary_exprt &expr);
   virtual bvt convert_overflow_result(const overflow_result_exprt &expr);
 
+  bvt convert_update_bits(bvt src, const exprt &index, const bvt &new_value);
+
   void convert_with(
     const typet &type,
-    const exprt &op1,
-    const exprt &op2,
+    const exprt &where,
+    const exprt &new_value,
     const bvt &prev_bv,
     bvt &next_bv);
 
   void convert_with_bv(
-    const exprt &op1,
-    const exprt &op2,
+    const exprt &index,
+    const exprt &new_value,
     const bvt &prev_bv,
     bvt &next_bv);
 
   void convert_with_array(
     const array_typet &type,
-    const exprt &op1,
-    const exprt &op2,
+    const exprt &index,
+    const exprt &new_value,
     const bvt &prev_bv,
     bvt &next_bv);
 
   void convert_with_union(
     const union_typet &type,
-    const exprt &op2,
+    const exprt &new_value,
     const bvt &prev_bv,
     bvt &next_bv);
 
   void convert_with_struct(
     const struct_typet &type,
-    const exprt &op1,
-    const exprt &op2,
+    const exprt &where,
+    const exprt &new_value,
     const bvt &prev_bv,
     bvt &next_bv);
 

@@ -52,7 +52,8 @@ void symex_level1t::insert(
     ssa.get().get_identifier(), std::make_pair(ssa.get(), index));
 }
 
-optionalt<std::pair<ssa_exprt, std::size_t>> symex_level1t::insert_or_replace(
+std::optional<std::pair<ssa_exprt, std::size_t>>
+symex_level1t::insert_or_replace(
   const renamedt<ssa_exprt, L0> &ssa,
   std::size_t index)
 {
@@ -228,9 +229,11 @@ bool check_renaming_l1(const exprt &expr)
   }
   else
   {
-    forall_operands(it, expr)
-      if(check_renaming_l1(*it))
+    for(const auto &op : expr.operands())
+    {
+      if(check_renaming_l1(op))
         return true;
+    }
   }
 
   return false;
@@ -271,9 +274,11 @@ bool check_renaming(const exprt &expr)
   }
   else
   {
-    forall_operands(it, expr)
-      if(check_renaming(*it))
+    for(const auto &op : expr.operands())
+    {
+      if(check_renaming(op))
         return true;
+    }
   }
 
   return false;

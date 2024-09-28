@@ -25,7 +25,7 @@ public:
 
   std::unique_ptr<statet> make(locationt l) const override
   {
-    auto p = util_make_unique<invariant_set_domaint>(
+    auto p = std::make_unique<invariant_set_domaint>(
       ip.value_sets, ip.object_store, ip.ns);
     CHECK_RETURN(p->is_bottom());
 
@@ -40,7 +40,7 @@ invariant_propagationt::invariant_propagationt(
   const namespacet &_ns,
   value_setst &_value_sets)
   : ait<invariant_set_domaint>(
-      util_make_unique<invariant_set_domain_factoryt>(*this)),
+      std::make_unique<invariant_set_domain_factoryt>(*this)),
     ns(_ns),
     value_sets(_value_sets),
     object_store(_ns)
@@ -131,7 +131,10 @@ void invariant_propagationt::get_objects_rec(
     t.id() == ID_struct || t.id() == ID_union || t.id() == ID_struct_tag ||
     t.id() == ID_union_tag)
   {
-    const struct_union_typet &struct_type = to_struct_union_type(ns.follow(t));
+    const struct_union_typet &struct_type =
+      (t.id() == ID_struct_tag || t.id() == ID_union_tag)
+        ? ns.follow_tag(to_struct_or_union_tag_type(t))
+        : to_struct_union_type(t);
 
     for(const auto &component : struct_type.components())
     {
@@ -223,7 +226,9 @@ bool invariant_propagationt::check_type(const typet &type) const
   else if(
     type.id() == ID_struct || type.id() == ID_union ||
     type.id() == ID_struct_tag || type.id() == ID_union_tag)
+  {
     return false;
+  }
   else if(type.id()==ID_array)
     return false;
   else if(type.id()==ID_unsignedbv ||

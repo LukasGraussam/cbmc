@@ -12,8 +12,6 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include <memory>
 
-#include <util/make_unique.h>
-
 #include <langapi/language.h>
 
 #include "ansi_c_parse_tree.h"
@@ -25,16 +23,19 @@ Author: Daniel Kroening, kroening@kroening.com
   "(min-null-tree-depth):"
 
 #define HELP_ANSI_C_LANGUAGE \
-  " --max-nondet-tree-depth N    limit size of nondet (e.g. input) object tree;\n" /* NOLINT(*) */\
-  "                              at level N pointers are set to null\n" \
-  " --min-null-tree-depth N      minimum level at which a pointer can first be\n" /* NOLINT(*) */\
-  "                              NULL in a recursively nondet initialized struct\n" /* NOLINT(*) */
+  " {y--max-nondet-tree-depth} {uN} \t " \
+  "limit size of nondet (e.g. input) object tree; at level {uN} pointers are " \
+  "set to null\n" \
+  " {y--min-null-tree-depth} {uN} \t " \
+  "minimum level at which a pointer can first be NULL in a recursively " \
+  "nondet initialized struct\n" \
 // clang-format on
 
 class ansi_c_languaget:public languaget
 {
 public:
-  void set_language_options(const optionst &options) override
+  void
+  set_language_options(const optionst &options, message_handlert &) override
   {
     object_factory_params.set(options);
   }
@@ -42,22 +43,28 @@ public:
   bool preprocess(
     std::istream &instream,
     const std::string &path,
-    std::ostream &outstream) override;
+    std::ostream &outstream,
+    message_handlert &message_handler) override;
 
   bool parse(
     std::istream &instream,
-    const std::string &path) override;
+    const std::string &path,
+    message_handlert &message_handler) override;
 
-  bool generate_support_functions(symbol_table_baset &symbol_table) override;
+  bool generate_support_functions(
+    symbol_table_baset &symbol_table,
+    message_handlert &message_handler) override;
 
   bool typecheck(
     symbol_table_baset &symbol_table,
     const std::string &module,
+    message_handlert &message_handler,
     const bool keep_file_local) override;
 
   bool typecheck(
     symbol_table_baset &symbol_table,
     const std::string &module,
+    message_handlert &message_handler,
     const bool keep_file_local,
     const std::set<irep_idt> &keep);
 
@@ -66,13 +73,15 @@ public:
     return true;
   }
 
-  bool typecheck(symbol_table_baset &symbol_table, const std::string &module)
-    override
+  bool typecheck(
+    symbol_table_baset &symbol_table,
+    const std::string &module,
+    message_handlert &message_handler) override
   {
-    return typecheck(symbol_table, module, true);
+    return typecheck(symbol_table, module, message_handler, true);
   }
 
-  void show_parse(std::ostream &out) override;
+  void show_parse(std::ostream &out, message_handlert &) override;
 
   ~ansi_c_languaget() override;
   ansi_c_languaget() { }
@@ -96,10 +105,13 @@ public:
     const std::string &code,
     const std::string &module,
     exprt &expr,
-    const namespacet &ns) override;
+    const namespacet &ns,
+    message_handlert &message_handler) override;
 
   std::unique_ptr<languaget> new_language() override
-  { return util_make_unique<ansi_c_languaget>(); }
+  {
+    return std::make_unique<ansi_c_languaget>();
+  }
 
   std::string id() const override { return "C"; }
   std::string description() const override { return "ANSI-C 99"; }

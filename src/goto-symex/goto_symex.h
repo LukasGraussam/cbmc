@@ -15,6 +15,7 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <util/message.h>
 
 #include "complexity_limiter.h"
+#include "shadow_memory.h"
 #include "symex_config.h"
 #include "symex_target_equation.h"
 
@@ -22,6 +23,7 @@ class address_of_exprt;
 class function_application_exprt;
 class goto_symex_statet;
 class path_storaget;
+class shadow_memory_field_definitionst;
 class side_effect_exprt;
 class symex_assignt;
 class typet;
@@ -65,7 +67,16 @@ public:
       path_segment_vccs(0),
       _total_vccs(std::numeric_limits<unsigned>::max()),
       _remaining_vccs(std::numeric_limits<unsigned>::max()),
-      complexity_module(mh, options)
+      complexity_module(mh, options),
+      shadow_memory(
+        std::bind(
+          &goto_symext::symex_assign,
+          this,
+          std::placeholders::_1,
+          std::placeholders::_2,
+          std::placeholders::_3),
+        ns,
+        mh)
   {
   }
 
@@ -98,16 +109,23 @@ public:
   /// having the state around afterwards.
   /// \param get_goto_function: The delegate to retrieve function bodies (see
   ///   \ref get_goto_functiont)
-  /// \param new_symbol_table: A symbol table to store the symbols added during
-  /// symbolic execution
-  virtual void symex_from_entry_point_of(
+  /// \param fields The shadow memory field declarations
+  /// \return A symbol table holding the symbols added during symbolic
+  ///   execution.
+  [[nodiscard]] virtual symbol_tablet symex_from_entry_point_of(
     const get_goto_functiont &get_goto_function,
-    symbol_tablet &new_symbol_table);
+    const shadow_memory_field_definitionst &fields);
 
   /// Puts the initial state of the entry point function into the path storage
+  /// \param get_goto_function: The delegate to retrieve function bodies (see
+  ///   \ref get_goto_functiont)
+  /// \param new_symbol_table: A symbol table to store the symbols added during
+  /// symbolic execution
+  /// \param fields The shadow memory field declarations
   virtual void initialize_path_storage_from_entry_point_of(
     const get_goto_functiont &get_goto_function,
-    symbol_table_baset &new_symbol_table);
+    symbol_table_baset &new_symbol_table,
+    const shadow_memory_field_definitionst &fields);
 
   /// Performs symbolic execution using a state and equation that have
   /// already been used to symbolically execute part of the program. The state
@@ -117,13 +135,12 @@ public:
   ///   \ref get_goto_functiont)
   /// \param saved_state: The symbolic execution state to resume from
   /// \param saved_equation: The equation as previously built up
-  /// \param new_symbol_table: A symbol table to store the symbols added during
-  ///   symbolic execution
-  virtual void resume_symex_from_saved_state(
+  /// \return A symbol table holding the symbols added during symbolic
+  ///   execution.
+  [[nodiscard]] virtual symbol_tablet resume_symex_from_saved_state(
     const get_goto_functiont &get_goto_function,
     const statet &saved_state,
-    symex_target_equationt *saved_equation,
-    symbol_tablet &new_symbol_table);
+    symex_target_equationt *saved_equation);
 
   //// \brief Symbolically execute the entire program starting from entry point
   ///
@@ -135,12 +152,10 @@ public:
   /// \param state: The symbolic execution state to use for the execution
   /// \param get_goto_functions: A functor to retrieve function bodies to
   ///   execute
-  /// \param new_symbol_table: A symbol table to store the symbols added during
-  ///   symbolic execution
-  virtual void symex_with_state(
-    statet &state,
-    const get_goto_functiont &get_goto_functions,
-    symbol_tablet &new_symbol_table);
+  /// \return A symbol table holding the symbols added during symbolic
+  ///   execution.
+  [[nodiscard]] virtual symbol_tablet
+  symex_with_state(statet &state, const get_goto_functiont &get_goto_functions);
 
   /// \brief Set when states are pushed onto the workqueue
   /// If this flag is set at the end of a symbolic execution run, it means that
@@ -383,10 +398,16 @@ protected:
     value_sett *jump_not_taken_value_set,
     const namespacet &ns);
 
+  /// Symbolically execute a verification condition (assertion).
+  /// \param cond: The guard of the assumption
+  /// \param property_id: Unique property identifier of this assertion
+  /// \param msg: The message associated with this assertion
+  /// \param state: Symbolic execution state for current instruction
   virtual void vcc(
-    const exprt &,
+    const exprt &cond,
+    const irep_idt &property_id,
     const std::string &msg,
-    statet &);
+    statet &state);
 
   /// Symbolically execute an ASSUME instruction or simulate such an execution
   /// for a synthetic assumption
@@ -429,12 +450,6 @@ protected:
 
   virtual void loop_bound_exceeded(statet &state, const exprt &guard);
 
-  /// Log a warning that a function has no body
-  /// \param identifier: The name of the function with no body
-  virtual void no_body(const irep_idt &identifier)
-  {
-  }
-
   /// Symbolically execute a FUNCTION_CALL instruction.
   /// Only functions that are symbols are supported, see
   /// \ref goto_symext::symex_function_call_symbol.
@@ -446,6 +461,16 @@ protected:
     const get_goto_functiont &get_goto_function,
     statet &state,
     const goto_programt::instructiont &instruction);
+
+  /// Preserves locality of parameters of a given function by applying L1
+  /// renaming to them.
+  /// \param function_identifier The parameter identifier
+  /// \param state The current state
+  /// \param goto_function The goto function
+  virtual void locality(
+    const irep_idt &function_identifier,
+    goto_symext::statet &state,
+    const goto_functionst::goto_functiont &goto_function);
 
   /// Symbolically execute a END_FUNCTION instruction.
   /// \param state: Symbolic execution state for current instruction
@@ -717,11 +742,11 @@ protected:
     const array_exprt &new_char_array,
     const address_of_exprt &string_data);
 
-  optionalt<std::reference_wrapper<const array_exprt>>
+  std::optional<std::reference_wrapper<const array_exprt>>
   try_evaluate_constant_string(const statet &state, const exprt &content);
 
   // clang-format off
-  static optionalt<std::reference_wrapper<const constant_exprt>>
+  static std::optional<std::reference_wrapper<const constant_exprt>>
   try_evaluate_constant(
     const statet &state,
     const exprt &expr);
@@ -782,9 +807,6 @@ protected:
   /// \param code: The cleaned up output instruction
   virtual void symex_output(statet &state, const codet &code);
 
-  /// A monotonically increasing index for each created dynamic object
-  static unsigned dynamic_counter;
-
   void rewrite_quantifiers(exprt &, statet &);
 
   /// \brief Symbolic execution paths to be resumed later
@@ -818,6 +840,9 @@ protected:
   ///@}
 
   complexity_limitert complexity_module;
+
+  /// Shadow memory instrumentation API
+  shadow_memoryt shadow_memory;
 
 public:
   unsigned get_total_vccs() const

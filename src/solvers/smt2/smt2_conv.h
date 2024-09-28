@@ -14,6 +14,7 @@ Author: Daniel Kroening, kroening@kroening.com
 #include <util/std_expr.h>
 #include <util/threeval.h>
 
+#include <cstdint>
 #include <map>
 #include <set>
 #include <sstream>
@@ -32,6 +33,8 @@ Author: Daniel Kroening, kroening@kroening.com
 class floatbv_typecast_exprt;
 class ieee_float_op_exprt;
 class union_typet;
+class update_bit_exprt;
+class update_bits_exprt;
 
 class smt2_convt : public stack_decision_proceduret
 {
@@ -39,10 +42,12 @@ public:
   enum class solvert
   {
     GENERIC,
+    BITWUZLA,
     BOOLECTOR,
     CPROVER_SMT2,
     CVC3,
     CVC4,
+    CVC5,
     MATHSAT,
     YICES,
     Z3
@@ -99,12 +104,12 @@ protected:
     unordered_map<irep_idt, std::function<void(const exprt &)>, irep_id_hash>;
   converterst converters;
 
-  std::vector<exprt> assumptions;
+  std::vector<literalt> assumptions;
   boolbv_widtht boolbv_width;
 
   std::size_t number_of_solver_calls = 0;
 
-  resultt dec_solve() override;
+  resultt dec_solve(const exprt &) override;
 
   void write_header();
   /// Writes the end of the SMT file to the `smt_convt::out` stream. These parts
@@ -147,6 +152,8 @@ protected:
 
   void convert_with(const with_exprt &expr);
   void convert_update(const update_exprt &);
+  void convert_update_bit(const update_bit_exprt &);
+  void convert_update_bits(const update_bits_exprt &);
 
   void convert_expr(const exprt &);
   void convert_type(const typet &);
@@ -187,6 +194,7 @@ protected:
     std::unordered_map<int64_t, exprt> *operands_map,
     const irept &src,
     const array_typet &type);
+  std::unordered_map<irep_idt, irept> current_bindings;
 
   // we use this to build a bit-vector encoding of the FPA theory
   void convert_floatbv(const exprt &expr);
@@ -213,7 +221,7 @@ protected:
 
   const smt2_symbolt &to_smt2_symbol(const exprt &expr)
   {
-    assert(expr.id()==ID_smt2_symbol && !expr.has_operands());
+    PRECONDITION(expr.id() == ID_smt2_symbol && !expr.has_operands());
     return static_cast<const smt2_symbolt&>(expr);
   }
 
@@ -235,13 +243,16 @@ protected:
   // keeps track of all non-Boolean symbols and their value
   struct identifiert
   {
+    // We do not currently read any of the following members, but might do so in
+    // future. At this time, we just care about (not) having an entry in
+    // `identifier_map`.
     bool is_bound;
     typet type;
     exprt value;
 
-    identifiert() : is_bound(false)
+    identifiert(typet type, bool is_bound)
+      : is_bound(is_bound), type(std::move(type))
     {
-      type.make_nil();
       value.make_nil();
     }
   };

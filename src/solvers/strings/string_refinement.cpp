@@ -40,7 +40,7 @@ static bool is_valid_string_constraint(
   const namespacet &ns,
   const string_constraintt &constraint);
 
-static optionalt<exprt> find_counter_example(
+static std::optional<exprt> find_counter_example(
   const namespacet &ns,
   const exprt &axiom,
   const symbol_exprt &var,
@@ -106,14 +106,14 @@ static std::vector<exprt> instantiate(
   const std::unordered_map<string_not_contains_constraintt, symbol_exprt>
     &witnesses);
 
-static optionalt<exprt> get_array(
+static std::optional<exprt> get_array(
   const std::function<exprt(const exprt &)> &super_get,
   const namespacet &ns,
   messaget::mstreamt &stream,
   const array_string_exprt &arr,
   const array_poolt &array_pool);
 
-static optionalt<exprt> substitute_array_access(
+static std::optional<exprt> substitute_array_access(
   const index_exprt &index_expr,
   symbol_generatort &symbol_generator,
   const bool left_propagate);
@@ -282,7 +282,7 @@ replace_expr_copy(const union_find_replacet &symbol_resolve, exprt expr)
 /// \param value: the boolean value to set it to
 void string_refinementt::set_to(const exprt &expr, bool value)
 {
-  PRECONDITION(expr.type().id() == ID_bool);
+  PRECONDITION(expr.is_boolean());
   PRECONDITION(equality_propagation);
   if(!value)
     equations.push_back(not_exprt{expr});
@@ -341,7 +341,10 @@ static void add_equations_for_symbol_resolution(
     {
       if(rhs.type().id() == ID_struct || rhs.type().id() == ID_struct_tag)
       {
-        const struct_typet &struct_type = to_struct_type(ns.follow(rhs.type()));
+        const struct_typet &struct_type =
+          rhs.type().id() == ID_struct_tag
+            ? ns.follow_tag(to_struct_tag_type(rhs.type()))
+            : to_struct_type(rhs.type());
         for(const auto &comp : struct_type.components())
         {
           if(is_char_pointer_type(comp.type()))
@@ -377,7 +380,10 @@ extract_strings_from_lhs(const exprt &lhs, const namespacet &ns)
     result.push_back(lhs);
   else if(lhs.type().id() == ID_struct || lhs.type().id() == ID_struct_tag)
   {
-    const struct_typet &struct_type = to_struct_type(ns.follow(lhs.type()));
+    const struct_typet &struct_type =
+      lhs.type().id() == ID_struct_tag
+        ? ns.follow_tag(to_struct_tag_type(lhs.type()))
+        : to_struct_type(lhs.type());
     for(const auto &comp : struct_type.components())
     {
       const std::vector<exprt> strings_in_comp = extract_strings_from_lhs(
@@ -439,7 +445,9 @@ static void add_string_equation_to_symbol_resolution(
       eq.rhs().type().id() == ID_struct_tag)
     {
       const struct_typet &struct_type =
-        to_struct_type(ns.follow(eq.rhs().type()));
+        eq.rhs().type().id() == ID_struct_tag
+          ? ns.follow_tag(to_struct_tag_type(eq.rhs().type()))
+          : to_struct_type(eq.rhs().type());
       for(const auto &comp : struct_type.components())
       {
         const member_exprt lhs_data(eq.lhs(), comp.get_name(), comp.type());
@@ -603,7 +611,8 @@ output_equations(std::ostream &output, const std::vector<exprt> &equations)
 /// \return `resultt::D_SATISFIABLE` if the constraints are satisfiable,
 ///   `resultt::D_UNSATISFIABLE` if they are unsatisfiable,
 ///   `resultt::D_ERROR` if the limit of iteration was reached.
-decision_proceduret::resultt string_refinementt::dec_solve()
+decision_proceduret::resultt
+string_refinementt::dec_solve(const exprt &assumption)
 {
 #ifdef DEBUG
   log.debug() << "dec_solve: Initial set of equations" << messaget::eom;
@@ -686,7 +695,7 @@ decision_proceduret::resultt string_refinementt::dec_solve()
     // in the graph.
     const exprt eq_with_char_array_replaced_with_representative_elements =
       replace_expr_copy(symbol_resolve, eq);
-    const optionalt<exprt> new_equation = add_node(
+    const std::optional<exprt> new_equation = add_node(
       dependencies,
       eq_with_char_array_replaced_with_representative_elements,
       generator.array_pool,
@@ -781,7 +790,8 @@ decision_proceduret::resultt string_refinementt::dec_solve()
   // Initial try without index set
   const auto get = [this](const exprt &expr) { return this->get(expr); };
   dependencies.clean_cache();
-  const decision_proceduret::resultt initial_result = supert::dec_solve();
+  const decision_proceduret::resultt initial_result =
+    supert::dec_solve(nil_exprt());
   if(initial_result == resultt::D_SATISFIABLE)
   {
     bool satisfied;
@@ -822,7 +832,8 @@ decision_proceduret::resultt string_refinementt::dec_solve()
   while((loop_bound_--) > 0)
   {
     dependencies.clean_cache();
-    const decision_proceduret::resultt refined_result = supert::dec_solve();
+    const decision_proceduret::resultt refined_result =
+      supert::dec_solve(nil_exprt());
 
     if(refined_result == resultt::D_SATISFIABLE)
     {
@@ -927,7 +938,7 @@ void string_refinementt::add_lemma(
     {
       it.mutate() = array_of_exprt(
         from_integer(
-          CHARACTER_FOR_UNKNOWN, to_array_type(it->type()).subtype()),
+          CHARACTER_FOR_UNKNOWN, to_array_type(it->type()).element_type()),
         to_array_type(it->type()));
       it.next_sibling_or_parent();
     }
@@ -954,7 +965,7 @@ void string_refinementt::add_lemma(
 /// \param array_pool: pool of arrays representing strings
 /// \return an optional expression representing the size of the array that can
 ///         be cast to size_t
-static optionalt<exprt> get_valid_array_size(
+static std::optional<exprt> get_valid_array_size(
   const std::function<exprt(const exprt &)> &super_get,
   const namespacet &ns,
   messaget::mstreamt &stream,
@@ -967,14 +978,14 @@ static optionalt<exprt> get_valid_array_size(
   {
     const exprt size = size_from_pool.value();
     size_val = simplify_expr(super_get(size), ns);
-    if(size_val.id() != ID_constant)
+    if(!size_val.is_constant())
     {
       stream << "(sr::get_valid_array_size) string of unknown size: "
              << format(size_val) << messaget::eom;
       return {};
     }
   }
-  else if(to_array_type(arr.type()).size().id() == ID_constant)
+  else if(to_array_type(arr.type()).size().is_constant())
     size_val = simplify_expr(to_array_type(arr.type()).size(), ns);
   else
     return {};
@@ -998,7 +1009,7 @@ static optionalt<exprt> get_valid_array_size(
 /// \param arr: expression of type array representing a string
 /// \param array_pool: pool of arrays representing strings
 /// \return an optional array expression or array_of_exprt
-static optionalt<exprt> get_array(
+static std::optional<exprt> get_array(
   const std::function<exprt(const exprt &)> &super_get,
   const namespacet &ns,
   messaget::mstreamt &stream,
@@ -1032,7 +1043,7 @@ static optionalt<exprt> get_array(
   }
 
   const exprt arr_val = simplify_expr(super_get(arr), ns);
-  const typet char_type = to_array_type(arr.type()).subtype();
+  const typet char_type = to_array_type(arr.type()).element_type();
   const typet &index_type = size.value().type();
 
   if(
@@ -1188,9 +1199,9 @@ static exprt substitute_array_access(
   exprt false_index = index_exprt(if_expr.false_case(), index);
 
   // Substitute recursively in branches of conditional expressions
-  optionalt<exprt> substituted_true_case =
+  std::optional<exprt> substituted_true_case =
     substitute_array_access(true_index, symbol_generator, left_propagate);
-  optionalt<exprt> substituted_false_case =
+  std::optional<exprt> substituted_false_case =
     substitute_array_access(false_index, symbol_generator, left_propagate);
 
   return if_exprt(
@@ -1199,7 +1210,7 @@ static exprt substitute_array_access(
     substituted_false_case ? *substituted_false_case : false_index);
 }
 
-static optionalt<exprt> substitute_array_access(
+static std::optional<exprt> substitute_array_access(
   const index_exprt &index_expr,
   symbol_generatort &symbol_generator,
   const bool left_propagate)
@@ -1238,7 +1249,7 @@ static void substitute_array_access_in_place(
   {
     if(const auto index_expr = expr_try_dynamic_cast<index_exprt>(*it))
     {
-      optionalt<exprt> result =
+      std::optional<exprt> result =
         substitute_array_access(*index_expr, symbol_generator, left_propagate);
 
       // Only perform a write when we have something changed.
@@ -1577,7 +1588,7 @@ static void add_to_index_set(
 {
   simplify(i, ns);
   const bool is_size_t = numeric_cast<std::size_t>(i).has_value();
-  if(i.id() != ID_constant || is_size_t)
+  if(!i.is_constant() || is_size_t)
   {
     std::vector<exprt> sub_arrays;
     get_sub_arrays(s, sub_arrays);
@@ -1711,8 +1722,8 @@ static void update_index_set(
     }
     else
     {
-      forall_operands(it, cur)
-        to_process.push_back(*it);
+      for(const auto &op : as_const(cur).operands())
+        to_process.push_back(op);
     }
   }
 }
@@ -1904,7 +1915,7 @@ exprt string_refinementt::get(const exprt &expr) const
 /// \param message_handler: message handler
 /// \return the witness of the satisfying assignment if one
 ///   exists. If UNSAT, then behaviour is undefined.
-static optionalt<exprt> find_counter_example(
+static std::optional<exprt> find_counter_example(
   const namespacet &ns,
   const exprt &axiom,
   const symbol_exprt &var,

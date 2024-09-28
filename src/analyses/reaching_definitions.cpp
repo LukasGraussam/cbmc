@@ -16,7 +16,6 @@ Date: February 2013
 #include "reaching_definitions.h"
 
 #include <util/base_exceptions.h> // IWYU pragma: keep
-#include <util/make_unique.h>
 #include <util/pointer_offset_size.h>
 
 #include <pointer-analysis/value_set_analysis_fi.h>
@@ -33,27 +32,30 @@ class rd_range_domain_factoryt : public ai_domain_factoryt<rd_range_domaint>
 {
 public:
   rd_range_domain_factoryt(
-    sparse_bitvector_analysist<reaching_definitiont> *_bv_container)
-    : bv_container(_bv_container)
+    sparse_bitvector_analysist<reaching_definitiont> *_bv_container,
+    message_handlert &message_handler)
+    : bv_container(_bv_container), message_handler(message_handler)
   {
     PRECONDITION(bv_container != nullptr);
   }
 
   std::unique_ptr<statet> make(locationt) const override
   {
-    auto p = util_make_unique<rd_range_domaint>(bv_container);
+    auto p = std::make_unique<rd_range_domaint>(bv_container, message_handler);
     CHECK_RETURN(p->is_bottom());
     return std::unique_ptr<statet>(p.release());
   }
 
 private:
   sparse_bitvector_analysist<reaching_definitiont> *const bv_container;
+  message_handlert &message_handler;
 };
 
 reaching_definitions_analysist::reaching_definitions_analysist(
-  const namespacet &_ns)
+  const namespacet &_ns,
+  message_handlert &message_handler)
   : concurrency_aware_ait<rd_range_domaint>(
-      util_make_unique<rd_range_domain_factoryt>(this)),
+      std::make_unique<rd_range_domain_factoryt>(this, message_handler)),
     ns(_ns)
 {
 }
@@ -70,7 +72,7 @@ reaching_definitions_analysist::~reaching_definitions_analysist()=default;
 /// `output` method.
 void rd_range_domaint::populate_cache(const irep_idt &identifier) const
 {
-  assert(bv_container);
+  PRECONDITION(bv_container);
 
   valuest::const_iterator v_entry=values.find(identifier);
   if(v_entry==values.end() ||
@@ -106,7 +108,7 @@ void rd_range_domaint::transform(
     bad_cast_exceptiont,
     "ai has type reaching_definitions_analysist");
 
-  assert(bv_container);
+  PRECONDITION(bv_container);
 
   // kill values
   if(from->is_dead())
@@ -307,7 +309,7 @@ void rd_range_domaint::transform_assign(
   locationt to,
   reaching_definitions_analysist &rd)
 {
-  rw_range_set_value_sett rw_set(ns, rd.get_value_sets());
+  rw_range_set_value_sett rw_set(ns, rd.get_value_sets(), message_handler);
   goto_rw(function_to, to, rw_set);
   const bool is_must_alias=rw_set.get_w_set().size()==1;
 
@@ -351,7 +353,7 @@ void rd_range_domaint::kill(
     return;
   }
 
-  assert(range_end>range_start);
+  PRECONDITION(range_end > range_start);
 
   valuest::iterator entry=values.find(identifier);
   if(entry==values.end())
@@ -432,7 +434,7 @@ void rd_range_domaint::kill(
     }
     else if(it!=entry->second.end())
     {
-      assert(*it==id);
+      DATA_INVARIANT(*it == id, "entries must match");
       ++it;
     }
   }
@@ -622,7 +624,7 @@ bool rd_range_domaint::merge_inner(
     }
     else if(itr!=dest.end())
     {
-      assert(*itr==id);
+      DATA_INVARIANT(*itr == id, "entries must match");
       ++itr;
     }
   }
@@ -651,7 +653,7 @@ bool rd_range_domaint::merge(
     }
     else if(it!=values.end())
     {
-      assert(it->first==value.first);
+      DATA_INVARIANT(it->first == value.first, "entries must match");
 
       if(merge_inner(it->second, value.second))
       {
@@ -701,7 +703,7 @@ bool rd_range_domaint::merge_shared(
     }
     else if(it!=values.end())
     {
-      assert(it->first==value.first);
+      DATA_INVARIANT(it->first == value.first, "entries must match");
 
       if(merge_inner(it->second, value.second))
       {
@@ -734,13 +736,13 @@ const rd_range_domaint::ranges_at_loct &rd_range_domaint::get(
 void reaching_definitions_analysist::initialize(
   const goto_functionst &goto_functions)
 {
-  auto value_sets_=util_make_unique<value_set_analysis_fit>(ns);
+  auto value_sets_ = std::make_unique<value_set_analysis_fit>(ns);
   (*value_sets_)(goto_functions);
   value_sets=std::move(value_sets_);
 
-  is_threaded=util_make_unique<is_threadedt>(goto_functions);
+  is_threaded = std::make_unique<is_threadedt>(goto_functions);
 
-  is_dirty=util_make_unique<dirtyt>(goto_functions);
+  is_dirty = std::make_unique<dirtyt>(goto_functions);
 
   concurrency_aware_ait<rd_range_domaint>::initialize(goto_functions);
 }

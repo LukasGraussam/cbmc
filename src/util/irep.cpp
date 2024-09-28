@@ -76,30 +76,18 @@ long long irept::get_long_long(const irep_idt &name) const
 
 void irept::set(const irep_idt &name, const long long value)
 {
-#ifdef USE_DSTRING
   add(name).id(to_dstring(value));
-#else
-  add(name).id(std::to_string(value));
-#endif
 }
 
 void irept::set_size_t(const irep_idt &name, const std::size_t value)
 {
-#ifdef USE_DSTRING
   add(name).id(to_dstring(value));
-#else
-  add(name).id(std::to_string(value));
-#endif
 }
 
 void irept::remove(const irep_idt &name)
 {
-#if NAMED_SUB_IS_FORWARD_LIST
-  return get_named_sub().remove(name);
-#else
   named_subt &s = get_named_sub();
   s.erase(name);
-#endif
 }
 
 const irept &irept::find(const irep_idt &name) const

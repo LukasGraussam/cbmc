@@ -1,6 +1,7 @@
 %option nounput
 %option noinput
 %option stack
+%option noyywrap
 
 %{
 
@@ -38,7 +39,7 @@ static int isatty(int) { return 0; }
 #include "literals/convert_string_literal.h"
 #include "literals/unescape_string.h"
 
-#define PARSER ansi_c_parser
+#define PARSER (*ansi_c_parser)
 #define YYSTYPE unsigned
 #undef  ECHO
 #define ECHO
@@ -48,6 +49,23 @@ static int isatty(int) { return 0; }
 #ifdef ANSI_C_DEBUG
 extern int yyansi_cdebug;
 #endif
+
+static ansi_c_parsert *ansi_c_parser;
+void ansi_c_scanner_init(ansi_c_parsert &_ansi_c_parser)
+{
+#ifdef ANSI_C_DEBUG
+  yyansi_cdebug=1;
+#endif
+  ansi_c_parser = &_ansi_c_parser;
+  YY_FLUSH_BUFFER;
+  BEGIN(0);
+}
+
+int yyansi_cerror(const std::string &error)
+{
+  ansi_c_parser->parse_error(error, yyansi_ctext);
+  return 0;
+}
 
 #define loc() \
   { newstack(yyansi_clval); PARSER.set_source_location(parser_stack(yyansi_clval)); }
@@ -86,7 +104,8 @@ int make_identifier()
   {
     parser_stack(yyansi_clval).id(ID_symbol);
     parser_stack(yyansi_clval).set(ID_C_base_name, final_base_name);
-    return TOK_IDENTIFIER;
+    return PARSER.mode == configt::ansi_ct::flavourt::VISUAL_STUDIO ?
+      TOK_MSC_IDENTIFIER : TOK_GCC_IDENTIFIER;
   }
   else
   {
@@ -112,7 +131,8 @@ int make_identifier()
     else
     {
       parser_stack(yyansi_clval).id(ID_symbol);
-      return TOK_IDENTIFIER;
+      return PARSER.mode == configt::ansi_ct::flavourt::VISUAL_STUDIO ?
+        TOK_MSC_IDENTIFIER : TOK_GCC_IDENTIFIER;
     }
   }
 }
@@ -215,10 +235,13 @@ hexfloat1       "0"[xX]{hexdigit}*"."{hexdigit}+[pP][+-]?{integer}
 hexfloat2       "0"[xX]{hexdigit}*"."[pP][+-]?{integer}
 hexfloat3       "0"[xX]{hexdigit}*[pP][+-]?{integer}
 float_suffix    [fFlLiIjJ]*
-gcc_ext_float_suffix    [wWqQ]|[dD][fFdDlL]?|"f16"|"f32"|"f64"|"f128"|"f32x"|"f64x"|"f128x"
+clang_ext_float_suffix [qQ]|"f16"|"F16"
+gcc_ext_float_width (("bf"|"BF")"16")|([fF]("32"|"64"|"128"|"32x"|"64x"|"128x"))
+gcc_ext_float_suffix {clang_ext_float_suffix}|[wW]|[dD][fFdDlL]?|{gcc_ext_float_width}
 float           {float1}|{float2}|{float3}|{hexfloat1}|{hexfloat2}|{hexfloat3}
 float_s         {float}{float_suffix}|{integer}[fF]
 gcc_ext_float_s {float}{gcc_ext_float_suffix}
+clang_ext_float_s {float}{clang_ext_float_suffix}
 cppstart        {ws}"#"{ws}
 cpplineno       {cppstart}"line"*{ws}{integer}{ws}.*{newline}
 cppdirective    {cppstart}({newline}|[^p].*|"p"[^r].*|"pr"[^a].*|"pra"[^g].*|"prag"[^m].*|"pragm"[^a].*)
@@ -232,7 +255,7 @@ string_lit      ("L"|"u"|"U"|"u8")?["]{s_char}*["]
 
 CPROVER_PREFIX  "__CPROVER_"
 
-arith_check     ("conversion"|"undefined-shift"|"nan"|"div-by-zero")
+arith_check     ("conversion"|"undefined-shift"|"nan"|"div-by-zero"|"float-div-by-zero")
 enum_check      "enum-range"
 pointer_primitive "pointer-primitive"
 memory_check    ("bounds"|"pointer"|"memory-leak")
@@ -261,17 +284,6 @@ enable_or_disable ("enable"|"disable")
 %x CPROVER_ID
 %x CPROVER_PRAGMA
 %x OTHER_PRAGMA
-
-%{
-void ansi_c_scanner_init()
-{
-#ifdef ANSI_C_DEBUG
-  yyansi_cdebug=1;
-#endif
-  YY_FLUSH_BUFFER;
-  BEGIN(0);
-}
-%}
 
 %%
 
@@ -522,7 +534,23 @@ void ansi_c_scanner_init()
                     return make_identifier();
                 }
 
-"_Float16"      { if(PARSER.ts_18661_3_Floatn_types)
+"_Float16"      { if(PARSER.float16_type)
+                  { loc(); return TOK_GCC_FLOAT16; }
+                  else
+                    return make_identifier();
+                }
+
+{CPROVER_PREFIX}"Float16" {
+                  loc(); return TOK_GCC_FLOAT16;
+                }
+
+"__bf16"        { if(PARSER.bf16_type)
+                  { loc(); return TOK_GCC_FLOAT16; }
+                  else
+                    return make_identifier();
+                }
+
+"__fp16"        { if(PARSER.fp16_type)
                   { loc(); return TOK_GCC_FLOAT16; }
                   else
                     return make_identifier();
@@ -560,9 +588,7 @@ void ansi_c_scanner_init()
                   loc(); return TOK_GCC_FLOAT80;
                 }
 
-"__float128"    { // This is a keyword for CLANG,
-                  // but a typedef for GCC
-                  if(PARSER.mode==configt::ansi_ct::flavourt::CLANG)
+"__float128"    { if(PARSER.__float128_is_keyword)
                   { loc(); return TOK_GCC_FLOAT128; }
                   else
                     return make_identifier();
@@ -846,6 +872,7 @@ friend              { return cpp98_keyword(TOK_FRIEND); }
 mutable             { return cpp98_keyword(TOK_MUTABLE); }
 namespace           { return cpp98_keyword(TOK_NAMESPACE); }
 new                 { return cpp98_keyword(TOK_NEW); }
+nodiscard           { return cpp11_keyword(TOK_NODISCARD); } // C++11
 noexcept            { return cpp11_keyword(TOK_NOEXCEPT); } // C++11
 noreturn            { return cpp11_keyword(TOK_NORETURN); } // C++11
 not                 { return cpp98_keyword('!'); }
@@ -857,8 +884,9 @@ or_eq               { return cpp98_keyword(TOK_ORASSIGN); }
 private             { return cpp98_keyword(TOK_PRIVATE); }
 protected           { return cpp98_keyword(TOK_PROTECTED); }
 public              { return cpp98_keyword(TOK_PUBLIC); }
-static_assert       { // C++11, but Visual Studio supports it in all modes (and
-                      // doesn't support _Static_assert)
+static_assert       { // C++11, but Visual Studio supports it in all modes
+                      // as a keyword, even though the documentation claims
+                      // it's a macro.
                       if(PARSER.mode == configt::ansi_ct::flavourt::VISUAL_STUDIO)
                       {
                         loc(); return TOK_STATIC_ASSERT;
@@ -1273,6 +1301,21 @@ __decltype          { if(PARSER.cpp98 &&
                     return make_identifier();
                 }
 
+"__nodiscard__" { if(PARSER.mode==configt::ansi_ct::flavourt::GCC ||
+                     PARSER.mode==configt::ansi_ct::flavourt::CLANG ||
+                     PARSER.mode==configt::ansi_ct::flavourt::ARM)
+                    { loc(); return TOK_NODISCARD; }
+                  else
+                    return make_identifier();
+                }
+
+"__builtin_bit_cast" { if(PARSER.mode==configt::ansi_ct::flavourt::GCC ||
+                          PARSER.mode==configt::ansi_ct::flavourt::CLANG)
+                         { loc(); return TOK_BIT_CAST; }
+                       else
+                         return make_identifier();
+                     }
+
 {CPROVER_PREFIX}"atomic"       { loc(); return TOK_CPROVER_ATOMIC; }
 {CPROVER_PREFIX}"forall"       { loc(); return TOK_FORALL; }
 {CPROVER_PREFIX}"exists"       { loc(); return TOK_EXISTS; }
@@ -1463,10 +1506,7 @@ __decltype          { if(PARSER.cpp98 &&
 
   /* This is a C11 keyword */
 
-"_Static_assert" { if(!PARSER.cpp98 &&
-                      (PARSER.mode==configt::ansi_ct::flavourt::GCC ||
-                      PARSER.mode==configt::ansi_ct::flavourt::CLANG ||
-                       PARSER.mode==configt::ansi_ct::flavourt::ARM))
+"_Static_assert" { if(!PARSER.cpp98)
                     { loc(); return TOK_STATIC_ASSERT; }
                   else
                     return make_identifier();
@@ -1553,9 +1593,21 @@ __decltype          { if(PARSER.cpp98 &&
                   return TOK_INTEGER;
                 }
 
+{clang_ext_float_s} { if(PARSER.mode!=configt::ansi_ct::flavourt::GCC &&
+                         PARSER.mode != configt::ansi_ct::flavourt::CLANG)
+                      {
+                        yyansi_cerror("Floating-point constant with unsupported extension");
+                        return TOK_SCANNER_ERROR;
+                      }
+                      newstack(yyansi_clval);
+                      parser_stack(yyansi_clval)=convert_float_literal(yytext);
+                      PARSER.set_source_location(parser_stack(yyansi_clval));
+                      return TOK_FLOATING;
+                    }
+
 {gcc_ext_float_s} { if(PARSER.mode!=configt::ansi_ct::flavourt::GCC)
                     {
-                      yyansi_cerror("Preprocessor directive found");
+                      yyansi_cerror("Floating-point constant with unsupported extension");
                       return TOK_SCANNER_ERROR;
                     }
                     newstack(yyansi_clval);
@@ -1803,7 +1855,3 @@ __decltype          { if(PARSER.cpp98 &&
 }
 
 <<EOF>>         { yyterminate(); /* done! */ }
-
-%%
-
-int yywrap() { return 1; }

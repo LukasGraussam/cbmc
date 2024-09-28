@@ -8,19 +8,18 @@ Author: Diffblue Ltd.
 
 #include "load_java_class.h"
 
-#include <iostream>
-#include <testing-utils/free_form_cmdline.h>
-#include <testing-utils/message.h>
-#include <testing-utils/use_catch.h>
-
 #include <util/config.h>
 #include <util/options.h>
 #include <util/suffix.h>
 
-#include <java_bytecode/lazy_goto_model.h>
-
 #include <java_bytecode/java_bytecode_language.h>
-#include <util/file_util.h>
+#include <java_bytecode/lazy_goto_model.h>
+#include <testing-utils/free_form_cmdline.h>
+#include <testing-utils/message.h>
+#include <testing-utils/use_catch.h>
+
+#include <filesystem>
+#include <iostream>
 
 /// Go through the process of loading, type-checking and finalising loading a
 /// specific class file to build the symbol table. The functions are converted
@@ -115,7 +114,8 @@ goto_modelt load_goto_model_from_java_class(
   // Add the language to the model
   language_filet &lf=lazy_goto_model.add_language_file(filename);
   lf.language=std::move(java_lang);
-  languaget &language=*lf.language;
+  java_bytecode_languaget &language =
+    dynamic_cast<java_bytecode_languaget &>(*lf.language);
 
   std::istringstream java_code_stream("ignored");
 
@@ -123,11 +123,11 @@ goto_modelt load_goto_model_from_java_class(
   parse_java_language_options(command_line, options);
 
   // Configure the language, load the class files
-  language.set_message_handler(null_message_handler);
-  language.set_language_options(options);
-  language.parse(java_code_stream, filename);
-  language.typecheck(lazy_goto_model.symbol_table, "");
-  language.generate_support_functions(lazy_goto_model.symbol_table);
+  language.set_language_options(options, null_message_handler);
+  language.parse(java_code_stream, filename, null_message_handler);
+  language.typecheck(lazy_goto_model.symbol_table, "", null_message_handler);
+  language.generate_support_functions(
+    lazy_goto_model.symbol_table, null_message_handler);
   language.final(lazy_goto_model.symbol_table);
 
   lazy_goto_model.load_all_functions();
@@ -149,7 +149,7 @@ goto_modelt load_goto_model_from_java_class(
   // Log the working directory to help people identify the common error
   // of wrong working directory (should be the `unit` directory when running
   // the unit tests).
-  std::string path = get_current_working_directory();
+  std::string path = std::filesystem::current_path().string();
   INFO("Working directory: " << path);
 
   // if this fails it indicates the class was not loaded

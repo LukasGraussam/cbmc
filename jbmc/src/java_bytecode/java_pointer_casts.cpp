@@ -34,15 +34,14 @@ bool find_superclass_with_type(
   const typet &target_type,
   const namespacet &ns)
 {
-  assert(ptr.type().id()==ID_pointer);
+  PRECONDITION(ptr.type().id() == ID_pointer);
   while(true)
   {
-    const typet ptr_base = ns.follow(to_pointer_type(ptr.type()).base_type());
-
-    if(ptr_base.id()!=ID_struct)
+    const typet &ptr_base = to_pointer_type(ptr.type()).base_type();
+    if(ptr_base.id() != ID_struct_tag)
       return false;
-
-    const struct_typet &base_struct=to_struct_type(ptr_base);
+    const struct_typet &base_struct =
+      ns.follow_tag(to_struct_tag_type(ptr_base));
 
     if(base_struct.components().empty())
       return false;
@@ -60,7 +59,11 @@ bool find_superclass_with_type(
 
     // Compare the real (underlying) type, as target_type is already a non-
     // symbolic type.
-    if(ns.follow(first_field_type)==target_type)
+    const typet &underlying_type =
+      first_field_type.id() == ID_struct_tag
+        ? ns.follow_tag(to_struct_tag_type(first_field_type))
+        : first_field_type;
+    if(underlying_type == target_type)
       return true;
   }
 }
@@ -88,20 +91,18 @@ exprt make_clean_pointer_cast(
     return typecast_exprt(ptr, target_type);
   }
 
-  const typet &target_base = ns.follow(target_type.base_type());
-
   exprt bare_ptr=ptr;
   while(bare_ptr.id()==ID_typecast)
   {
-    assert(
-      bare_ptr.type().id()==ID_pointer &&
+    INVARIANT(
+      bare_ptr.type().id() == ID_pointer,
       "Non-pointer in make_clean_pointer_cast?");
     if(to_pointer_type(bare_ptr.type()).base_type() == java_void_type())
       bare_ptr = to_typecast_expr(bare_ptr).op();
   }
 
-  assert(
-    bare_ptr.type().id()==ID_pointer &&
+  INVARIANT(
+    bare_ptr.type().id() == ID_pointer,
     "Non-pointer in make_clean_pointer_cast?");
 
   if(bare_ptr.type()==target_type)
@@ -112,6 +113,10 @@ exprt make_clean_pointer_cast(
   // recorded on the pointer, not the pointee), so it may still be necessary
   // to use a cast to reintroduce the qualifier (for example, the base might
   // be recorded as a List, when we're looking for a List<E>)
+  const typet &target_base =
+    target_type.base_type().id() == ID_struct_tag
+      ? ns.follow_tag(to_struct_tag_type(target_type.base_type()))
+      : target_type.base_type();
   if(find_superclass_with_type(superclass_ptr, target_base, ns))
     return typecast_exprt::conditional_cast(superclass_ptr, target_type);
 
