@@ -424,18 +424,18 @@ bool symex_target_equationt::convert_observation_step(SSA_stept &step,
   std::size_t observation_index)
 {
   if(step.source.pc->source_location().is_built_in())  {
-    log.error() << "\n~~~~~~~WARNING: built in location not expected within Observation??"
+    log.warning() << "built in location not expected within Observation"
           << messaget::eom;
     return false;
   }
   if(step.assignment_type != symex_targett::assignment_typet::STATE) {
-    log.error() << "\n~~~~~~~WARNING: Non STATE Assignment not expected within observation??"
+    log.warning() << "Non STATE Assignment not expected within observation"
         << messaget::eom;
     return false;
   }
   // Check whether we have a equality expression:
   if(!can_cast_expr<equal_exprt>(step.cond_expr)) {
-    log.error() << "\n~~~~~~~WARNING: Non Equality expression not expected within observation??"
+    log.warning() << "Non Equality expression not expected within observation"
         << messaget::eom;
     return false;
   }
@@ -444,12 +444,12 @@ bool symex_target_equationt::convert_observation_step(SSA_stept &step,
   equal_exprt curAssignment = to_equal_expr(step.cond_expr);
 
   if(!curAssignment.rhs().is_constant()) {
-    log.error() << "\n~~~~~~~LUGR WARNING: RHS must be constant in observation"
+    log.warning() << "RHS must be constant in observation"
         << messaget::eom;
     return false;
   }
   if(!can_cast_expr<symbol_exprt>(curAssignment.lhs())) {
-    log.error() << "\n~~~~~~~LUGR WARNING: LHS must be a symbol in observation"
+    log.warning() << "LHS must be a symbol in observation"
         << messaget::eom;
     return false;
   }
@@ -479,6 +479,11 @@ void symex_target_equationt::convert_wcnf_assignment_step(SSA_stept &step)
     switch(step.assignment_type)
     {
     case symex_targett::assignment_typet::STATE:
+      // In this newer CBMC version, there are assignment steps created for function calls
+      // even when they appear within a CPROVER_assert. Thus, such lines - as in the TCAS benchmark -
+      // can now also get havoced as opposed to the initial CBMC version where the wcnf feature was introduced.
+      // This cannot be fixed by NOT havocing function calls (step.source.pc->is_function_call()) since
+      // a "normal" line can consist of only such a function call assignment step
       insertFaultLoc = true;
       break;
     case symex_targett::assignment_typet::GUARD:

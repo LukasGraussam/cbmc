@@ -417,7 +417,7 @@ void goto_convertt::do_observation_end(
   if(lhs.is_not_nil())
   {
     error().source_location=lhs.find_source_location();
-    error() << "observation_end does not expect an LHS" << eom;
+    error() << "observation_end does not expect a LHS" << eom;
     throw 0;
   }
 

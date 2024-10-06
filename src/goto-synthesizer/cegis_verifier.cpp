@@ -528,6 +528,8 @@ cext cegis_verifiert::build_cex(
     case goto_trace_stept::typet::CONSTRAINT:
     case goto_trace_stept::typet::SHARED_READ:
     case goto_trace_stept::typet::SHARED_WRITE:
+    case goto_trace_stept::typet::OBSERVATION_BEGIN:
+    case goto_trace_stept::typet::OBSERVATION_END:
       break;
 
     case goto_trace_stept::typet::NONE:

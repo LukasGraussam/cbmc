@@ -471,6 +471,7 @@ void _check_with_strategy(
       goto_symex_property_decidert property_decider(
         options, ui_message_handler, resume.equation, ns);
 
+      // argument options introduced for WCNF option:
       const auto solver_runtime = prepare_property_decider(
         options, properties, resume.equation, property_decider, ui_message_handler);
 

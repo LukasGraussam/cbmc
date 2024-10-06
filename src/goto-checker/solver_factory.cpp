@@ -368,14 +368,14 @@ std::unique_ptr<solver_factoryt::solvert> solver_factoryt::get_wcnf()
   no_beautification();
   no_incremental_check();
 
-  auto prop = util_make_unique<wcnf_cnft>(message_handler);
+  auto prop = std::make_unique<wcnf_cnft>(message_handler);
 
   std::string filename = options.get_option("outfile");
 
-  auto bv_wcnf =
-    util_make_unique<bv_wcnft>(ns, *prop, message_handler, filename);
+  std::unique_ptr<boolbvt> bv_wcnf =
+    std::make_unique<bv_wcnft>(ns, *prop, message_handler, filename);
 
-  return util_make_unique<solvert>(std::move(bv_wcnf), std::move(prop));
+  return std::make_unique<solvert>(std::move(bv_wcnf), std::move(prop));
 }
 
 std::unique_ptr<solver_factoryt::solvert> solver_factoryt::get_external_sat()
