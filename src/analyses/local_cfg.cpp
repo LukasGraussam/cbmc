@@ -73,8 +73,8 @@ void local_cfgt::build(const goto_programt &goto_program)
     case DECL:
     case DEAD:
     case ASSIGN:
-    case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
-    case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+    case OBSERVATION_BEGIN:
+    case OBSERVATION_END:
       node.successors.push_back(loc_nr + 1);
       break;
 

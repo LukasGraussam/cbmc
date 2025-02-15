@@ -19,10 +19,7 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include <chrono> // IWYU pragma: keep
 
-#include <util/options.h> // LUGR: for wcnf option
-
-#include <iostream> // LUGR debug
-#include <util/format_expr.h> // LUGR debug
+#include <util/options.h> // Introduced for WCNF option (fault-localization)
 
 static std::function<void(solver_hardnesst &)>
 hardness_register_ssa(std::size_t step_index, const SSA_stept &step)
@@ -115,7 +112,7 @@ void symex_target_equationt::atomic_end(
   merge_ireps(SSA_step);
 }
 
-/// LUGR: start observation (for wcnf fault-localization option)
+/// start of an observation block, for WCNF option (fault-localization)
 void symex_target_equationt::observation_begin(
   const exprt &guard,
   const sourcet &source)
@@ -127,7 +124,7 @@ void symex_target_equationt::observation_begin(
   merge_ireps(SSA_step);
 }
 
-/// LUGR: end observation (for wcnf fault-localization option)
+/// end of an observation block, for WCNF option (fault-localization)
 void symex_target_equationt::observation_end(
   const exprt &guard,
   const sourcet &source)
@@ -358,7 +355,7 @@ void symex_target_equationt::constraint(
 
 void symex_target_equationt::convert_without_assertions(
   decision_proceduret &decision_procedure,
-  bool wcnfIsSet) // LUGR: WCNF Fault localization option)
+  bool wcnfIsSet)
 {
   with_solver_hardness(decision_procedure, [&](solver_hardnesst &hardness) {
     hardness.register_ssa_size(SSA_steps.size());
@@ -381,7 +378,7 @@ void symex_target_equationt::convert_without_assertions(
 
 void symex_target_equationt::convert(
   decision_proceduret &decision_procedure,
-  bool wcnfIsSet) // LUGR: WCNF Fault localization option
+  bool wcnfIsSet)
 {
   const auto convert_SSA_start = std::chrono::steady_clock::now();
 
@@ -407,9 +404,6 @@ void symex_target_equationt::convert_assignments(
         step.output(mstream);
         mstream << messaget::eom;
       });
-      
-      std::cout << "\n";
-      step.output(std::cout); // LUGR show all steps
 
       decision_procedure.set_to_true(step.cond_expr);
       step.converted = true;
@@ -470,20 +464,20 @@ bool symex_target_equationt::convert_observation_step(SSA_stept &step,
 
 void symex_target_equationt::convert_wcnf_assignment_step(SSA_stept &step)
 {
-  // LUGR: decide whether to insert a healthy variable for fault-localization,
+  // decide whether to insert a healthy variable for fault-localization,
   // i.e. check whether this assignment really corresponds to a line of code we want to enable/disble:
   bool insertFaultLoc = false;
-  // LUGR: check if not a built-in step:
+  // check if not a built-in step:
   if(!step.source.pc->source_location().is_built_in()) {
     // check types of assignments:
     switch(step.assignment_type)
     {
     case symex_targett::assignment_typet::STATE:
-      // In this newer CBMC version, there are assignment steps created for function calls
+      // TODO: In this newer CBMC version, there are assignment steps created for function calls
       // even when they appear within a CPROVER_assert. Thus, such lines - as in the TCAS benchmark -
       // can now also get havoced as opposed to the initial CBMC version where the wcnf feature was introduced.
       // This cannot be fixed by NOT havocing function calls (step.source.pc->is_function_call()) since
-      // a "normal" line can consist of only such a function call assignment step
+      // a "normal" line can consist of only such an assignment step of type function call
       insertFaultLoc = true;
       break;
     case symex_targett::assignment_typet::GUARD:
@@ -502,20 +496,19 @@ void symex_target_equationt::convert_wcnf_assignment_step(SSA_stept &step)
     case symex_targett::assignment_typet::VISIBLE_ACTUAL_PARAMETER:
       insertFaultLoc = false; // used somehow in function calls
       break;
-    // LUGR TODO: check how to handle other assignment types:
+    // TODO: check if handling for other assignment types is necessary:
     case symex_targett::assignment_typet::HIDDEN_ACTUAL_PARAMETER:
-      log.error() << "\n~~~~~~~LUGR WARNING: Assignment type not considered so far"
+      log.error() << "Assignment type not considered so far (for WCNF option)"
             << messaget::eom;
       break;
     default:
-      log.error() << "\n~~~~~~~LUGR WARNING: Assignment type not considered so far"
+      log.error() << "Assignment type not considered so far (for WCNF option)"
             << messaget::eom;
     }
   }
 
-  // LUGR: actually insert our variables:
   if(insertFaultLoc) {
-    // create healthy variable for fault-loc:
+    // create and insert healthy variable for fault-loc:
     std::string myFile = id2string(step.source.pc->source_location().get_file());
     std::string myLine = id2string(step.source.pc->source_location().get_line());
     const irep_idt identifier = "compHealthy::" + myFile + "::" + myLine;
@@ -533,8 +526,8 @@ void symex_target_equationt::convert_assignments_wcnf(
   decision_proceduret &decision_procedure)
 {
   std::size_t step_index = 0;
-  std::size_t observation_index = 0; // LUGR: For wcnf (fault-localization): keep track of observations
-  bool inObservation = false; // keep whether we are in an observation
+  std::size_t observation_index = 0; // keep track of observations
+  bool inObservation = false; // whether we are in an observation block
   for(auto &step : SSA_steps)
   {
     if(step.is_assignment() && !step.ignore && !step.converted)
@@ -547,9 +540,6 @@ void symex_target_equationt::convert_assignments_wcnf(
       // Parse observations:
       if(inObservation) {
         if(convert_observation_step(step,observation_index)) {
-          std::cout << "\n";
-          step.output(std::cout); // LUGR show all steps
-
           decision_procedure.set_to_true(step.cond_expr);
           step.converted = true;
           with_solver_hardness(
@@ -560,9 +550,6 @@ void symex_target_equationt::convert_assignments_wcnf(
       }
 
       convert_wcnf_assignment_step(step);
-
-      std::cout << "\n";
-      step.output(std::cout); // LUGR show all steps
 
       decision_procedure.set_to_true(step.cond_expr);
       step.converted = true;
@@ -717,7 +704,7 @@ void symex_target_equationt::convert_constraints(
 void symex_target_equationt::convert_assertions(
   decision_proceduret &decision_procedure,
   bool optimized_for_single_assertions,
-  bool wcnfIsSet) // LUGR: WCNF Fault localization option (default: false)
+  bool wcnfIsSet)
 {
   // we find out if there is only _one_ assertion,
   // which allows for a simpler formula
@@ -756,9 +743,7 @@ void symex_target_equationt::convert_assertions(
             step.cond_expr = implicationWcnf;
           }
           
-          // LUGR: for fault-localization the assertion needs to be positive:
-          std::cout << "\n~~~~~~~LUGR: added single positive assertion for wcnf"  << "\n";
-          step.output(std::cout); // LUGR show all steps
+          // for fault-localization the assertion needs to be positive:
           decision_procedure.set_to_true(step.cond_expr);
         }
         else {
@@ -825,9 +810,6 @@ void symex_target_equationt::convert_assertions(
             step.cond_expr);
           step.cond_expr = implicationWcnf;
         }
-
-        std::cout << "\n~~~~~~~LUGR: added positive assertion for wcnf"  << "\n";
-        step.output(std::cout); // LUGR show all steps
 
         // ASSUME is currently not implemented for WCNF, we just care for the cond_expr:
         decision_procedure.set_to_true(step.cond_expr);

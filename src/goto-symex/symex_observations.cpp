@@ -15,7 +15,7 @@ Description: Symbolically execute OBSERVATION_[BEGIN/END] instructions
 
 #include <util/exception_utils.h>
   
-  // LUGR TODO: maybe keep track of inObservation and observation IDs here,
+  // TODO: maybe keep track of inObservation and observation IDs here,
   // similar to atomic section?
   // for now we do this only when converting assignments (for solver)
 

@@ -915,8 +915,8 @@ IREP_ID_ONE(prophecy_r_ok)
 IREP_ID_ONE(prophecy_w_ok)
 IREP_ID_ONE(prophecy_pointer_in_range)
 IREP_ID_ONE(bit_cast)
-IREP_ID_ONE(observation_begin) // LUGR: for wcnf option (fault-localization)
-IREP_ID_ONE(observation_end) // LUGR for wcnf option (fault-localization)
+IREP_ID_ONE(observation_begin)
+IREP_ID_ONE(observation_end)
 
 // Projects depending on this code base that wish to extend the list of
 // available ids should provide a file local_irep_ids.def in their source tree

@@ -88,8 +88,8 @@ void symex_slicet::slice(SSA_stept &SSA_step)
   case goto_trace_stept::typet::ATOMIC_END:
   case goto_trace_stept::typet::SPAWN:
   case goto_trace_stept::typet::MEMORY_BARRIER:
-  case goto_trace_stept::typet::OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
-  case goto_trace_stept::typet::OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+  case goto_trace_stept::typet::OBSERVATION_BEGIN:
+  case goto_trace_stept::typet::OBSERVATION_END:
     // ignore for now
     break;
 
@@ -190,8 +190,8 @@ void symex_slicet::collect_open_variables(
     case goto_trace_stept::typet::ATOMIC_END:
     case goto_trace_stept::typet::SPAWN:
     case goto_trace_stept::typet::MEMORY_BARRIER:
-    case goto_trace_stept::typet::OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
-    case goto_trace_stept::typet::OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+    case goto_trace_stept::typet::OBSERVATION_BEGIN:
+    case goto_trace_stept::typet::OBSERVATION_END:
       // ignore for now
       break;
 

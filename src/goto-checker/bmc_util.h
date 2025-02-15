@@ -34,7 +34,7 @@ struct trace_optionst;
 class ui_message_handlert;
 
 void convert_symex_target_equation(
-  const optionst &options, // LUGR: WCNF Fault localization
+  const optionst &options, // Introduced for WCNF option (fault-localization)
   symex_target_equationt &equation,
   decision_proceduret &decision_procedure,
   message_handlert &message_handler);
@@ -139,6 +139,7 @@ void update_status_of_unknown_properties(
 
 /// Converts the equation and sets up the property decider,
 /// but does not call solve.
+/// \param [in] options: Command line options passed to CBMC by the user
 /// \param [in,out] properties: Sets the status of properties to be checked to
 ///   UNKNOWN
 /// \param [in,out] equation: The equation that will be converted
@@ -147,7 +148,7 @@ void update_status_of_unknown_properties(
 /// \param [in,out] ui_message_handler: For logging
 /// \return The runtime for converting the equation
 std::chrono::duration<double> prepare_property_decider(
-  const optionst &options, // LUGR: needed for WCNF option
+  const optionst &options,
   propertiest &properties,
   symex_target_equationt &equation,
   goto_symex_property_decidert &property_decider,

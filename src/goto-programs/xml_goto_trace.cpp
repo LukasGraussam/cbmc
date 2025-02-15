@@ -275,8 +275,8 @@ void convert(
     case goto_trace_stept::typet::GOTO:
     case goto_trace_stept::typet::ASSUME:
     case goto_trace_stept::typet::NONE:
-    case goto_trace_stept::typet::OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
-    case goto_trace_stept::typet::OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+    case goto_trace_stept::typet::OBSERVATION_BEGIN:
+    case goto_trace_stept::typet::OBSERVATION_END:
     {
       const auto default_step = ::default_step(step, previous_source_location);
       if(default_step)

@@ -30,8 +30,6 @@ Author: Daniel Kroening, kroening@kroening.com
 #include "destructor.h"
 #include "format_strings.h"
 
-#include <iostream> // LUGR debug
-
 void goto_convertt::do_prob_uniform(
   const exprt &lhs,
   const symbol_exprt &function,
@@ -385,7 +383,7 @@ void goto_convertt::do_atomic_end(
   dest.add(goto_programt::make_atomic_end(function.source_location()));
 }
 
-// LUGR: for wcnf option (Fault-loc.):
+// Observations for WCNF option (fault-localization):
 void goto_convertt::do_observation_begin(
   const exprt &lhs,
   const symbol_exprt &function,
@@ -407,7 +405,8 @@ void goto_convertt::do_observation_begin(
   }
   dest.add(goto_programt::make_observation_begin(function.source_location()));
 }
-// LUGR: for wcnf option (Fault-loc.):
+
+// Observations for WCNF option (fault-localization):
 void goto_convertt::do_observation_end(
   const exprt &lhs,
   const symbol_exprt &function,
@@ -1095,15 +1094,12 @@ void goto_convertt::do_function_call_symbol(
 
     do_output(function, arguments, dest);
   }
-  // LUGR: observations or wcnf option (fault localization):
   else if(identifier==CPROVER_PREFIX "observation_begin")
   {
-    std::cout << "\n~~~~~~~LUGR: builtin_funcitons.cpp in if CPROVER_PREFIX observation_begin, should be alright here"  << "\n";
     do_observation_begin(lhs, function, arguments, dest);
   }
   else if(identifier==CPROVER_PREFIX "observation_end")
   {
-    std::cout << "\n~~~~~~~LUGR: builtin_funcitons.cpp in if CPROVER_PREFIX observation_end, should be alright here"  << "\n";
     do_observation_end(lhs, function, arguments, dest);
   }
   else if(

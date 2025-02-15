@@ -318,8 +318,8 @@ void local_bitvector_analysist::build()
     case ASSUME:       // Ignoring is a valid over-approximation
     case GOTO:         // Ignoring the guard is a valid over-approximation
     case END_FUNCTION: // No action required
-    case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
-    case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+    case OBSERVATION_BEGIN: // No action required
+    case OBSERVATION_END: // No action required
       break;
     case OTHER:
 #if 0

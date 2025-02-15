@@ -28,8 +28,6 @@ Author: Daniel Kroening, kroening@kroening.com
 
 #include "destructor.h"
 
-#include <iostream> // LUGR debug
-
 static bool is_empty(const goto_programt &goto_program)
 {
   forall_goto_program_instructions(it, goto_program)
@@ -634,11 +632,10 @@ void goto_convertt::convert(
     convert_assign(to_code_assign(code), dest, mode);
   else if(statement == ID_assert)
     convert_assert(to_code_assert(code), dest, mode);
-    // LUGR TODO: Look here?
   else if(statement==ID_observation_begin)
-    std::cout << "\n~~~~~~~LUGR: goto_convert.cpp in if ID_observation_begin"  << "\n";
+    ; // It seems this point is not reached anyway
   else if(statement==ID_observation_end)
-    std::cout << "\n~~~~~~~LUGR: goto_convert.cpp in if ID_observation_end"  << "\n";
+    ; // It seems this point is not reached anyway
   else if(statement == ID_assume)
     convert_assume(to_code_assume(code), dest, mode);
   else if(statement == ID_function_call)

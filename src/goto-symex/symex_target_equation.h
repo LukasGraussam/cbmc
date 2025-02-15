@@ -167,14 +167,12 @@ public:
     const exprt &guard,
     unsigned atomic_section_id,
     const sourcet &source);
-  
-  // LUGR for wcnf option (fault localization):
+
   /// \copydoc symex_targett::observation_begin()
   virtual void observation_begin(
     const exprt &guard,
     const sourcet &source);
-  
-  // LUGR for wcnf option (fault localization):
+
   /// \copydoc symex_targett::observation_end()
   virtual void observation_end(
     const exprt &guard,
@@ -184,9 +182,10 @@ public:
   /// format. The method iterates over the equation, i.e. over the SSA steps and
   /// converts each type of step separately.
   /// \param decision_procedure: A handle to a decision procedure interface
+  /// \param wcnfIsSet: True if WCNF (fault-localization) option is set
   void convert(
   decision_proceduret &decision_procedure,
-  bool wcnfIsSet = false); // LUGR: WCNF Fault localization option
+  bool wcnfIsSet = false);
 
   /// Interface method to initiate the conversion into a decision procedure
   /// format. The method iterates over the equation, i.e. over the SSA steps and
@@ -194,9 +193,10 @@ public:
   /// This enables the caller to handle assertion conversion differently,
   /// e.g. for incremental solving.
   /// \param decision_procedure: A handle to a particular decision procedure
+  /// \param wcnfIsSet: True if WCNF (fault-localization) option is set
   ///   interface
   void convert_without_assertions(decision_proceduret &decision_procedure,
-  bool wcnfIsSet = false); // LUGR: WCNF Fault localization option
+  bool wcnfIsSet = false);
 
   /// Converts assignments: set the equality _lhs==rhs_ to _True_.
   /// \param decision_procedure: A handle to a decision procedure
@@ -236,11 +236,12 @@ public:
   /// Converts assertions: build a disjunction of negated assertions.
   /// \param decision_procedure: A handle to a decision procedure interface
   /// \param optimized_for_single_assertions: Use an optimized encoding for
+  /// \param wcnfIsSet: True if WCNF (fault-localization) option is set
   ///   single assertions (unsound for incremental conversions)
   void convert_assertions(
     decision_proceduret &decision_procedure,
     bool optimized_for_single_assertions = true,
-    bool wcnfIsSet = false); // LUGR: WCNF Fault localization option
+    bool wcnfIsSet = false);
 
   /// Converts constraints: set the represented condition to _True_.
   /// \param decision_procedure: A handle to a decision procedure interface

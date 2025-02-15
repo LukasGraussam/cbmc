@@ -85,9 +85,9 @@ void goto_trace_stept::output(
     break;
   case goto_trace_stept::typet::ATOMIC_END: out << "ATOMIC_END"; break;
 
-  case goto_trace_stept::typet::OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
+  case goto_trace_stept::typet::OBSERVATION_BEGIN:
     out << "OBSERVATION_BEGIN"; break;
-  case goto_trace_stept::typet::OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+  case goto_trace_stept::typet::OBSERVATION_END:
     out << "OBSERVATION_END"; break;
 
   case goto_trace_stept::typet::SHARED_READ: out << "SHARED_READ"; break;
@@ -510,8 +510,8 @@ void show_compact_goto_trace(
     case goto_trace_stept::typet::CONSTRAINT:
     case goto_trace_stept::typet::SHARED_READ:
     case goto_trace_stept::typet::SHARED_WRITE:
-    case goto_trace_stept::typet::OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
-    case goto_trace_stept::typet::OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+    case goto_trace_stept::typet::OBSERVATION_BEGIN:
+    case goto_trace_stept::typet::OBSERVATION_END:
       break;
 
     case goto_trace_stept::typet::NONE:
@@ -707,8 +707,8 @@ void show_full_goto_trace(
     case goto_trace_stept::typet::ATOMIC_BEGIN:
     case goto_trace_stept::typet::ATOMIC_END:
     case goto_trace_stept::typet::DEAD:
-    case goto_trace_stept::typet::OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
-    case goto_trace_stept::typet::OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+    case goto_trace_stept::typet::OBSERVATION_BEGIN:
+    case goto_trace_stept::typet::OBSERVATION_END:
       break;
 
     case goto_trace_stept::typet::CONSTRAINT:

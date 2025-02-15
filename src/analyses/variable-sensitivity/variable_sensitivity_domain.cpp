@@ -147,8 +147,8 @@ void variable_sensitivity_domaint::transform(
   case END_THREAD:
   case ATOMIC_BEGIN:
   case ATOMIC_END:
-  case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
-  case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_BEGIN:
+  case OBSERVATION_END:
     throw "threading not supported";
 
   case THROW:

@@ -125,8 +125,8 @@ void interval_domaint::transform(
   case ASSERT:       // No action required
   case LOCATION:     // No action required
   case SKIP:         // No action required
-  case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
-  case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_BEGIN: // No action required
+  case OBSERVATION_END: // No action required
     break;
   case OTHER:
 #if 0

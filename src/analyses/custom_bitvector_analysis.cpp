@@ -551,14 +551,12 @@ void custom_bitvector_domaint::transform(
   case SKIP:         // No action required
   case ASSERT:       // No action required
   case ASSUME:       // Ignoring is a valid over-approximation
+  case OBSERVATION_BEGIN: // No action required
+  case OBSERVATION_END: // No action required
     break;
   case INCOMPLETE_GOTO:
   case NO_INSTRUCTION_TYPE:
     DATA_INVARIANT(false, "Only complete instructions can be analyzed");
-    break;
-  case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
-  case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
-    std::cout << "\n~~~~~~~LUGR: in Obs. Begin/End case in cutom_bitvector_analysis.cpp"  << "\n"; // TODO remove this
     break;
   }
 }

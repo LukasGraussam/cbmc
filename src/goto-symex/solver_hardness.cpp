@@ -366,13 +366,12 @@ solver_hardnesst::goto_instruction2string(goto_programt::const_targett pc)
   case ATOMIC_END:
     out << "ATOMIC_END";
     break;
-  
 
-  case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_BEGIN:
     out << "OBSERVATION_BEGIN";
     break;
 
-  case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_END:
     out << "OBSERVATION_END";
     break;
 

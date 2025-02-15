@@ -23,9 +23,9 @@ void __CPROVER_postcondition(__CPROVER_bool assertion, const char *description);
 void __CPROVER_input(const char *description, ...);
 void __CPROVER_output(const char *description, ...);
 
-// LUGR: not sure if these prototypes are required here, already in cprover_builtin_headers.h:
-void __CPROVER_observation_begin(); // LUGR: for wcnf option (fault localization)
-void __CPROVER_observation_end(); // LUGR: for wcnf option (fault localization)
+// Observations for WCNF option (fault-localization):
+void __CPROVER_observation_begin();
+void __CPROVER_observation_end();
 
 // concurrency-related
 void __CPROVER_atomic_begin(void);

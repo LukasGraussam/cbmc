@@ -331,13 +331,13 @@ void interpretert::step()
     trace_step.type=goto_trace_stept::typet::ATOMIC_END;
     throw "ATOMIC_END not yet implemented"; // NOLINT(readability/throw)
 
-  case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_BEGIN:
     trace_step.type=goto_trace_stept::typet::OBSERVATION_BEGIN;
-    throw "OBSERVATION_BEGIN not yet implemented (LUGR: in interpreter.cpp)"; // NOLINT(readability/throw)
+    throw "OBSERVATION_BEGIN not yet implemented"; // NOLINT(readability/throw)
 
-  case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_END:
     trace_step.type=goto_trace_stept::typet::OBSERVATION_END;
-    throw "OBSERVATION_END not yet implemented (LUGR: in interpreter.cpp)"; // NOLINT(readability/throw)
+    throw "OBSERVATION_END not yet implemented"; // NOLINT(readability/throw)
 
   case DEAD:
     trace_step.type=goto_trace_stept::typet::DEAD;

@@ -304,11 +304,11 @@ std::ostream &goto_programt::instructiont::output(std::ostream &out) const
     out << "ATOMIC_END" << '\n';
     break;
 
-  case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_BEGIN:
     out << "OBSERVATION_BEGIN" << '\n';
     break;
 
-  case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_END:
     out << "OBSERVATION_END" << '\n';
     break;
 
@@ -410,8 +410,8 @@ std::list<exprt> expressions_read(
   case OTHER:
   case INCOMPLETE_GOTO:
   case NO_INSTRUCTION_TYPE:
-  case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
-  case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_BEGIN:
+  case OBSERVATION_END:
     break;
   }
 
@@ -452,8 +452,8 @@ std::list<exprt> expressions_written(
   case OTHER:
   case INCOMPLETE_GOTO:
   case NO_INSTRUCTION_TYPE:
-  case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
-  case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_BEGIN:
+  case OBSERVATION_END:
     break;
   }
 
@@ -600,10 +600,10 @@ std::string as_string(
   case ATOMIC_END:
     return "ATOMIC_END";
 
-  case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_BEGIN:
     return "OBSERVATION_BEGIN";
   
-  case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_END:
     return "OBSERVATION_END";
 
   case START_THREAD:
@@ -939,9 +939,9 @@ void goto_programt::instructiont::validate(
     break;
   case ATOMIC_END:
     break;
-  case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_BEGIN:
     break;
-  case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_END:
     break;
   case SET_RETURN_VALUE:
     DATA_CHECK_WITH_DIAGNOSTICS(
@@ -1098,8 +1098,8 @@ void goto_programt::instructiont::transform(
   case CATCH:
   case INCOMPLETE_GOTO:
   case NO_INSTRUCTION_TYPE:
-  case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
-  case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_BEGIN:
+  case OBSERVATION_END:
     if(has_condition())
     {
       auto new_condition = f(condition());
@@ -1156,8 +1156,8 @@ void goto_programt::instructiont::apply(
   case CATCH:
   case INCOMPLETE_GOTO:
   case NO_INSTRUCTION_TYPE:
-  case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
-  case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_BEGIN:
+  case OBSERVATION_END:
     if(has_condition())
       f(condition());
   }
@@ -1241,10 +1241,10 @@ std::ostream &operator<<(std::ostream &out, goto_program_instruction_typet t)
   case ATOMIC_END:
     out << "ATOMIC_END";
     break;
-  case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_BEGIN:
     out << "OBSERVATION_BEGIN";
     break;
-  case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_END:
     out << "OBSERVATION_END";
     break;
   case SET_RETURN_VALUE:

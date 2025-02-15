@@ -691,8 +691,7 @@ protected:
     const exprt::operandst &arguments,
     goto_programt &dest,
     const irep_idt &mode);
-  
-  // LUGR: for wcnf option (Fault-loc.):
+  // Observations for WCNF option (fault-localization):
   void do_observation_begin(
     const exprt &lhs,
     const symbol_exprt &function,

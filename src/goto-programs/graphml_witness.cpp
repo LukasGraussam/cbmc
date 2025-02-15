@@ -514,8 +514,8 @@ void graphml_witnesst::operator()(const goto_tracet &goto_trace)
     case goto_trace_stept::typet::DEAD:
     case goto_trace_stept::typet::CONSTRAINT:
     case goto_trace_stept::typet::NONE:
-    case goto_trace_stept::typet::OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
-    case goto_trace_stept::typet::OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+    case goto_trace_stept::typet::OBSERVATION_BEGIN:
+    case goto_trace_stept::typet::OBSERVATION_END:
       // ignore
       break;
     }
@@ -667,8 +667,8 @@ void graphml_witnesst::operator()(const symex_target_equationt &equation)
     case goto_trace_stept::typet::DEAD:
     case goto_trace_stept::typet::CONSTRAINT:
     case goto_trace_stept::typet::NONE:
-    case goto_trace_stept::typet::OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
-    case goto_trace_stept::typet::OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+    case goto_trace_stept::typet::OBSERVATION_BEGIN:
+    case goto_trace_stept::typet::OBSERVATION_END:
       // ignore
       break;
     }

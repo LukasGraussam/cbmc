@@ -901,8 +901,8 @@ void goto_rw(
   case ATOMIC_END:
   case THROW:
   case CATCH:
-  case OBSERVATION_BEGIN: // LUGR: for wcnf option (Fault-loc.)
-  case OBSERVATION_END: // LUGR: for wcnf option (Fault-loc.)
+  case OBSERVATION_BEGIN:
+  case OBSERVATION_END:
     // these don't read or write anything
     break;
 
