@@ -20,7 +20,7 @@ public:
   explicit wcnf_cnft(message_handlert &);
   virtual ~wcnf_cnft() { }
 
-  virtual void write_wcnf_cnf(std::ostream &out, std::string activationVarString, int countActVars);
+  virtual void write_wcnf_cnf(std::ostream &out, std::string softClausesString, int countHealthyPreds);
 
   // dummy functions
 

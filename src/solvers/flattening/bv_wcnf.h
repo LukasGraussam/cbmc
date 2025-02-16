@@ -35,6 +35,7 @@ protected:
   const std::string filename;
   bool write_wcnf();
   bool write_wcnf(std::ostream &);
+  bool writeObservationOutput(std::ostream &);
 };
 
 #endif // CPROVER_SOLVERS_FLATTENING_BV_WCNF_H

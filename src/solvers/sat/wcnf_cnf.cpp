@@ -37,11 +37,11 @@ wcnf_cnf_dumpt::wcnf_cnf_dumpt(
 {
 }
 
-void wcnf_cnft::write_wcnf_cnf(std::ostream &out, std::string activationVarString, int countActVars)
+void wcnf_cnft::write_wcnf_cnf(std::ostream &out, std::string softClausesString, int countHealthyPreds)
 {
-  int topWeight = countActVars + 1;
+  int topWeight = countHealthyPreds + 1;
   write_problem_line(out, topWeight);
-  out << activationVarString;
+  out << softClausesString;
   write_clauses(out, topWeight);
 }
 
